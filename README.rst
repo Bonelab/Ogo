@@ -11,3 +11,6 @@ Contribute to a future where we can predict osteoporotic fracture.
     
 .. image:: https://travis-ci.org/Bonelab/Ogo.svg?branch=master
     :target: https://travis-ci.org/Bonelab/Ogo
+
+.. image:: https://circleci.com/gh/Bonelab/Ogo.svg?style=svg
+    :target: https://circleci.com/gh/Bonelab/Ogo
