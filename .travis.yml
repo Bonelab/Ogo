@@ -1,6 +1,0 @@
-language: python
-os: osx
-script:
-  - pip install .
-  - nosetests
-

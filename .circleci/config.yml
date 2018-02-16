@@ -4,7 +4,7 @@
 #
 version: 2
 jobs:
-  build:
+  test-py3:
     docker:
       - image: circleci/python:3.6.1
 
@@ -47,3 +47,105 @@ jobs:
       - store_artifacts:
           path: test-reports
           destination: test-reports
+
+  test-py2:
+    docker:
+      - image: circleci/python:2.7.14
+
+    working_directory: ~/repo
+
+    steps:
+      - checkout
+
+      # Download and cache dependencies
+      - restore_cache:
+          keys:
+          - v1-dependencies-{{ checksum "requirements.txt" }}
+          # fallback to using the latest cache if no exact match is found
+          - v1-dependencies-
+
+      - run:
+          name: install virtualenv
+          command: |
+            python -m pip install virtualenv
+            rm -r venv
+            virtualenv -p `which python` venv
+
+      - run:
+          name: install dependencies
+          command: |
+            . venv/bin/activate
+            pip install -r requirements.txt
+
+      - save_cache:
+          paths:
+            - ./venv
+          key: v1-dependencies-{{ checksum "requirements.txt" }}
+        
+      - run:
+          name: install project
+          command: |
+            . venv/bin/activate
+            pip install .
+
+      - run:
+          name: run tests
+          command: |
+            . venv/bin/activate
+            nosetests
+
+      - store_artifacts:
+          path: test-reports
+          destination: test-reports
+
+  flake8:
+    docker:
+      - image: circleci/python:3.6.1
+
+    working_directory: ~/repo
+
+    steps:
+      - checkout
+
+      # Download and cache dependencies
+      - restore_cache:
+          keys:
+          - v1-dependencies-{{ checksum "requirements.txt" }}
+          # fallback to using the latest cache if no exact match is found
+          - v1-dependencies-
+
+      - run:
+          name: install dependencies
+          command: |
+            python3 -m venv venv
+            . venv/bin/activate
+            pip install -r requirements.txt
+
+      - save_cache:
+          paths:
+            - ./venv
+          key: v1-dependencies-{{ checksum "requirements.txt" }}
+        
+      - run:
+          name: install project
+          command: |
+            . venv/bin/activate
+            pip install .
+
+      - run:
+          name: run flake8
+          command: |
+            . venv/bin/activate
+            flake8 ogo
+
+      - store_artifacts:
+          path: test-reports
+          destination: test-reports
+
+workflows:
+  version: 2
+  python_tests:
+    jobs:
+      - test-py2
+      - test-py3
+      - flake8
