@@ -1,6 +1,10 @@
+# Internal tools
 pbr
+click
 
+# Documentation
 Sphinx
 
+# Testings
 nose
 flake8
