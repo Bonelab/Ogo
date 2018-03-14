@@ -14,7 +14,7 @@ class TestCLIExists(unittest.TestCase):
 
     def test_can_call_ogo_help(self):
         '''Can call `ogo --help`'''
-        command = ['ogo']
+        command = ['ogo', '--help']
         self.assertTrue(subprocess.check_output(command))
 
 
