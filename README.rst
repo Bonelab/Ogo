@@ -37,3 +37,22 @@ Developer Install
 
     # You can also run the full install
     python setup.py install
+
+Developer Notes
+===============
+
+Style Guide Enforcement
+-----------------------
+`flake8` is used for style guide enforcement. You will not be able to merge without passing the style guide.
+
+.. code-block:: bash
+    cd ogo
+    flake8
+
+Running Tests
+-------------
+`nose` is used for running tests. You will not be able to merge without your tests passing. And please, do write tests.
+
+.. code-block:: bash
+    cd Ogo  # From root directory, not ogo
+    nosetests
