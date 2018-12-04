@@ -4,7 +4,7 @@
 #
 # This file does only contain a selection of the most common options. For a
 # full list see the documentation:
-# http://www.sphinx-doc.org/en/stable/config
+# http://www.sphinx-doc.org/en/master/config
 
 # -- Path setup --------------------------------------------------------------
 
@@ -12,21 +12,23 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
-# import sys
+import os
+import sys
 # sys.path.insert(0, os.path.abspath('.'))
 
+import pbr.version
 
 # -- Project information -----------------------------------------------------
 
 project = u'Ogo'
-copyright = u'2018, Bryce A. Besler, Andrew S. Michalski'
-author = u'Bryce A. Besler, Andrew S. Michalski'
+copyright = u'2018, Bryce A. Besler, Andrew S. Michalski, Steven K. Boyd'
+author = u'Bryce A. Besler, Andrew S. Michalski, Steven K. Boyd'
 
-# The short X.Y version
-version = u''
-# The full version, including alpha/beta/rc tags
-release = u'0.0.0'
+version_info = pbr.version.VersionInfo('ogo')
+# The short X.Y version.
+version = version_info.version_string()
+# The full version, including alpha/beta/rc tags.
+release = version_info.release_string()
 
 
 # -- General configuration ---------------------------------------------------
@@ -39,7 +41,41 @@ release = u'0.0.0'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    'sphinx.ext.autodoc',
+    'sphinx.ext.imgmath',
 ]
+
+working_dir = os.path.abspath(os.path.dirname(__file__))
+apidoc_module_dir = os.path.join(working_dir, '..', project.lower())
+apidoc_output_dir = os.path.join(working_dir, 'ogo')
+apidoc_excluded_paths = [' ']
+
+def run_apidoc(*args):
+    '''Generate the documentation from the code'''
+    global apidoc_module_dir, apidoc_output_dir, apidoc_excluded_paths
+
+    argv = [
+        "-f",
+        "-T",
+        "-e",
+        "-M",
+        "-o", apidoc_output_dir,
+        apidoc_module_dir
+    ] + apidoc_excluded_paths
+
+    try:
+        # Sphinx 1.7+
+        from sphinx.ext import apidoc
+        apidoc.main(argv)
+    except ImportError:
+        # Sphinx 1.6 (and earlier)
+        from sphinx import apidoc
+        argv.insert(0, apidoc.__file__)
+        apidoc.main(argv)
+
+def setup(app):
+    # Hook so we can generate documents
+    app.connect('builder-inited', run_apidoc)
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -62,12 +98,11 @@ language = None
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-# This pattern also affects html_static_path and html_extra_path .
-exclude_patterns = []
+# This pattern also affects html_static_path and html_extra_path.
+exclude_patterns = [u'_build', 'Thumbs.db', '.DS_Store']
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
-
+pygments_style = None
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -129,7 +164,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'Ogo.tex', u'Ogo Documentation',
-     u'Bryce A. Besler, Andrew S. Michalski', 'manual'),
+     u'Bryce A. Besler, Andrew S. Michalski, Steven K. Boyd', 'manual'),
 ]
 
 
@@ -153,3 +188,24 @@ texinfo_documents = [
      author, 'Ogo', 'One line description of project.',
      'Miscellaneous'),
 ]
+
+
+# -- Options for Epub output -------------------------------------------------
+
+# Bibliographic Dublin Core info.
+epub_title = project
+
+# The unique identifier of the text. This can be a ISBN number
+# or the project homepage.
+#
+# epub_identifier = ''
+
+# A unique identification for the text.
+#
+# epub_uid = ''
+
+# A list of files that should not be packed into the epub file.
+epub_exclude_files = ['search.html']
+
+
+# -- Extension configuration -------------------------------------------------
