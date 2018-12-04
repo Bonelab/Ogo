@@ -2,6 +2,10 @@
 pbr
 click
 
+# Image processing
+simpleitk
+numpy
+
 # Documentation
 Sphinx
 
