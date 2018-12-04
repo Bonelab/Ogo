@@ -2,6 +2,9 @@
 pbr
 click
 
+# Image processing
+simpleitk
+
 # Documentation
 Sphinx
 
