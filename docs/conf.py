@@ -42,7 +42,7 @@ release = version_info.release_string()
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
-    'sphinx.ext.imgmath',
+    'sphinx.ext.mathjax',
 ]
 
 working_dir = os.path.abspath(os.path.dirname(__file__))

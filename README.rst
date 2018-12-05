@@ -58,3 +58,12 @@ Running Tests
 
     cd Ogo  # From root directory, not ogo
     nosetests
+
+Building Docs Locally
+---------------------
+Use `sphinx-build`. This should rather fast.
+
+.. code-block:: bash
+
+    cd Ogo  # From root directory, not ogo
+    sphinx-build docs/ docs/_build/html/

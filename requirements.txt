@@ -1,10 +1,14 @@
 # Internal tools
 pbr
 click
+abc
 
 # Image processing
 simpleitk
 numpy
+
+# Statistics
+scipy
 
 # Documentation
 Sphinx
