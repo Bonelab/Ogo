@@ -58,7 +58,7 @@ class StandardCalibration(Calibration):
     def _fit(self, hounsfield_units, densities):
         '''Standard least squares fit'''
         self._slope, self._intercept, self._r_value, \
-            self._p_value , self._std_err = \
+            self._p_value, self._std_err = \
             stats.linregress(hounsfield_units, densities)
 
     def _predict(self, hu):

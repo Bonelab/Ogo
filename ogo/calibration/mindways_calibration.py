@@ -100,7 +100,7 @@ class MindwaysCalibration(StandardCalibration):
         # Fit equation 3
         lhs = np.array(hounsfield_units) - np.array(water)
         self._sigma_ref, self._beta_ref, self._r_value, \
-            self._p_value , self._std_err = \
+            self._p_value, self._std_err = \
             stats.linregress(densities, lhs)
 
         # Use equations 4 & 5
