@@ -1,7 +1,6 @@
 # Internal tools
 pbr
 click
-abc
 
 # Image processing
 simpleitk
