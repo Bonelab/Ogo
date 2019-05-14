@@ -31,7 +31,7 @@ jobs:
           paths:
             - ./venv
           key: v1-dependencies-{{ checksum "requirements.txt" }}
-        
+
       - run:
           name: install project
           command: |
@@ -68,7 +68,7 @@ jobs:
           name: install virtualenv
           command: |
             python -m pip install virtualenv
-            rm -r venv
+            if [ -d venv ]; then rm -r venv; fi
             virtualenv -p `which python` venv
 
       - run:

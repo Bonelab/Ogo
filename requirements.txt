@@ -6,6 +6,9 @@ click
 simpleitk
 numpy
 
+# Statistics
+scipy
+
 # Documentation
 Sphinx
 

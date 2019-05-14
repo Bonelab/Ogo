@@ -2,6 +2,7 @@
 
 import click
 from .img.img import img
+from .calib.calib import calib
 
 
 @click.group()
@@ -11,3 +12,4 @@ def main():
 
 
 main.add_command(img)
+main.add_command(calib)
