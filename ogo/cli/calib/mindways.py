@@ -5,19 +5,7 @@ import SimpleITK as sitk
 from ogo.util.echo_arguments import echo_arguments
 from ogo.util.write_csv import write_csv
 from ogo.calibration.mindways_calibration import MindwaysCalibration
-import ast
-
-
-class PythonLiteralOption(click.Option):
-    '''A hack for getting variable length options.
-
-
-    See https://stackoverflow.com/questions/47631914/how-to-pass-several-list-of-arguments-to-click-option'''  # noqa: E501
-    def type_cast_value(self, ctx, value):
-        try:
-            return ast.literal_eval(value)
-        except:  # noqa: E722
-            raise click.BadParameter(value)
+from ogo.cli.util.PythonLiteral import PythonLiteral
 
 
 @click.command()
@@ -26,9 +14,9 @@ class PythonLiteralOption(click.Option):
 @click.argument('density_file_name',
                 type=click.Path(file_okay=True, writable=True))
 @click.argument('csv_file_name', type=click.Path())
-@click.option('--water', nargs=1, cls=PythonLiteralOption, required=True,
+@click.option('--water', nargs=1, cls=PythonLiteral, required=True,
               default="[923.2, 1119.52, 1103.57, 1056.95, 1012.25]")
-@click.option('--densities', nargs=1, cls=PythonLiteralOption, required=True,
+@click.option('--densities', nargs=1, cls=PythonLiteral, required=True,
               default="[375.83, 157.05, 58.88, -53.40, -51.83]")
 def mindways(ct_file_name, rods_file_name, density_file_name, csv_file_name,
              water, densities):
