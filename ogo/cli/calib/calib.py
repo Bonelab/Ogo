@@ -2,6 +2,7 @@
 
 import click
 from .mindways import mindways
+from .standard import standard
 
 
 @click.group()
@@ -11,3 +12,4 @@ def calib():
 
 
 calib.add_command(mindways)
+calib.add_command(standard)
