@@ -68,7 +68,7 @@ jobs:
           name: install virtualenv
           command: |
             python -m pip install virtualenv
-            rm -r venv
+            if [ -d venv ]; rm -r venv
             virtualenv -p `which python` venv
 
       - run:
