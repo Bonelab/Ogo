@@ -7,7 +7,7 @@ Help build a fracture free future.
 ============= ============
      Docs        Tests    
 ============= ============
-|ReadTheDocs|  |CircleCI| 
+|ReadTheDocs|  |Azure| 
 ============= ============
 
 .. _Ogopogo of the Okanagan: https://youtu.be/AbKw44AmHbY
@@ -16,8 +16,9 @@ Help build a fracture free future.
     :target: http://ogo.readthedocs.io/en/latest/?badge=latest
     :alt: Documentation Status
 
-.. |CircleCI| image:: https://circleci.com/gh/Bonelab/Ogo.svg?style=svg
-    :target: https://circleci.com/gh/Bonelab/Ogo
+.. |Azure| image:: https://dev.azure.com/babesler/Bone%20Imaging%20Laboratory/_apis/build/status/Bonelab.Ogo?branchName=master
+    :target: https://dev.azure.com/babesler/Bone%20Imaging%20Laboratory/_build/latest?definitionId=14&branchName=master
+
 
 Developer Install
 =================
