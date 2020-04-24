@@ -2,7 +2,6 @@
 
 import unittest
 from ogo.calibration.calibration import Calibration
-import os
 
 
 class TestCalibration(unittest.TestCase):
@@ -10,7 +9,8 @@ class TestCalibration(unittest.TestCase):
 
     def test_cannot_instantiate(self):
         with self.assertRaises(TypeError):
-            c = Calibration()
+            Calibration()
+
 
 if __name__ == '__main__':
     unittest.main()

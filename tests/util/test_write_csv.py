@@ -19,7 +19,6 @@ class TestWriteCSV(unittest.TestCase):
 
     def test_create_file(self):
         # Create test data
-        header = ['FileName', 'A', 'B']
         data = {
           'FileName':   'filename.txt',
           'A':          2,
@@ -33,7 +32,7 @@ class TestWriteCSV(unittest.TestCase):
           f.write('filename.txt,2,b' + os.linesep)
 
         # Print result
-        write_csv(data, self.csv_file_name, header)
+        write_csv(data, self.csv_file_name)
         self.assertTrue(os.path.exists(self.csv_file_name),
           'Could not create file')
         self.assertTrue(filecmp.cmp(correct_file_name, self.csv_file_name),
@@ -41,7 +40,6 @@ class TestWriteCSV(unittest.TestCase):
 
     def test_delimiter(self):
         # Create test data
-        header = ['FileName', 'A', 'B']
         data = {
           'FileName':   'filename.txt',
           'A':          2,
@@ -55,15 +53,14 @@ class TestWriteCSV(unittest.TestCase):
           f.write('filename.txt;2;b' + os.linesep)
 
         # Print result
-        write_csv(data, self.csv_file_name, header, delimiter=';')
+        write_csv(data, self.csv_file_name, delimiter=';')
         self.assertTrue(os.path.exists(self.csv_file_name),
           'Could not create file')
         self.assertTrue(filecmp.cmp(correct_file_name, self.csv_file_name),
-          'Files are not the sample')
+          'Files are not the same')
 
     def test_append_file(self):
         # Create test data
-        header = ['FileName', 'A', 'B']
         data = {
           'FileName':   'filename.txt',
           'A':          2,
@@ -71,13 +68,13 @@ class TestWriteCSV(unittest.TestCase):
         }
 
         # First write
-        write_csv(data, self.csv_file_name, header)
+        write_csv(data, self.csv_file_name)
 
         self.assertTrue(os.path.exists(self.csv_file_name),
           'Could not create file')
 
         # Second write
-        write_csv(data, self.csv_file_name, header)
+        write_csv(data, self.csv_file_name)
 
         # Create the expected file
         correct_file_name = os.path.join(self.test_dir, 'test_correct.csv')
@@ -87,7 +84,8 @@ class TestWriteCSV(unittest.TestCase):
           f.write('filename.txt,2,b' + os.linesep)
 
         self.assertTrue(filecmp.cmp(correct_file_name, self.csv_file_name),
-          'Files are not the sample')
+          'Files are not the same')
+
 
 if __name__ == '__main__':
     unittest.main()

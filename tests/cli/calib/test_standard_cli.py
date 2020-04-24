@@ -18,5 +18,6 @@ class TestStandardCLI(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             subprocess.check_output(command, stderr=subprocess.STDOUT)
 
+
 if __name__ == '__main__':
     unittest.main()
