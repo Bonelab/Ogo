@@ -8,6 +8,7 @@ numpy
 
 # Statistics
 scipy
+pandas
 
 # Documentation
 Sphinx
