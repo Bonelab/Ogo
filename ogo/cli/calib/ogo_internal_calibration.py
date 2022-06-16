@@ -17,8 +17,8 @@ script_version = 1.0
 
 ##
 # Import the required modules
-import ogo_helper as ogo
-import MassAttenuationTables as mat
+import ogo.cli.calib.ogo_helper as ogo
+import ogo.cli.calib.MassAttenuationTables as mat
 import os
 import sys
 import argparse
