@@ -25,14 +25,13 @@ Developer Install
 .. code-block:: bash
 
     # I would recommend you create a virtual environment
-    # ... either using conda
-    conda create -n env_name python=2   # or 3
-    conda activate env_name
+    #  using conda
+    conda create -n ogo -c numerics88 -c simpleitk -c conda-forge python=3 n88tools pbr nose six simpleitk pydicom gdcm
 
-    # ... or using virtualenv
-    virtualenv env_name
-    . env_name/bin/activate
-
+    # Activate your conda environment, make sure you have conda installed on your system.
+    # Best way to install conda is through anaconda
+    conda activate ogo
+    
     # Install in an 'editable' format 
     pip install -e .
 
