@@ -18,7 +18,7 @@ script_version = 1.0
 
 ##
 # Import the required modules
-import ogo.cli.calib.ogo_helper as ogo
+import ogo.cli.Helper as ogo
 import os
 import sys
 import argparse
