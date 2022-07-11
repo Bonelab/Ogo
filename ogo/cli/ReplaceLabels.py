@@ -101,7 +101,6 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ov
     reader.Update()
     
     image = reader.GetOutput() # pointer to image
-    array = reader.GetOutput().GetPointData().GetScalars() # pointer to image data
     
     scalarType = image.GetScalarType()
     print('Input image scalar type: {:s}'.format(image.GetScalarTypeAsString()))
@@ -109,16 +108,14 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ov
     print('Input image labels:')
     histogram(image)
     
+    array = vtk_to_numpy(image.GetPointData().GetScalars())
+    
     # Replace each label by cycling through image data; one cycle per label
     for idx,lab in enumerate(map_for_labels):
         print('!> Replacing {:d} with {:d}'.format(inputLabels[idx],outputLabels[idx]))
-        count = 0
-        for i in range(0,array.GetNumberOfTuples()):
-            if (array.GetTuple1(i) == inputLabels[idx]):
-                array.SetTuple1(i,outputLabels[idx])
-                count+=1
+        count = np.count_nonzero(array == inputLabels[idx])
         print('!> --> replaced {:d} labels'.format(count))
-
+        array[array == inputLabels[idx]] = outputLabels[idx]
     
     print('Output image labels:')
     histogram(image)
