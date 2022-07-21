@@ -114,6 +114,8 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
         name,ext = os.path.splitext(fname)
         if 'gz' in ext:
             name = os.path.splitext(name)[0] # Manages files with double extension
+        if '_0000' in name:
+            name = name.replace('_0000','')
         if name not in labelsTr_files[idx]:
             print('ERROR: Expected matching names in imagesTr and labelsTr.')
             print('       File {:s} does not match {:s}'.format(name,labelsTr_files[idx]))
@@ -195,15 +197,27 @@ searches the expected directories for the image file names.
 Each image file is stored in a Task using the numbers 500 and greater.
 
 nnUNet_raw_data_base/nnUNet_raw_data/
-├── Task501_OSSAI_L4
-├── Task502_OSSAI_Femur
+├── Task501_Spine
+├── Task502_LFemur
+├── Task503_RFemur
 ├── ...
 
-Task501_Osnet_L4/
+Task501_Spine/
 ├── dataset.json
 ├── imagesTr
 ├── imagesTs
 └── labelsTr
+
+Formatting of file names is crucial:
+   imagesTr --> RETRO_005_0000.nii
+   labelsTr --> RETRO_005.nii.gz
+   imagesTs --> RETRO_070_0000.nii.gz
+   
+The dataset.json file refers to all three categories of files without the 
+trailing "_0000". So, for above files they would be referred to as:
+   imagesTr --> RETRO_005.nii
+   labelsTr --> RETRO_005.nii.gz
+   imagesTs --> RETRO_070.nii.gz
 
 '''
 
