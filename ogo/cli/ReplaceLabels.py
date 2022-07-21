@@ -140,7 +140,8 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ov
     writer.SetQFormMatrix(reader.GetQFormMatrix())
     writer.SetNIFTIHeader(reader.GetNIFTIHeader())
     writer.Update()
-
+    ogo.message('Done ogoReplaceLabels!')
+    
 def main():
     # Setup description
     description='''

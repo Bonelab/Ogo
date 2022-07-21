@@ -208,14 +208,14 @@ Task501_Spine/
 ├── imagesTs
 └── labelsTr
 
-Formatting of file names is crucial:
-   imagesTr --> RETRO_005_0000.nii
+Formatting of file names is crucial (ALL files must be .nii.gz)
+   imagesTr --> RETRO_005_0000.nii.gz
    labelsTr --> RETRO_005.nii.gz
    imagesTs --> RETRO_070_0000.nii.gz
    
 The dataset.json file refers to all three categories of files without the 
 trailing "_0000". So, for above files they would be referred to as:
-   imagesTr --> RETRO_005.nii
+   imagesTr --> RETRO_005.nii.gz
    labelsTr --> RETRO_005.nii.gz
    imagesTs --> RETRO_070.nii.gz
 
