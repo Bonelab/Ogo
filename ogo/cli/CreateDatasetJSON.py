@@ -115,7 +115,7 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
         if 'gz' in ext:
             name = os.path.splitext(name)[0] # Manages files with double extension
         if '_0000' in name:
-            name = name.replace('_0000','')
+            name = name.replace('_0000','') # We account for using _0000 in imagesTr but not labelsTr
         if name not in labelsTr_files[idx]:
             print('ERROR: Expected matching names in imagesTr and labelsTr.')
             print('       File {:s} does not match {:s}'.format(name,labelsTr_files[idx]))
@@ -152,7 +152,7 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
     training = []
     for idx,fname in enumerate(imagesTr_files):
         tmp_dict = {}
-        tmp_dict["image"] = imagesTr_files[idx]
+        tmp_dict["image"] = imagesTr_files[idx].replace('_0000','') # Remove trailing labels for imagesTr
         tmp_dict["label"] = labelsTr_files[idx]
         training.append(tmp_dict)
     
@@ -170,7 +170,7 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
     json_dict['numTraining'] = len(imagesTr_files)
     json_dict['numTest'] = len(imagesTs_files)
     json_dict['training'] = training
-    json_dict['test'] = ["%s" % i for i in imagesTs_files]
+    json_dict['test'] = ["%s" % fn.replace('_0000','') for fn in imagesTs_files]
 
     print('Saving JSON file:\n{:s}'.format(json_filename))
     print(json_dict)
