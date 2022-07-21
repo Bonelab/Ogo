@@ -1,3 +1,10 @@
+# /------------------------------------------------------------------------------+
+# | 06-JUL-2022                                                                  |
+# | Copyright (c) Bone Imaging Laboratory                                        |
+# | All rights reserved                                                          |
+# | bonelab@ucalgary.ca                                                          |
+# +------------------------------------------------------------------------------+
+
 '''Allow Python literals at the command line interface'''
 
 import click

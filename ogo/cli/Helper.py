@@ -1,3 +1,10 @@
+# /------------------------------------------------------------------------------+
+# | 06-JUL-2022                                                                  |
+# | Copyright (c) Bone Imaging Laboratory                                        |
+# | All rights reserved                                                          |
+# | bonelab@ucalgary.ca                                                          |
+# +------------------------------------------------------------------------------+
+
 #####
 # ogo_helper.py
 #
@@ -124,6 +131,64 @@ def applyInternalCalibration(imageData, cali_parameters):
 
     return K2HPO4_den_image
 
+def masterLabels():
+    od = OrderedDict()
+    od['0'] = "Clear Label"
+    od['1'] = "Femur Right"
+    od['2'] = "Femur Left"
+    od['3'] = "Pelvis Right"
+    od['4'] = "Pelvis Left"
+    od['5'] = "Sacrum"
+    od['6'] = "L5"
+    od['7'] = "L4"
+    od['8'] = "L3"
+    od['9'] = "L2"
+    od['10'] = "L1"
+    od['11'] = "T12"
+    od['12'] = "T11"
+    od['13'] = "T10"
+    od['14'] = "T9"
+    od['15'] = "T8"
+    od['16'] = "Radius Right"
+    od['17'] = "Radius Left"
+    od['18'] = "Ulna Right"
+    od['19'] = "Ulna Left"
+    od['20'] = "Humerus Right"
+    od['21'] = "Humerus Left"
+    od['22'] = "Tibia Right"
+    od['23'] = "Tibia Left"
+    od['24'] = "Fibula Right"
+    od['25'] = "Fibula Left"
+    od['26'] = "Patella Right"
+    od['27'] = "Patella Left"
+    od['28'] = "Calcaneus Right"
+    od['29'] = "Calcaneus Left"
+    od['30'] = "Navicular Right"
+    od['31'] = "Navicular Left"
+    od['32'] = "Talus Right"
+    od['33'] = "Talus Left"
+    od['81'] = "Not bone"
+    od['91'] = "Adipose"
+    od['92'] = "Air"
+    od['93'] = "Blood"
+    od['94'] = "Cortical Bone"
+    od['95'] = "Skeletal Muscle"
+    od['111'] = "Rod A - Low K2HPO4"
+    od['112'] = "Rod B"
+    od['113'] = "Rod C"
+    od['114'] = "Rod D"
+    od['115'] = "Rod E - High K2HPO4"
+    od['121'] = "Rod 1 - 0 mg/cc CHA"
+    od['122'] = "Rod 2 - 50 mg/cc CHA"
+    od['123'] = "Rod 3 - 100 mg/cc CHA"
+    od['124'] = "Rod 4 - 150 mg/cc CHA"
+    od['125'] = "Rod 5 - 200 mg/cc CHA"
+    
+    #for key, value in od.items():
+    #    print(key, value)
+    
+    return od
+    
 def applyMask(imageData, maskData):
     """Applies the mask to the image.
     The first argument is the image. The second argument is the mask.
@@ -250,7 +315,10 @@ def bmd_metrics(vtk_image):
 
     # BMD measures
     BMD_total = numpy_image.sum()  # [mg/cc K2HPO4]
-    BMD_AVG = BMD_total / voxel_count  # [mg/cc K2HPO4]
+    if voxel_count > 0:
+        BMD_AVG = BMD_total / voxel_count  # [mg/cc K2HPO4]
+    else:
+        BMD_AVG = 0.0 # Set to zero when there are no voxels (avoid divide by 0)
     VOLUME_mm = voxel_count * voxel_volume
     VOLUME_cm = voxel_count * voxel_volume2  # [cm^3]
     BMC = BMD_AVG * VOLUME_cm  # [mg HA]
