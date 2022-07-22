@@ -189,6 +189,173 @@ def masterLabels():
     
     return od
     
+def histogram(image,nbins):
+    array = vtk_to_numpy(image.GetPointData().GetScalars()).ravel()
+    guard = '!-------------------------------------------------------------------------------'
+
+    # Define formatting
+    line_format_data       = '!>  {:>8d} {:>8.3f} {:>12d}'
+    line_format_data_stars = '!>  {:>8d} {:>8.3f} {:>12d} {:s}'
+    line_format_summary    = '!>  {:>8s} {:>8.3f} {:>12d}'
+    line_format_header     = '!>  {:>8s} {:>8s} {:>12s}'
+    line_format_bin_edge   = '!>  {:>8d} {:>8s} {:>12s}'
+    line_skip = '!> ...'
+
+    # Find the range of the data type. Options are:
+    #          wide: -32768 to 32767  (short)
+    #           med:   -128 to   127  (char)
+    #        narrow:      0 to   127  (unsigned char)
+    data_minimum = array.min()
+    if (data_minimum < -128):
+      data_type_minimum = -32768
+    elif (data_minimum < 0):
+      data_type_minimum = -128
+    else:
+      data_type_minimum = 0
+    
+    data_maximum = array.max()
+    if (data_maximum > 255):
+      data_type_maximum = 32767
+    elif (data_maximum > 127):
+      data_type_maximum = 255
+    else:
+      data_type_maximum = 127
+    
+    level_4 = False # Show every possible value within data type range
+    level_3 = False  # Show non-zero range within data type range
+    level_2 = False   # Show non-zero range with number_bins fixed
+    level_1 = True # Same as level 2, but adds star ('*') outputs
+    
+    if (level_4):
+      number_bins = data_type_maximum - data_type_minimum + 1
+      data_range = [data_type_minimum, data_type_maximum]
+    if (level_3):
+      number_bins = data_type_maximum - data_type_minimum + 1
+      data_range = [data_type_minimum, data_type_maximum]
+    if (level_2 or level_1):
+      data_range = [data_minimum, data_maximum]
+      number_bins = nbins
+
+    # Make sure number of bins isn't greater than the data range
+    data_range_span = data_maximum - data_minimum + 1
+    if (data_range_span < number_bins):
+      number_bins = data_range_span
+      print('!> WARNING: Histogram data range reset to {} bins.'.format(number_bins))
+      
+    # Generate the histogram
+    # https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
+    image_histogram,bin_edges = np.histogram(array,number_bins,data_range,None,None,False)
+
+    total_number_voxels = sum(image_histogram)
+    first_nonzero_idx = np.min(np.nonzero(image_histogram))
+    last_nonzero_idx = np.max(np.nonzero(image_histogram))
+    bin_width = (data_maximum - data_minimum)/(number_bins-1)
+    
+    # Initialize variables
+    total_percent = 0.0
+    total_voxels = 0
+    max_number_stars = 30
+    
+    # Start output to screen
+    #print(guard)
+    print('!>  Number of bins:            {:8d}'.format(number_bins))
+    print('!>  Bin width:                 {:8.3f}'.format(bin_width))
+    print('!>  Data type range: minimum = {:8d}, maximum = {:8d}'.format(data_type_minimum,data_type_maximum))
+    print('!>  Data range:      minimum = {:8d}, maximum = {:8d}'.format(data_minimum,data_maximum))
+    print('!>  Non-zero:          first = {:8d},    last = {:8d}'.format(first_nonzero_idx,last_nonzero_idx))
+    print('!>  ')
+    print(line_format_header.format('ImageValue','Percent','#Voxels'))
+
+    for idx in range(number_bins):
+      
+      if (level_4):
+        image_value = idx + data_type_minimum
+        number_voxels = image_histogram[idx]
+        percent_number_voxels = number_voxels/total_number_voxels
+        print(line_format_data.format(image_value,percent_number_voxels,number_voxels))
+      
+      if (level_3):
+        image_value = idx + data_type_minimum
+        number_voxels = image_histogram[idx]
+        percent_number_voxels = number_voxels/total_number_voxels
+        if (idx==number_bins-1):
+          print(line_skip)
+        if ((idx>first_nonzero_idx and idx<last_nonzero_idx) or (idx==0) or (idx==number_bins-1)):
+          print(line_format_data.format(image_value,percent_number_voxels,number_voxels))
+        if (idx==0):
+          print(line_skip)
+          
+      if (level_2):
+        image_value = int((idx*bin_width) + data_minimum)
+        number_voxels = image_histogram[idx]
+        percent_number_voxels = number_voxels/total_number_voxels
+        print(line_format_data.format(image_value,percent_number_voxels,number_voxels))
+        if (idx == (number_bins-1)):
+          bin_edge = int(((idx+1)*bin_width) + data_minimum)
+          print(line_format_bin_edge.format(bin_edge,'-----','-----'))
+
+      if (level_1):
+        image_value = int((idx*bin_width) + data_minimum)
+        number_voxels = image_histogram[idx]
+        percent_number_voxels = number_voxels/total_number_voxels
+        number_stars = int(percent_number_voxels*100)
+        if (number_stars > max_number_stars):
+          print(line_format_data_stars.format(image_value,percent_number_voxels,number_voxels,max_number_stars*'*'+'...('+ str(number_stars)+'*)'))
+        else:
+          print(line_format_data_stars.format(image_value,percent_number_voxels,number_voxels,number_stars*'*'))
+        if (idx == (number_bins-1)):
+          bin_edge = int(((idx+1)*bin_width) + data_minimum)
+          print(line_format_bin_edge.format(bin_edge,'-----','-----'))
+  
+      total_percent += percent_number_voxels
+      total_voxels += number_voxels
+      
+    print('!> -------------------------------')
+    print(line_format_summary.format('TOTAL',total_percent,total_voxels))
+    print(guard)
+    if (total_voxels != len(array)):
+      print('!> WARNING: Not all voxels in the image were included in the histogram.')
+      print('!>          Image voxel count     = {}.'.format(len(array)))
+      print('!>          Histogram voxel count = {}.'.format(total_voxels))
+
+def aix(infile,image):
+    guard = '!-------------------------------------------------------------------------------'
+    phys_dim = [x*y for x,y in zip(image.GetDimensions(), image.GetSpacing())]
+    position = [math.floor(x/y) for x,y in zip(image.GetOrigin(), image.GetSpacing())]
+    size = os.path.getsize(infile) # gets size of file; used to calculate K,M,G bytes
+    names = ['Bytes', 'KBytes', 'MBytes', 'GBytes']
+    n_image_voxels = image.GetDimensions()[0] * image.GetDimensions()[1] * image.GetDimensions()[2]
+    voxel_volume = image.GetSpacing()[0] * image.GetSpacing()[1] * image.GetSpacing()[2]
+    i = 0
+    while int(size) > 1024 and i < len(names):
+        i+=1
+        size = size / 2.0**10
+    
+    # Print header
+    print(guard)
+    print('!>')
+    print('!> dim                            {:>8}  {:>8}  {:>8}'.format(*image.GetDimensions()))
+    print('!> off                            {:>8}  {:>8}  {:>8}'.format('-','-','-'))
+    print('!> pos                            {:>8}  {:>8}  {:>8}'.format(*position))
+    print('!> element size in mm             {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*image.GetSpacing()))
+    print('!> phys dim in mm                 {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*phys_dim))
+    print('!>')
+    print('!> Type of data               {}'.format(image.GetScalarTypeAsString()))
+    print('!> Total memory size          {:.1f} {: <10}'.format(size, names[i]))
+    print(guard)
+
+def infoNIFTII(reader):
+    guard = '!-------------------------------------------------------------------------------'
+    print('!> HEADER')
+    print('!> {:30s} = {}'.format('TimeDimension',reader.GetTimeDimension()))
+    print('!> {:30s} = {}'.format('TimeSpacing',reader.GetTimeSpacing()))
+    print('!> {:30s} = {}'.format('RescaleSlope',reader.GetRescaleSlope()))
+    print('!> {:30s} = {}'.format('RescaleIntercept',reader.GetRescaleIntercept()))
+    print('!> {:30s} = {}'.format('QFac',reader.GetQFac()))
+    print('!> {:30s} = {}'.format('QFormMatrix',reader.GetQFormMatrix()))
+    print('!> {:30s} = {}'.format('NIFTIHeader',reader.GetNIFTIHeader()))
+    print(guard)
+
 def applyMask(imageData, maskData):
     """Applies the mask to the image.
     The first argument is the image. The second argument is the mask.

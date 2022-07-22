@@ -14,47 +14,10 @@ from vtk.util.numpy_support import vtk_to_numpy
 from ogo.util.echo_arguments import echo_arguments
 import ogo.cli.Helper as ogo
 
-def histogram(image):
-    array = vtk_to_numpy(image.GetPointData().GetScalars()).ravel()
-    guard = '!-------------------------------------------------------------------------------'
-
-    if (array.min() < -128):
-      range_min = -32768
-    elif (array.min() < 0):
-      range_min = -128
-    else:
-      range_min = 0
-    
-    if (array.max() > 255):
-      range_max = 32767
-    elif (array.max() > 127):
-      range_max = 255
-    else:
-      range_max = 127
-
-    nRange = [range_min, range_max]
-    nBins = 128
-    
-    # https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
-    hist,bin_edges = np.histogram(array,nBins,nRange,None,None,False)
-    nValues = sum(hist)
-
-    print(guard)
-    print('!>  {:4s} ({:.3s}) : {:s}'.format('Lab','Qty','#Voxels'))
-    for bin in range(nBins):
-      index = nRange[0] + int(bin * (nRange[1]-nRange[0])/(nBins-1))
-      count = hist[bin]/nValues # We normalize so total count = 1
-      nStars = int(count*100)
-      if (count>0 and nStars==0): # Ensures at least one * if the histogram bin is not zero
-        nStars = 1
-      if (nStars > 60):
-        nStars = 60 # just prevents it from wrapping in the terminal
-      if (count>0):
-        print('!> {:4d} ({:.3f}): {:d}'.format(index,count,hist[bin]))
-    print(guard)
-
 def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, overwrite=False):
 
+    ogo.message('Start ogoReplaceLabels!')
+    
     # Check if output exists and should overwrite
     if os.path.isfile(output_filename) and not overwrite:
         result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_filename))
@@ -107,7 +70,7 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ov
     ogo.message('Input image scalar type: {:s}'.format(image.GetScalarTypeAsString()))
     
     ogo.message('Input image labels:')
-    histogram(image)
+    ogo.histogram(image,128)
     
     array = vtk_to_numpy(image.GetPointData().GetScalars())
     
