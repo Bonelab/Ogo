@@ -175,10 +175,22 @@ def mindwaysModel3PhantomCalib(args):
     ogo.message("End of Script.")
     sys.exit()
 
+def make_calibration_dict():
+    print('Making calibration dict')
+    
+    calibration_dict = OrderedDict()
+    calibration_dict['mindway_phantom_h2o_densities'] = [1012.25, 1056.95, 1103.57, 1119.52, 923.20] # Rod A to Rod E in mg/cc.
+    calibration_dict['mindway_phantom_k2hpo4_densities'] = [-51.83, -53.40, 58.88, 157.05, 375.83] # Rod A to Rod E in mg/cc.
+    calibration_dict['bmas200_phantom_k2hpo4_densities'] = [0, 50, 100, 150, 200] # Rod A to Rod E in mg/cc.
+    
+    print("\n".join("{:33s} = {}".format(k,v) for k, v in calibration_dict.items()))
+    
 # PHANTOM CALIBARATION ------------------------------------------------------------------
 def phantom(input_image,input_mask,output_image,async_image,overwrite,func):
     ogo.message('Starting phantom based calibration.')
     
+    make_calibration_dict()
+    exit()
     # Check if output exists and should overwrite
     if os.path.isfile(output_image) and not overwrite:
         result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
@@ -296,7 +308,7 @@ asynchronous phantom or internal calibration.
 
 Current phantoms are:
   Mindways Model 3 CT phantom
-  B-MAS200
+  B-MAS 200 CT phantom
   
 Valid file formats are NIFTII: .nii, .nii.gz
 
@@ -327,6 +339,10 @@ python ImageCalibration.py internal \
   /Users/skboyd/Desktop/ML/test/qct_mask.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii
 
+Citation:
+Michalski AS, Besler BA, Michalak GJ, Boyd SK, 2020. CT-based internal density 
+calibration for opportunistic skeletal assessment using abdominal CT scans. 
+Med Eng Phys 78, 55-63.
 '''
 
     # Setup argument parsing
