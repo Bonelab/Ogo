@@ -82,7 +82,7 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ov
         array[array == inputLabels[idx]] = outputLabels[idx]
     
     ogo.message('Output image labels:')
-    histogram(image)
+    ogo.histogram(image,128)
 
     # Create writer
     if output_filename.lower().endswith('.nii'):
@@ -112,25 +112,27 @@ Utility to read segmented image and replace specified labels with new labels.
 It can be used to remove labels from an image (replace with background of 0) or 
 to change a label. It works through the list provided sequentially.
 
-Valid input and output file formats include: 
-.nii, .nii.gz
-
-Currently only accepts NIFTI file formats as input and output.
+Valid file formats are NIFTII: .nii, .nii.gz
 
 Valid input and output labels should be within 0 - 255 (inclusive)
+'''
+    epilog='''
+USAGE: 
+ogoReplaceLabels input.nii.gz output.nii.gz --inputLabels 4 5 6 --outputLabels 0 0 7
 '''
 
     # Setup argument parsing
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
         prog="ogoReplaceLabels",
-        description=description
+        description=description,
+        epilog=epilog
     )
     parser.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
     parser.add_argument('output_filename', help='Output image file (*.nii, *.nii.gz)')
     parser.add_argument('--inputLabels', type=int, nargs='*', default=[0], metavar='ID', help='Target label input IDs; space separated (e.g. 1 2 3)')
     parser.add_argument('--outputLabels', type=int, nargs='*', default=[0], metavar='ID', help='Target label output IDs; space separated (e.g. 4 5 6)')
-    parser.add_argument('-o', '--overwrite', action='store_true', help='Overwrite output without asking')
+    parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
 
     print()
 
