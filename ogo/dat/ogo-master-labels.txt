@@ -1,0 +1,256 @@
+################################################
+# ITK-SnAP Label Description File
+# File format: 
+# IDX   -R-  -G-  -B-  -A--  VIS MSH  LABEL
+# Fields: 
+#    IDX:   Zero-based index 
+#    -R-:   Red color component (0..255)
+#    -G-:   Green color component (0..255)
+#    -B-:   Blue color component (0..255)
+#    -A-:   Label transparency (0.00 .. 1.00)
+#    VIS:   Label visibility (0 or 1)
+#    IDX:   Label mesh visibility (0 or 1)
+#  LABEL:   Label description 
+#
+# Valid Label Ranges:
+#           Bones:   1 to 80
+#   Miscellaneous:  81 to 90
+#       Int Calib:  91 to 110
+# Mindways Model3: 111 to 120
+#        B-MAS200: 121 to 130
+#
+# Hints:
+# If you need to add labels, use the color maps
+#    available at the bottom to create unique colors.
+# Comment out labels you don't want showing in
+#    ITK-Snap using '#'.
+################################################
+    0     0    0    0        0  0  0    "Clear Label"
+# Bones
+    1   255    0    0        1  1  1    "Femur Right"
+    2     0  255    0        1  1  1    "Femur Left"
+    3     0    0  255        1  1  1    "Pelvis Right"
+    4   255  255    0        1  1  1    "Pelvis Left"
+    5     0  255  255        1  1  1    "Sacrum"
+    6   255    0  255        1  1  1    "L5"
+    7   255  239  213        1  1  1    "L4"
+    8     0    0  205        1  1  1    "L3"
+    9   205  133   63        1  1  1    "L2"
+   10   210  180  140        1  1  1    "L1"
+   11     0  139  139        1  1  1    "T12"
+   12   224  255  255        1  1  1    "T11"
+   13    72  209  204        1  1  1    "T10"
+   14   176  224  230        1  1  1    "T9"
+   15   100  149  237        1  1  1    "T8"
+   16   173  216  230        1  1  1    "Radius Right"
+   17     0    0  139        1  1  1    "Radius Left"
+   18   139   69   19        1  1  1    "Ulna Right"
+   19    72   61  139        1  1  1    "Ulna Left"
+   20   100  149  237        1  1  1    "Humerus Right"
+   21   153   50  204        1  1  1    "Humerus Left"
+   22   147  112  219        1  1  1    "Tibia Right"
+   23   153    0  204        1  1  1    "Tibia Left"
+   24   216  191  216        1  1  1    "Fibula Right"
+   25   255    0  255        1  1  1    "Fibula Left"
+   26   219  112  147        1  1  1    "Patella Right"
+   27   255  182  193        1  1  1    "Patella Left"
+   28   245  245  220        1  1  1    "Calcaneus Right"
+   29   154  205   50        1  1  1    "Calcaneus Left"
+   30   224  255  255        1  1  1    "Navicular Right"
+   31     0  206  209        1  1  1    "Navicular Left"
+   32   138   43  226        1  1  1    "Talus Right"
+   33   176  224  230        1  1  1    "Talus Left"
+# Miscellaneous   
+   81   192  192  192        1  1  1    "Not bone"
+# Internal Calibration
+   91   128    0    0        1  1  1    "Adipose"
+   92   128  128    0        1  1  1    "Air"
+   93     0  128    0        1  1  1    "Blood"
+   94   128    0  128        1  1  1    "Cortical Bone"
+   95     0  128  128        1  1  1    "Skeletal Muscle"
+# Mindways Model 3 CT
+  111   255    0    0        1  1  1    "Rod A - Low K2HPO4"
+  112     0  255    0        1  1  1    "Rod B"
+  113     0    0  255        1  1  1    "Rod C"
+  114   255    0  255        1  1  1    "Rod D"
+  115     0  255  255        1  1  1    "Rod E - High K2HPO4"
+# B-MAS200
+  121   255    0    0        1  1  1    "Rod A -   0 mg/cc CHA"
+  122     0  255    0        1  1  1    "Rod B -  50 mg/cc CHA"
+  123     0    0  255        1  1  1    "Rod C - 100 mg/cc CHA"
+  124   255  255    0        1  1  1    "Rod D - 150 mg/cc CHA"
+  125     0  255  255        1  1  1    "Rod E - 200 mg/cc CHA"
+# Mindways Model 3 QA
+  131   219  112  147        1  1  1    "Rod A - Low K2HPO4"
+  132   255  182  193        1  1  1    "Rod B"
+  133   245  245  220        1  1  1    "Rod C"
+  134   154  205   50        1  1  1    "Rod E - High K2HPO4"
+# QRM-BDC 3-rod
+  141   100  149  237        1  1  1    "Rod A - 0 mg/cc CHA"
+  142   173  216  230        1  1  1    "Rod B - 400 mg/cc CHA"
+  143     0    0  139        1  1  1    "Rod C - 800 mg/cc CHA"
+# QRM-BDC 6-rod
+  151   205  133   63        1  1  1    "Rod A -   0 mg/cc CHA"
+  152   210  180  140        1  1  1    "Rod B - 100 mg/cc CHA"
+  153     0  139  139        1  1  1    "Rod C - 200 mg/cc CHA"
+  154   224  255  255        1  1  1    "Rod D - 400 mg/cc CHA"
+  155    72  209  204        1  1  1    "Rod E - 600 mg/cc CHA"
+  156   176  224  230        1  1  1    "Rod F - 800 mg/cc CHA"
+# Image Analysis QCT-3D Plus
+  161     0    0  189        1  1  1    "Rod A -   0 mg/cc CHA"
+  162   139   69   19        1  1  1    "Rod B -  75 mg/cc CHA"
+  163    72   61  139        1  1  1    "Rod C - 150 mg/cc CHA"
+#
+#
+################################################
+# Color maps are kept for reference
+#
+# IND    R     G     B   DESC  - 128 colors
+################################################
+#   1   128    0    0   maroon
+#   2   139    0    0   dark red
+#   3   165   42   42   brown
+#   4   178   34   34   firebrick
+#   5   220   20   60   crimson
+#   6   255    0    0   red
+#   7   255   99   71   tomato
+#   8   255  127   80   coral
+#   9   205   92   92   indian red
+#  10   240  128  128   light coral
+#  11   233  150  122   dark salmon
+#  12   250  128  114   salmon
+#  13   255  160  122   light salmon
+#  14   255   69    0   orange red
+#  15   255  140    0   dark orange
+#  16   255  165    0   orange
+#  17   255  215    0   gold
+#  18   184  134   11   dark golden rod
+#  19   218  165   32   golden rod
+#  20   238  232  170   pale golden rod
+#  21   189  183  107   dark khaki
+#  22   240  230  140   khaki
+#  23   128  128    0   olive
+#  24   255  255    0   yellow
+#  25   154  205   50   yellow green
+#  26    85  107   47   dark olive green
+#  27   107  142   35   olive drab
+#  28   127  255    0   chartreuse
+#  29   173  255   47   green yellow
+#  30     0  100    0   dark green
+#  31     0  128    0   green
+#  32     0  255    0   lime
+#  33    50  205   50   lime green
+#  34   144  238  144   light green
+#  35   152  251  152   pale green
+#  36   143  188  143   dark sea green
+#  37     0  250  154   medium spring green
+#  38     0  255  127   spring green
+#  39    46  139   87   sea green
+#  40   102  205  170   medium aqua marine
+#  41    60  179  113   medium sea green
+#  42    32  178  170   light sea green
+#  43    47   79   79   dark slate gray
+#  44     0  128  128   teal
+#  45     0  139  139   dark cyan
+#  46     0  255  255   aqua
+#  47     0  255  255   cyan
+#  48   224  255  255   light cyan
+#  49     0  206  209   dark turquoise
+#  50    64  224  208   turquoise
+#  51    72  209  204   medium turquoise
+#  52   175  238  238   pale turquoise
+#  53   127  255  212   aqua marine
+#  54   176  224  230   powder blue
+#  55    95  158  160   cadet blue
+#  56    70  130  180   steel blue
+#  57   100  149  237   corn flower blue
+#  58     0  191  255   deep sky blue
+#  59    30  144  255   dodger blue
+#  60   173  216  230   light blue
+#  61   135  206  235   sky blue
+#  62   135  206  250   light sky blue
+#  63     0    0  139   dark blue
+#  64     0    0  205   medium blue
+#  65     0    0  255   blue
+#  66    65  105  225   royal blue
+#  67   138   43  226   blue violet
+#  68    75    0  130   indigo
+#  69    72   61  139   dark slate blue
+#  70   106   90  205   slate blue
+#  71   123  104  238   medium slate blue
+#  72   147  112  219   medium purple
+#  73   139    0  139   dark magenta
+#  74   148    0  211   dark violet
+#  75   153   50  204   dark orchid
+#  76   186   85  211   medium orchid
+#  77   128    0  128   purple
+#  78   216  191  216   thistle
+#  79   221  160  221   plum
+#  80   238  130  238   violet
+#  81   255    0  255   magenta
+#  82   218  112  214   orchid
+#  83   199   21  133   medium violet red
+#  84   219  112  147   pale violet red
+#  85   255   20  147   deep pink
+#  86   255  105  180   hot pink
+#  87   255  182  193   light pink
+#  88   255  192  203   pink
+#  89   250  235  215   antique white
+#  90   245  245  220   beige
+#  91   255  228  196   bisque
+#  92   255  235  205   blanched almond
+#  93   245  222  179   wheat
+#  94   255  248  220   corn silk
+#  95   255  250  205   lemon chiffon
+#  96   250  250  210   light golden rod yellow
+#  97   255  255  224   light yellow
+#  98   139   69   19   saddle brown
+#  99   160   82   45   sienna
+# 100   210  105   30   chocolate
+# 101   205  133   63   peru
+# 102   244  164   96   sandy brown
+# 103   222  184  135   burly wood
+# 104   210  180  140   tan
+# 105   188  143  143   rosy brown
+# 106   255  228  225   misty rose
+# 107   255  240  245   lavender blush
+# 108   250  240  230   linen
+# 109   253  245  230   old lace
+# 110   255  239  213   papaya whip
+# 111   255  245  238   sea shell
+# 112   245  255  250   mint cream
+# 113   112  128  144   slate gray
+# 114   119  136  153   light slate gray
+# 115   176  196  222   light steel blue
+# 116   230  230  250   lavender
+# 117   255  250  240   floral white
+# 118   240  248  255   alice blue
+# 119   248  248  255   ghost white
+# 120     0    0    0   black
+# 121   105  105  105   dim gray
+# 122   128  128  128   gray
+# 123   169  169  169   dark gray
+# 124   192  192  192   silver
+# 125   211  211  211   light gray
+# 126   220  220  220   gainsboro
+# 127   245  245  245   white smoke
+# 128   255  255  255   white
+################################################
+# IND    R     G     B   DESC  - 16 colors
+################################################
+#   1     0    0    0   Black
+#   2   255  255  255   White
+#   3   255    0    0   Red
+#   4     0  255    0   Lime
+#   5     0    0  255   Blue
+#   6   255  255    0   Yellow
+#   7     0  255  255   Cyan
+#   8   255    0  255   Magenta
+#   9   192  192  192   Silver
+#  10   128  128  128   Gray
+#  11   128    0    0   Maroon
+#  12   128  128    0   Olive
+#  13     0  128    0   Green
+#  14   128    0  128   Purple
+#  15     0  128  128   Teal
+#  16     0    0  128   Navy
