@@ -30,8 +30,11 @@ import sys
 import argparse
 import vtk
 import time
+import numpy as np
+from scipy import stats
 from datetime import date
 from collections import OrderedDict
+from vtk.util.numpy_support import vtk_to_numpy
 
 import ogo.cli.Helper as ogo
 from ogo.util.echo_arguments import echo_arguments
@@ -175,22 +178,10 @@ def mindwaysModel3PhantomCalib(args):
     ogo.message("End of Script.")
     sys.exit()
 
-def make_calibration_dict():
-    print('Making calibration dict')
-    
-    calibration_dict = OrderedDict()
-    calibration_dict['mindway_phantom_h2o_densities'] = [1012.25, 1056.95, 1103.57, 1119.52, 923.20] # Rod A to Rod E in mg/cc.
-    calibration_dict['mindway_phantom_k2hpo4_densities'] = [-51.83, -53.40, 58.88, 157.05, 375.83] # Rod A to Rod E in mg/cc.
-    calibration_dict['bmas200_phantom_k2hpo4_densities'] = [0, 50, 100, 150, 200] # Rod A to Rod E in mg/cc.
-    
-    print("\n".join("{:33s} = {}".format(k,v) for k, v in calibration_dict.items()))
-    
 # PHANTOM CALIBARATION ------------------------------------------------------------------
-def phantom(input_image,input_mask,output_image,async_image,overwrite,func):
+def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,func):
     ogo.message('Starting phantom based calibration.')
     
-    make_calibration_dict()
-    exit()
     # Check if output exists and should overwrite
     if os.path.isfile(output_image) and not overwrite:
         result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
@@ -252,7 +243,141 @@ def phantom(input_image,input_mask,output_image,async_image,overwrite,func):
         ogo.message('      \"{}\"'.format(input_mask))
         ogo.message('      \"{}\"'.format(async_image))
     
+    # Get the correct reference calibration phantom
+    phantom_dict = ogo.get_phantom(phantom)
+    #print("\n".join("{:33s} = {}".format(k,v) for k, v in phantom_dict.items()))
+    ogo.message('Calibration phantom is \"{}\".'.format(phantom_dict['name']))
+    if phantom_dict['type'] in 'CHA':
+        cha_phantom = phantom_dict['densities']
+        ogo.message("  CHA Phantom [mg/cc] --> ["+" ".join("{:8.3f}".format(i) for i in cha_phantom)+"]")
+    else:
+        cha_phantom = phantom_dict['densities']
+        h2o_phantom = phantom_dict['h2o_densities']
+        ogo.message("  K2HPO4 Phantom [mg/cc] --> ["+" ".join("{:8.3f}".format(i) for i in cha_phantom)+"]")
+        ogo.message("     H2O Phantom [mg/cc] --> ["+" ".join("{:8.3f}".format(i) for i in h2o_phantom)+"]")
+        
+    # Gather the image and mask
+    if (async_image):
+        image_array = vtk_to_numpy(reader_async.GetOutput().GetPointData().GetScalars())
+    else:
+        image_array = vtk_to_numpy(reader_image.GetOutput().GetPointData().GetScalars())
+    mask_array = vtk_to_numpy(reader_mask.GetOutput().GetPointData().GetScalars())
     
+    # Calculate the mean and SD of each phantom rod in the image
+    ogo.message("Extracting calibration data from image...")
+    ogo.message("       {:>8s} {:>8s} {:>8s}".format('Mean','StdDev','#Voxels'))
+    rod_labels = phantom_dict['rod_labels']
+    rod_names = phantom_dict['rod_names']
+    phantom_HU = []
+
+    for rod in range(phantom_dict['number_rods']):
+        rod_label = rod_labels[rod]
+        if rod_label not in mask_array:
+            os.sys.exit('[ERROR] Mask image does not contain label \"{}\". Are you using the wrong mask?'.format(rod_label))
+        rod_name = rod_names[rod]
+        rod_mean = np.mean(image_array[mask_array == rod_label])
+        rod_std = np.std(image_array[mask_array == rod_label])
+        rod_count = len(image_array[mask_array == rod_label])
+        ogo.message('Rod {:s}: {:8.3f} {:8.3f} {:8d}'.format(rod_name,rod_mean,rod_std,rod_count)) # Report mean, SD, # voxels
+        phantom_HU.append(rod_mean)
+        
+    ogo.message("  Image [HU]--> ["+" ".join("{:8.3f}".format(i) for i in phantom_HU)+"]")
+
+    exit()
+    # See Figure 2.1 on page 26 of Andy's thesis
+    if (phantom in 'Mindways Model 3'):
+        y_values = np.subtract(phantom_HU,h2o_phantom_densities)
+        x_values = k2hpo4_phantom_densities
+        regression_parameters = stats.linregress(x_values, y_values)
+        print(regression_parameters)
+        # convert slope and y-intercept to CT parameters
+        sigma_ct = regression_parameters[0] - 0.2174
+        beta_ct = regression_parameters[1] + 999.6
+        calibration_slope = 1/sigma_ct
+        calibration_yint = 1*beta_ct/sigma_ct
+        print('calibration_slope = {}'.format(calibration_slope))
+        print('calibration_yint = {}'.format(calibration_yint))
+    elif (phantom in 'B-MAS 200'):
+        y_values = 0
+    else:
+        os.sys.exit('[ERROR] Cannot find appropriate phantom density for \"{}\"'.format(phantom))
+    
+    exit()
+#def phantomParameters(h2o_density, k2hpo4_density, phantom_HU):
+#    """Determine the slope and y-intercept for the phantom calibration.
+#    The first argument are the phantom specific H2O equivalent density values. The second
+#    argument are the phantom specific K2HPO4 equivalent density values. The third
+#    argument are the phantom rod mean HU values from the image and mask.
+#    Returns the slope and y-intercept for the calibration as a float list.
+#    """
+#    y_values = np.subtract(phantom_HU, h2o_density)
+#    x_values = k2hpo4_density
+#    regression_parameters = stats.linregress(x_values, y_values)
+#
+#    # convert slope and y-intercept to CT parameters
+#    sigma_ct = regression_parameters[0] - 0.2174
+#    beta_ct = regression_parameters[1] + 999.6
+#
+#    # Determine calibration parameters
+#    calibration_slope = 1/sigma_ct
+#    calibration_yint = 1*beta_ct/sigma_ct
+#    return {
+#    'Calibration Slope':calibration_slope,
+#    'Calibration Y-Intercept':calibration_yint
+#    }
+
+
+
+    ##
+    # determine the phantom calibration parameters
+    ogo.message("Determining the phantom calibration parameters...")
+    cali_parameters = ogo.phantomParameters(phantom_h2o_densities, phantom_k2hpo4_densities, phantom_HU)
+
+    ##
+    # Apply calibration parameters the image
+    ogo.message("Applying Image Calibration...")
+    calibrated_image = ogo.applyPhantomParameters(imageData, cali_parameters)
+    
+#    if (async_image):
+    
+    
+    
+    #Mindways Model 3 CT phantom
+    #B-MAS 200 CT phantom
+    
+    # Get the correct phantom parameters (Mindways, B200)
+    # Calculate the phantom values from the CT image (direct or asynchronous)
+    # Calculate the linear relation and apply it to the input image
+    # Write out some report information
+    
+    #labels = np.unique(array)
+    ## Remove label 0 from list (background)
+    #if (labels[0] == 0):
+    #    labels = labels[1:]
+    
+    ## Loop through each of the valid labels and calculate BMD
+    #for idx,lab in enumerate(labels):
+    #
+    #    bone_mask = ogo.maskThreshold(reader_mask.GetOutput(), lab)
+    #    bone_VOI = ogo.applyMask(reader_image.GetOutput(), bone_mask)
+    #    bmd_outcomes = ogo.bmd_metrics(bone_VOI)
+    #    
+    #    #parameters_dict['ID'] = os.path.basename(image_filename)
+    #    parameters_dict['Script'] = os.path.basename(sys.argv[0])
+    #    parameters_dict['Version'] = script_version
+    #    parameters_dict['Created'] = str(date.today())
+    #    parameters_dict['Image'] = os.path.basename(image_filename)
+    #    #parameters_dict['ImageDir'] = os.path.dirname(image_filename)
+    #    parameters_dict['Mask'] = os.path.basename(mask_filename)
+    #    #parameters_dict['MaskDir'] = os.path.dirname(mask_filename)
+    #    parameters_dict['Label'] = lab
+    #    parameters_dict['LabelDesc'] = labelsDict[str(labels[idx])]
+    #    
+    #    parameters_dict['Integral BMD [mg/cc]'] = bmd_outcomes['Integral BMD [mg/cc]']
+    #    parameters_dict['Integral BMC [mg]'] = bmd_outcomes['Integral BMC [mg]']
+    #    parameters_dict['Bone Volume [mm^3]'] = bmd_outcomes['Bone Volume [mm^3]']
+    #    parameters_dict['Bone Volume [cm^3]'] = bmd_outcomes['Bone Volume [cm^3]']
+    #
     ogo.message('Done phantom based calibration.')
     
 # INTERNAL CALIBARATION ------------------------------------------------------------------
@@ -319,20 +444,21 @@ parameters and results.
 
     epilog='''
 USAGE: 
-ogoImageCalibration internal input.nii.gz output.nii.gz  
-ogoImageCalibration phantom  input.nii.gz output.nii.gz  
-ogoImageCalibration phantom  input.nii.gz output.nii.gz --async_image asynch.nii.gz
+ogoImageCalibration internal input_image.nii.gz input_mask.nii.gz output.nii.gz  
+ogoImageCalibration phantom  input_image.nii.gz asynch_mask.nii.gz --async_image asynch.nii.gz output.nii.gz  
 
 python ImageCalibration.py phantom \
-  /Users/skboyd/Desktop/ML/test/qct.nii \
-  /Users/skboyd/Desktop/ML/test/qct_mask.nii.gz \
-  /Users/skboyd/Desktop/ML/test/test.nii
-  
-python ImageCalibration.py phantom \
-  /Users/skboyd/Desktop/ML/test/qct.nii \
-  /Users/skboyd/Desktop/ML/test/qct_mask.nii.gz \
+  /Users/skboyd/Desktop/ML/test/kub.nii.gz \
+  /Users/skboyd/Desktop/ML/test/kub_mask.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii \
-  --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz
+  --phantom 'Mindways Model 3 CT'
+    
+python ImageCalibration.py phantom \
+  /Users/skboyd/Desktop/ML/test/kub.nii.gz \
+  /Users/skboyd/Desktop/ML/test/async_mask_mindways.nii.gz \
+  /Users/skboyd/Desktop/ML/test/test.nii \
+  --async_image /Users/skboyd/Desktop/ML/test/asynch.nii.gz \
+  --phantom 'Mindways Model 3 CT' 
 
 python ImageCalibration.py internal \
   /Users/skboyd/Desktop/ML/test/qct.nii \
@@ -360,6 +486,7 @@ Med Eng Phys 78, 55-63.
     parser_phantom.add_argument('input_mask', help='Input image mask for either input image or asynchronous image, if present (*.nii, *.nii.gz)')
     parser_phantom.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
     parser_phantom.add_argument('--async_image', default='', metavar='IMAGE', help='Asynchronous image of phantom (*.nii, *.nii.gz)')
+    parser_phantom.add_argument('--phantom', default='Mindways Model 3 CT', choices=['Mindways Model 3 CT','Mindways Model 3 QA','QRM-BDC 3-rod','QRM-BDC 6-rod','Image Analysis QCT-3D Plus','B-MAS 200'], help='Specify phantom used (default: %(default)s)')
     parser_phantom.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     parser_phantom.set_defaults(func=phantom)
 

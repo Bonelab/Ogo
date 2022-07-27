@@ -35,7 +35,7 @@ def ImageExam(input_filename, header, histo, bins):
       os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(input_filename))
     
     print()
-    #ogo.message('Reading input image ' + input_filename)
+    ogo.message('Reading input image ' + input_filename)
     reader.SetFileName(input_filename)
     reader.Update()
     

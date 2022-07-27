@@ -131,63 +131,141 @@ def applyInternalCalibration(imageData, cali_parameters):
 
     return K2HPO4_den_image
 
-def masterLabels():
-    od = OrderedDict()
-    od['0'] = "Clear Label"
-    od['1'] = "Femur Right"
-    od['2'] = "Femur Left"
-    od['3'] = "Pelvis Right"
-    od['4'] = "Pelvis Left"
-    od['5'] = "Sacrum"
-    od['6'] = "L5"
-    od['7'] = "L4"
-    od['8'] = "L3"
-    od['9'] = "L2"
-    od['10'] = "L1"
-    od['11'] = "T12"
-    od['12'] = "T11"
-    od['13'] = "T10"
-    od['14'] = "T9"
-    od['15'] = "T8"
-    od['16'] = "Radius Right"
-    od['17'] = "Radius Left"
-    od['18'] = "Ulna Right"
-    od['19'] = "Ulna Left"
-    od['20'] = "Humerus Right"
-    od['21'] = "Humerus Left"
-    od['22'] = "Tibia Right"
-    od['23'] = "Tibia Left"
-    od['24'] = "Fibula Right"
-    od['25'] = "Fibula Left"
-    od['26'] = "Patella Right"
-    od['27'] = "Patella Left"
-    od['28'] = "Calcaneus Right"
-    od['29'] = "Calcaneus Left"
-    od['30'] = "Navicular Right"
-    od['31'] = "Navicular Left"
-    od['32'] = "Talus Right"
-    od['33'] = "Talus Left"
-    od['81'] = "Not bone"
-    od['91'] = "Adipose"
-    od['92'] = "Air"
-    od['93'] = "Blood"
-    od['94'] = "Cortical Bone"
-    od['95'] = "Skeletal Muscle"
-    od['111'] = "Rod A - Low K2HPO4"
-    od['112'] = "Rod B"
-    od['113'] = "Rod C"
-    od['114'] = "Rod D"
-    od['115'] = "Rod E - High K2HPO4"
-    od['121'] = "Rod 1 - 0 mg/cc CHA"
-    od['122'] = "Rod 2 - 50 mg/cc CHA"
-    od['123'] = "Rod 3 - 100 mg/cc CHA"
-    od['124'] = "Rod 4 - 150 mg/cc CHA"
-    od['125'] = "Rod 5 - 200 mg/cc CHA"
+def get_master_labels():
+    
+    with open('test.txt') as f:
+        lines = f.readlines()
+    
+    #    od = OrderedDict()
+    #    od['0'] = "Clear Label"
+    #    od['1'] = "Femur Right"
+    #    od['2'] = "Femur Left"
+    #    od['3'] = "Pelvis Right"
+    #    od['4'] = "Pelvis Left"
+    #    od['5'] = "Sacrum"
+    #    od['6'] = "L5"
+    #    od['7'] = "L4"
+    #    od['8'] = "L3"
+    #    od['9'] = "L2"
+    #    od['10'] = "L1"
+    #    od['11'] = "T12"
+    #    od['12'] = "T11"
+    #    od['13'] = "T10"
+    #    od['14'] = "T9"
+    #    od['15'] = "T8"
+    #    od['16'] = "Radius Right"
+    #    od['17'] = "Radius Left"
+    #    od['18'] = "Ulna Right"
+    #    od['19'] = "Ulna Left"
+    #    od['20'] = "Humerus Right"
+    #    od['21'] = "Humerus Left"
+    #    od['22'] = "Tibia Right"
+    #    od['23'] = "Tibia Left"
+    #    od['24'] = "Fibula Right"
+    #    od['25'] = "Fibula Left"
+    #    od['26'] = "Patella Right"
+    #    od['27'] = "Patella Left"
+    #    od['28'] = "Calcaneus Right"
+    #    od['29'] = "Calcaneus Left"
+    #    od['30'] = "Navicular Right"
+    #    od['31'] = "Navicular Left"
+    #    od['32'] = "Talus Right"
+    #    od['33'] = "Talus Left"
+    #    od['81'] = "Not bone"
+    #    od['91'] = "Adipose"
+    #    od['92'] = "Air"
+    #    od['93'] = "Blood"
+    #    od['94'] = "Cortical Bone"
+    #    od['95'] = "Skeletal Muscle"
+    #    od['111'] = "Rod A - Low K2HPO4"
+    #    od['112'] = "Rod B"
+    #    od['113'] = "Rod C"
+    #    od['114'] = "Rod D"
+    #    od['115'] = "Rod E - High K2HPO4"
+    #    od['121'] = "Rod 1 - 0 mg/cc CHA"
+    #    od['122'] = "Rod 2 - 50 mg/cc CHA"
+    #    od['123'] = "Rod 3 - 100 mg/cc CHA"
+    #    od['124'] = "Rod 4 - 150 mg/cc CHA"
+    #    od['125'] = "Rod 5 - 200 mg/cc CHA"
+    
+    #print("\n".join("{:33s} = {}".format(k,v) for k, v in od.items()))
     
     #for key, value in od.items():
     #    print(key, value)
     
-    return od
+    #return od
+    
+##
+# Returns a dictionary of calibration phantoms for each phantom requested
+def get_phantom(phantom_type):
+    
+    calibration_dict = OrderedDict()
+    
+    if (phantom_type in 'Mindways Model 3 CT'):
+        calibration_dict['name']                = 'Mindways Model 3 CT'
+        calibration_dict['units']               = 'mg/cc'
+        calibration_dict['type']                = 'k2hpo4'
+        calibration_dict['serial']              = '#4541A, #4560'
+        calibration_dict['number_rods']         = 5
+        calibration_dict['rod_labels']          = [111,112,113,114,115]
+        calibration_dict['rod_names']           = ['A','B','C','D','E']
+        calibration_dict['densities']           = [-51.83, -53.40, 58.88, 157.05, 375.83]
+        calibration_dict['h2o_densities']       = [1012.25, 1056.95, 1103.57, 1119.52, 923.20]
+
+    elif (phantom_type in 'Mindways Model 3 QA'):
+        calibration_dict['name']                = 'Mindways Model 3 QA'
+        calibration_dict['units']               = 'mg/cc'
+        calibration_dict['type']                = 'k2hpo4'
+        calibration_dict['serial']              = '#4408'
+        calibration_dict['number_rods']         = 4
+        calibration_dict['rod_labels']          = [131,132,133,134]
+        calibration_dict['rod_names']           = ['A','B','C','D']
+        calibration_dict['densities']           = [58.88, -53.40, 157.05, 157.13]
+        calibration_dict['h2o_densities']       = [1103.57, 1056.95, 1119.52, 1120.10]
+
+    elif (phantom_type in 'QRM-BDC 3-rod'):
+        calibration_dict['name']                = 'QRM-BDC 3-rod'
+        calibration_dict['units']               = 'mg/cc'
+        calibration_dict['type']                = 'CHA'
+        calibration_dict['serial']              = '#BDC-71'
+        calibration_dict['number_rods']         = 3
+        calibration_dict['rod_labels']          = [141,142,143]
+        calibration_dict['rod_names']           = ['A','B','C']
+        calibration_dict['densities']           = [0, 400, 800]
+
+    elif (phantom_type in 'QRM-BDC 6-rod'):
+        calibration_dict['name']                = 'QRM-BDC 6-rod'
+        calibration_dict['units']               = 'mg/cc'
+        calibration_dict['type']                = 'CHA'
+        calibration_dict['serial']              = '#BDC-106'
+        calibration_dict['number_rods']         = 6
+        calibration_dict['rod_labels']          = [151,152,153,154,155,156]
+        calibration_dict['rod_names']           = ['A','B','C','D','E','F']
+        calibration_dict['densities']           = [0, 100, 200, 400, 600, 800]
+
+    elif (phantom_type in 'Image Analysis QCT-3D Plus'):
+        calibration_dict['name']                = 'Image Analysis QCT-3D Plus'
+        calibration_dict['units']               = 'mg/cc'
+        calibration_dict['type']                = 'CHA'
+        calibration_dict['serial']              = '#G2730'
+        calibration_dict['number_rods']         = 3
+        calibration_dict['rod_labels']          = [161, 162, 163]
+        calibration_dict['rod_names']           = ['A','B','C']
+        calibration_dict['densities']           = [8.0, 97.3, 189.8]
+
+    elif (phantom_type in 'B-MAS 200'):
+        calibration_dict['name']                = 'B-MAS 200'
+        calibration_dict['units']               = 'mg/cc'
+        calibration_dict['type']                = 'CHA'
+        calibration_dict['serial']              = 'unknown'
+        calibration_dict['number_rods']         = 5
+        calibration_dict['rod_labels']          = [121,122,123,124,125]
+        calibration_dict['rod_names']           = ['A','B','C','D','E']
+        calibration_dict['densities']           = [0, 50, 100, 150, 200]
+    else:
+        os.sys.exit('[ERROR] Cannot find appropriate phantom density for \"{}\"'.format(phantom_type))
+        
+    return calibration_dict
     
 def histogram(image,nbins):
     array = vtk_to_numpy(image.GetPointData().GetScalars()).ravel()
@@ -1089,6 +1167,21 @@ def imageHistogramMean(imageData):
     accumulate.Update()
     mean = accumulate.GetMean()
     return mean
+
+def imageHistogram(imageData):
+    """Creates a histogram of the input image data, ignoring zero values.
+    Returns the mean value of the histogram.
+    """
+    accumulate = vtk.vtkImageAccumulate()
+    accumulate.SetInputData(imageData)
+    accumulate.IgnoreZeroOn()
+    accumulate.Update()
+    image_mean = accumulate.GetMean()[0] # First value in tuple is our result
+    image_sd = accumulate.GetStandardDeviation()[0]
+    image_min = accumulate.GetMin()[0]
+    image_max = accumulate.GetMax()[0]
+    image_voxel_count = accumulate.GetVoxelCount()
+    return [image_mean, image_sd, image_min, image_max, image_voxel_count]
 
 def icMaterialDensity(material_HU, material_attenuation, water_attenuation, water_density):
     """Determines the apparent density for each material.
