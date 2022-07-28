@@ -34,7 +34,7 @@ import numpy as np
 from scipy import stats
 from datetime import date
 from collections import OrderedDict
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 import ogo.cli.Helper as ogo
 from ogo.util.echo_arguments import echo_arguments
@@ -181,7 +181,7 @@ def mindwaysModel3PhantomCalib(args):
 # PHANTOM CALIBARATION ------------------------------------------------------------------
 def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,func):
     ogo.message('Starting phantom based calibration.')
-    
+
     # Check if output exists and should overwrite
     if os.path.isfile(output_image) and not overwrite:
         result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
@@ -246,16 +246,17 @@ def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,fu
     # Get the correct reference calibration phantom
     phantom_dict = ogo.get_phantom(phantom)
     #print("\n".join("{:33s} = {}".format(k,v) for k, v in phantom_dict.items()))
-    ogo.message('Calibration phantom is \"{}\".'.format(phantom_dict['name']))
-    if phantom_dict['type'] in 'CHA':
-        cha_phantom = phantom_dict['densities']
-        ogo.message("  CHA Phantom [mg/cc] --> ["+" ".join("{:8.3f}".format(i) for i in cha_phantom)+"]")
-    else:
-        cha_phantom = phantom_dict['densities']
-        h2o_phantom = phantom_dict['h2o_densities']
-        ogo.message("  K2HPO4 Phantom [mg/cc] --> ["+" ".join("{:8.3f}".format(i) for i in cha_phantom)+"]")
-        ogo.message("     H2O Phantom [mg/cc] --> ["+" ".join("{:8.3f}".format(i) for i in h2o_phantom)+"]")
-        
+    ogo.message('Calibration phantom selected is:')
+    ogo.message('  {:>14s} = {:s}'.format('name',phantom_dict['name']))
+    ogo.message('  {:>14s} = {:s}'.format('type',phantom_dict['type']))
+    ogo.message('  {:>14s} = {:s}'.format('serial',phantom_dict['serial']))
+    ogo.message('  {:>14s} = {:d}'.format('number_rods',phantom_dict['number_rods']))
+    ogo.message("  {:>14s} = ".format('rod_labels')+'['+', '.join("{:d}".format(i) for i in phantom_dict['rod_labels'])+"]")
+    ogo.message("  {:>14s} = ".format('rod_names')+'['+', '.join("{:s}".format(i) for i in phantom_dict['rod_names'])+"]")
+    ogo.message("  {:>14s} = ".format('densities')+'['+', '.join("{:8.3f}".format(i) for i in phantom_dict['densities'])+"]")
+    if phantom_dict['h2o_densities'][0] != None:
+        ogo.message("  {:>14s} = ".format('h2o_densities')+'['+', '.join("{:8.3f}".format(i) for i in phantom_dict['h2o_densities'])+"]")
+
     # Gather the image and mask
     if (async_image):
         image_array = vtk_to_numpy(reader_async.GetOutput().GetPointData().GetScalars())
@@ -281,104 +282,144 @@ def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,fu
         ogo.message('Rod {:s}: {:8.3f} {:8.3f} {:8d}'.format(rod_name,rod_mean,rod_std,rod_count)) # Report mean, SD, # voxels
         phantom_HU.append(rod_mean)
         
-    ogo.message("  Image [HU]--> ["+" ".join("{:8.3f}".format(i) for i in phantom_HU)+"]")
+    ogo.message("  {:>14s} = ".format('Image [HU]')+'['+', '.join("{:8.3f}".format(i) for i in phantom_HU)+"]")
 
-    exit()
-    # See Figure 2.1 on page 26 of Andy's thesis
-    if (phantom in 'Mindways Model 3'):
-        y_values = np.subtract(phantom_HU,h2o_phantom_densities)
-        x_values = k2hpo4_phantom_densities
+    # Calculate slope and intercept
+    ogo.message('Calculating calibration slope and intercept.')
+    ogo.message('Calculating type is: \'{}\''.format(phantom_dict['type']))
+    if phantom_dict['type'] is 'k2hpo4':
+        x_values = phantom_dict['densities']
+        y_values = np.subtract(phantom_HU,phantom_dict['h2o_densities'])
+
         regression_parameters = stats.linregress(x_values, y_values)
-        print(regression_parameters)
-        # convert slope and y-intercept to CT parameters
         sigma_ct = regression_parameters[0] - 0.2174
         beta_ct = regression_parameters[1] + 999.6
         calibration_slope = 1/sigma_ct
         calibration_yint = 1*beta_ct/sigma_ct
-        print('calibration_slope = {}'.format(calibration_slope))
-        print('calibration_yint = {}'.format(calibration_yint))
-    elif (phantom in 'B-MAS 200'):
-        y_values = 0
+        calibration_rvalue = regression_parameters[2]
+        calibration_stderr = regression_parameters[3]
+        ogo.message('  {:>14s} = {:8.6f}'.format('slope',calibration_slope))
+        ogo.message('  {:>14s} = {:8.6f}'.format('y-intercept',calibration_yint))
+        ogo.message('  {:>14s} = {:8.6f}'.format('r-value',calibration_rvalue))
+        ogo.message('  {:>14s} = {:8.6f}'.format('stderr',calibration_stderr))
+        
+    elif phantom_dict['type'] is 'CHA':
+        x_values = phantom_HU
+        y_values = phantom_dict['densities']
+
+        regression_parameters = stats.linregress(x_values, y_values)
+        calibration_slope = regression_parameters[0]
+        calibration_yint = regression_parameters[1]
+        calibration_rvalue = regression_parameters[2]
+        calibration_stderr = regression_parameters[3]
+        ogo.message('  {:>14s} = {:8.6f}'.format('slope',calibration_slope))
+        ogo.message('  {:>14s} = {:8.6f}'.format('y-intercept',calibration_yint))
+        ogo.message('  {:>14s} = {:8.6f}'.format('r-value',calibration_rvalue))
+        ogo.message('  {:>14s} = {:8.6f}'.format('stderr',calibration_stderr))
+
     else:
-        os.sys.exit('[ERROR] Cannot find appropriate phantom density for \"{}\"'.format(phantom))
+        os.sys.exit('[ERROR] Unknown calibration phantom type: \"{}\"'.format(phantom_dict['type']))
     
-    exit()
-#def phantomParameters(h2o_density, k2hpo4_density, phantom_HU):
-#    """Determine the slope and y-intercept for the phantom calibration.
-#    The first argument are the phantom specific H2O equivalent density values. The second
-#    argument are the phantom specific K2HPO4 equivalent density values. The third
-#    argument are the phantom rod mean HU values from the image and mask.
-#    Returns the slope and y-intercept for the calibration as a float list.
-#    """
-#    y_values = np.subtract(phantom_HU, h2o_density)
-#    x_values = k2hpo4_density
-#    regression_parameters = stats.linregress(x_values, y_values)
-#
-#    # convert slope and y-intercept to CT parameters
-#    sigma_ct = regression_parameters[0] - 0.2174
-#    beta_ct = regression_parameters[1] + 999.6
-#
-#    # Determine calibration parameters
-#    calibration_slope = 1/sigma_ct
-#    calibration_yint = 1*beta_ct/sigma_ct
-#    return {
-#    'Calibration Slope':calibration_slope,
-#    'Calibration Y-Intercept':calibration_yint
-#    }
+    # Check that the calibration results are within a reasonable range
+    threshold_warning = 2 # percent
+    threshold_error =  10 # percent
+    if (abs(1.0-calibration_rvalue)*100.0>threshold_error):
+        ogo.message('[ERROR] R-value is too low ({:8.6f}).'.format(calibration_rvalue))
+        ogo.message('          * did you select the correct phantom?')
+        ogo.message('          * do all the rods have a reasonable value?')
+        ogo.message('          * is the StdDev of the rods high (i.e. missed the target)?')
+        os.sys.exit()
+    if (abs(1.0-calibration_rvalue)*100.0>threshold_warning):
+        ogo.message('[WARNING] R-value is low ({:8.6f}). Checking following:'.format(calibration_rvalue))
+        ogo.message('          * did you select the correct phantom?')
+        ogo.message('          * do all the rods have a reasonable value?')
+        ogo.message('          * is the StdDev of the rods high (i.e. missed the target)?')
+        
+    
+    # Apply calibration parameters to image
+    ogo.message("Applying image calibration.")
+    
+    cast = vtk.vtkImageCast()
+    cast.SetInputData(reader_image.GetOutput())
+    cast.SetOutputScalarTypeToFloat()
+    cast.Update()
+    
+    slope_image = vtk.vtkImageMathematics()
+    slope_image.SetInputConnection(0, cast.GetOutputPort())
+    slope_image.SetOperationToMultiplyByK()
+    slope_image.SetConstantK(calibration_slope)
+    slope_image.Update()
+    
+    calibrated_image = vtk.vtkImageMathematics()
+    calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
+    calibrated_image.SetOperationToAddConstant()
+    calibrated_image.SetConstantC(calibration_yint)
+    calibrated_image.Update()
+    
+    # Write image
+    if output_image.lower().endswith('.nii'):
+        writer = vtk.vtkNIFTIImageWriter()
+    elif output_image.lower().endswith('.nii.gz'):
+        writer = vtk.vtkNIFTIImageWriter()
+    else:
+        os.sys.exit('[ERROR] Cannot find writer for file \"{}\"'.format(output_image))
+          
+    ogo.message('Saving output image ' + output_image)
 
-
-
-    ##
-    # determine the phantom calibration parameters
-    ogo.message("Determining the phantom calibration parameters...")
-    cali_parameters = ogo.phantomParameters(phantom_h2o_densities, phantom_k2hpo4_densities, phantom_HU)
-
-    ##
-    # Apply calibration parameters the image
-    ogo.message("Applying Image Calibration...")
-    calibrated_image = ogo.applyPhantomParameters(imageData, cali_parameters)
+    writer.SetInputData(calibrated_image.GetOutput())
+    writer.SetFileName(output_image)
+    writer.SetTimeDimension(reader_image.GetTimeDimension())
+    writer.SetTimeSpacing(reader_image.GetTimeSpacing())
+    writer.SetRescaleSlope(reader_image.GetRescaleSlope())
+    writer.SetRescaleIntercept(reader_image.GetRescaleIntercept())
+    writer.SetQFac(reader_image.GetQFac())
+    writer.SetQFormMatrix(reader_image.GetQFormMatrix())
+    writer.SetNIFTIHeader(reader_image.GetNIFTIHeader())
+    writer.Update()
     
-#    if (async_image):
+    # Write text file
+    output_text = os.path.splitext(output_image)[0] + '.txt'
+    ogo.message('Writing parameters to output text file...')
+    ogo.message('      \"{}\"'.format(output_text))
     
+    txt_file = open(output_text, "w")
     
+    txt_file.write('Phantom-based calibration:\n')
+    txt_file.write('  {:>14s} = {:s}\n'.format('ID',os.path.basename(output_image)))
+    txt_file.write('  {:>14s} = {:s}\n'.format('python script',os.path.splitext(os.path.basename(sys.argv[0]))[0]))
+    txt_file.write('  {:>14s} = {:.2f}\n'.format('version',script_version))
+    txt_file.write('  {:>14s} = {:s}\n'.format('creation date',str(date.today())))
+    txt_file.write('\n')
+    txt_file.write('Files:\n')
+    txt_file.write('  {:>14s} = {:s}\n'.format('input image',input_image))
+    txt_file.write('  {:>14s} = {:s}\n'.format('input mask',input_mask))
+    txt_file.write('  {:>14s} = {:s}\n'.format('output image',output_image))
+    if async_image:
+        txt_file.write('  {:>14s} = {:s}\n'.format('async image',async_image))
+    else:
+        txt_file.write('  {:>14s} = {:s}\n'.format('async image','n/a'))
+    txt_file.write('\n')
+    txt_file.write('Calibration phantom:\n')
+    txt_file.write('  {:>14s} = {:s}\n'.format('name',phantom_dict['name']))
+    txt_file.write('  {:>14s} = {:s}\n'.format('type',phantom_dict['type']))
+    txt_file.write('  {:>14s} = {:s}\n'.format('serial',phantom_dict['serial']))
+    txt_file.write('  {:>14s} = {:d}\n'.format('number_rods',phantom_dict['number_rods']))
+    txt_file.write('  {:>14s} = '.format('rod_labels')+'['+', '.join("{:d}".format(i) for i in phantom_dict['rod_labels'])+"]\n")
+    txt_file.write('  {:>14s} = '.format('rod_names')+'['+', '.join("{:s}".format(i) for i in phantom_dict['rod_names'])+"]\n")
+    txt_file.write('  {:>14s} = '.format('densities')+'['+', '.join("{:8.3f}".format(i) for i in phantom_dict['densities'])+"]\n")
+    if phantom_dict['h2o_densities'][0] != None:
+        txt_file.write("  {:>14s} = ".format('h2o_densities')+'['+', '.join("{:8.3f}".format(i) for i in phantom_dict['h2o_densities'])+"]\n")
+    txt_file.write('\n')
+    txt_file.write('Calibration results:\n')
+    txt_file.write('  {:>14s} = {:8.6f}\n'.format('slope',calibration_slope))
+    txt_file.write('  {:>14s} = {:8.6f}\n'.format('y-intercept',calibration_yint))
+    txt_file.write('  {:>14s} = {:8.6f}\n'.format('r-value',calibration_rvalue))
+    txt_file.write('  {:>14s} = {:8.6f}\n'.format('stderr',calibration_stderr))
     
-    #Mindways Model 3 CT phantom
-    #B-MAS 200 CT phantom
+    txt_file.close()
     
-    # Get the correct phantom parameters (Mindways, B200)
-    # Calculate the phantom values from the CT image (direct or asynchronous)
-    # Calculate the linear relation and apply it to the input image
-    # Write out some report information
+    ogo.message('Done ImageCalibration.')
     
-    #labels = np.unique(array)
-    ## Remove label 0 from list (background)
-    #if (labels[0] == 0):
-    #    labels = labels[1:]
-    
-    ## Loop through each of the valid labels and calculate BMD
-    #for idx,lab in enumerate(labels):
-    #
-    #    bone_mask = ogo.maskThreshold(reader_mask.GetOutput(), lab)
-    #    bone_VOI = ogo.applyMask(reader_image.GetOutput(), bone_mask)
-    #    bmd_outcomes = ogo.bmd_metrics(bone_VOI)
-    #    
-    #    #parameters_dict['ID'] = os.path.basename(image_filename)
-    #    parameters_dict['Script'] = os.path.basename(sys.argv[0])
-    #    parameters_dict['Version'] = script_version
-    #    parameters_dict['Created'] = str(date.today())
-    #    parameters_dict['Image'] = os.path.basename(image_filename)
-    #    #parameters_dict['ImageDir'] = os.path.dirname(image_filename)
-    #    parameters_dict['Mask'] = os.path.basename(mask_filename)
-    #    #parameters_dict['MaskDir'] = os.path.dirname(mask_filename)
-    #    parameters_dict['Label'] = lab
-    #    parameters_dict['LabelDesc'] = labelsDict[str(labels[idx])]
-    #    
-    #    parameters_dict['Integral BMD [mg/cc]'] = bmd_outcomes['Integral BMD [mg/cc]']
-    #    parameters_dict['Integral BMC [mg]'] = bmd_outcomes['Integral BMC [mg]']
-    #    parameters_dict['Bone Volume [mm^3]'] = bmd_outcomes['Bone Volume [mm^3]']
-    #    parameters_dict['Bone Volume [cm^3]'] = bmd_outcomes['Bone Volume [cm^3]']
-    #
-    ogo.message('Done phantom based calibration.')
     
 # INTERNAL CALIBARATION ------------------------------------------------------------------
 def internal(input_image,input_mask,output_image,overwrite,func):
@@ -447,20 +488,27 @@ USAGE:
 ogoImageCalibration internal input_image.nii.gz input_mask.nii.gz output.nii.gz  
 ogoImageCalibration phantom  input_image.nii.gz asynch_mask.nii.gz --async_image asynch.nii.gz output.nii.gz  
 
-python ImageCalibration.py phantom \
+ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/kub.nii.gz \
   /Users/skboyd/Desktop/ML/test/kub_mask.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii \
   --phantom 'Mindways Model 3 CT'
     
-python ImageCalibration.py phantom \
+ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/kub.nii.gz \
   /Users/skboyd/Desktop/ML/test/async_mask_mindways.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii \
-  --async_image /Users/skboyd/Desktop/ML/test/asynch.nii.gz \
+  --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz \
   --phantom 'Mindways Model 3 CT' 
 
-python ImageCalibration.py internal \
+ogoImageCalibration phantom \
+  /Users/skboyd/Desktop/ML/test/kub.nii.gz \
+  /Users/skboyd/Desktop/ML/test/async_mask_bmas200.nii.gz \
+  /Users/skboyd/Desktop/ML/test/test.nii \
+  --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz \
+  --phantom 'B-MAS 200' 
+
+ogoImageCalibration internal \
   /Users/skboyd/Desktop/ML/test/qct.nii \
   /Users/skboyd/Desktop/ML/test/qct_mask.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii
@@ -498,20 +546,6 @@ Med Eng Phys 78, 55-63.
     parser_internal.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     parser_internal.set_defaults(func=internal)
     
-    #parser.add_argument("image_input",
-    #    help = "DICOM directory or *.nii image file")
-    #parser.add_argument("phantom_input",
-    #    help = "DICOM directory or *.nii phantom image file")
-    #parser.add_argument("calibration_mask_input",
-    #    help = "DICOM direcory or *.nii mask image of calibration phantom")
-    #
-    #parser.add_argument("--phantom_h2o_densities", type = float, nargs = 5,
-    #    default = [1012.25, 1056.95, 1103.57, 1119.52, 923.20],
-    #    help = "Set the H2O equivalent density values for the  Mindways Calibration Phantom. Set Rod A to Rod E in mg/cc. (Default: %(default)s mg/cc)")
-    #parser.add_argument("--phantom_k2hpo4_densities", type = float, nargs = 5,
-    #    default = [-51.83, -53.40, 58.88, 157.05, 375.83],
-    #    help = "Set the K2HPO4 equivalent density values for the  Mindways Calibration Phantom. Set Rod A to Rod E in mg/cc. (Default: %(default)s mg/cc)")
-
     # Parse and display
     args = parser.parse_args()
     print(echo_arguments('ImageCalibration', vars(args)))

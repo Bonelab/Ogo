@@ -131,70 +131,6 @@ def applyInternalCalibration(imageData, cali_parameters):
 
     return K2HPO4_den_image
 
-def get_master_labels():
-    
-    with open('test.txt') as f:
-        lines = f.readlines()
-    
-    #    od = OrderedDict()
-    #    od['0'] = "Clear Label"
-    #    od['1'] = "Femur Right"
-    #    od['2'] = "Femur Left"
-    #    od['3'] = "Pelvis Right"
-    #    od['4'] = "Pelvis Left"
-    #    od['5'] = "Sacrum"
-    #    od['6'] = "L5"
-    #    od['7'] = "L4"
-    #    od['8'] = "L3"
-    #    od['9'] = "L2"
-    #    od['10'] = "L1"
-    #    od['11'] = "T12"
-    #    od['12'] = "T11"
-    #    od['13'] = "T10"
-    #    od['14'] = "T9"
-    #    od['15'] = "T8"
-    #    od['16'] = "Radius Right"
-    #    od['17'] = "Radius Left"
-    #    od['18'] = "Ulna Right"
-    #    od['19'] = "Ulna Left"
-    #    od['20'] = "Humerus Right"
-    #    od['21'] = "Humerus Left"
-    #    od['22'] = "Tibia Right"
-    #    od['23'] = "Tibia Left"
-    #    od['24'] = "Fibula Right"
-    #    od['25'] = "Fibula Left"
-    #    od['26'] = "Patella Right"
-    #    od['27'] = "Patella Left"
-    #    od['28'] = "Calcaneus Right"
-    #    od['29'] = "Calcaneus Left"
-    #    od['30'] = "Navicular Right"
-    #    od['31'] = "Navicular Left"
-    #    od['32'] = "Talus Right"
-    #    od['33'] = "Talus Left"
-    #    od['81'] = "Not bone"
-    #    od['91'] = "Adipose"
-    #    od['92'] = "Air"
-    #    od['93'] = "Blood"
-    #    od['94'] = "Cortical Bone"
-    #    od['95'] = "Skeletal Muscle"
-    #    od['111'] = "Rod A - Low K2HPO4"
-    #    od['112'] = "Rod B"
-    #    od['113'] = "Rod C"
-    #    od['114'] = "Rod D"
-    #    od['115'] = "Rod E - High K2HPO4"
-    #    od['121'] = "Rod 1 - 0 mg/cc CHA"
-    #    od['122'] = "Rod 2 - 50 mg/cc CHA"
-    #    od['123'] = "Rod 3 - 100 mg/cc CHA"
-    #    od['124'] = "Rod 4 - 150 mg/cc CHA"
-    #    od['125'] = "Rod 5 - 200 mg/cc CHA"
-    
-    #print("\n".join("{:33s} = {}".format(k,v) for k, v in od.items()))
-    
-    #for key, value in od.items():
-    #    print(key, value)
-    
-    #return od
-    
 ##
 # Returns a dictionary of calibration phantoms for each phantom requested
 def get_phantom(phantom_type):
@@ -232,6 +168,7 @@ def get_phantom(phantom_type):
         calibration_dict['rod_labels']          = [141,142,143]
         calibration_dict['rod_names']           = ['A','B','C']
         calibration_dict['densities']           = [0, 400, 800]
+        calibration_dict['h2o_densities']       = [None]
 
     elif (phantom_type in 'QRM-BDC 6-rod'):
         calibration_dict['name']                = 'QRM-BDC 6-rod'
@@ -242,6 +179,7 @@ def get_phantom(phantom_type):
         calibration_dict['rod_labels']          = [151,152,153,154,155,156]
         calibration_dict['rod_names']           = ['A','B','C','D','E','F']
         calibration_dict['densities']           = [0, 100, 200, 400, 600, 800]
+        calibration_dict['h2o_densities']       = [None]
 
     elif (phantom_type in 'Image Analysis QCT-3D Plus'):
         calibration_dict['name']                = 'Image Analysis QCT-3D Plus'
@@ -252,6 +190,7 @@ def get_phantom(phantom_type):
         calibration_dict['rod_labels']          = [161, 162, 163]
         calibration_dict['rod_names']           = ['A','B','C']
         calibration_dict['densities']           = [8.0, 97.3, 189.8]
+        calibration_dict['h2o_densities']       = [None]
 
     elif (phantom_type in 'B-MAS 200'):
         calibration_dict['name']                = 'B-MAS 200'
@@ -262,6 +201,8 @@ def get_phantom(phantom_type):
         calibration_dict['rod_labels']          = [121,122,123,124,125]
         calibration_dict['rod_names']           = ['A','B','C','D','E']
         calibration_dict['densities']           = [0, 50, 100, 150, 200]
+        calibration_dict['h2o_densities']       = [None]
+        
     else:
         os.sys.exit('[ERROR] Cannot find appropriate phantom density for \"{}\"'.format(phantom_type))
         
