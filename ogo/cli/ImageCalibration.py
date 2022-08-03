@@ -31,6 +31,8 @@ import argparse
 import vtk
 import time
 import numpy as np
+import ogo.dat.MassAttenuationTables as mat
+import ogo.dat.OgoMasterLabels as lb
 from scipy import stats
 from datetime import date
 from collections import OrderedDict
@@ -335,26 +337,16 @@ def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,fu
         ogo.message('          * do all the rods have a reasonable value?')
         ogo.message('          * is the StdDev of the rods high (i.e. missed the target)?')
         
-    
     # Apply calibration parameters to image
     ogo.message("Applying image calibration.")
     
-    cast = vtk.vtkImageCast()
-    cast.SetInputData(reader_image.GetOutput())
-    cast.SetOutputScalarTypeToFloat()
-    cast.Update()
-    
-    slope_image = vtk.vtkImageMathematics()
-    slope_image.SetInputConnection(0, cast.GetOutputPort())
-    slope_image.SetOperationToMultiplyByK()
-    slope_image.SetConstantK(calibration_slope)
-    slope_image.Update()
-    
-    calibrated_image = vtk.vtkImageMathematics()
-    calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
-    calibrated_image.SetOperationToAddConstant()
-    calibrated_image.SetConstantC(calibration_yint)
-    calibrated_image.Update()
+    np_image = vtk_to_numpy(reader_image.GetOutput().GetPointData().GetScalars())
+    np_image = np_image * calibration_slope + calibration_yint
+    vtk_image_scalars = numpy_to_vtk(num_array=np_image, deep=True, array_type=vtk.VTK_SHORT) # Cast to short
+
+    calibrated_image = vtk.vtkImageData()
+    calibrated_image.DeepCopy(reader_image.GetOutput())
+    calibrated_image.GetPointData().SetScalars(vtk_image_scalars)
     
     # Write image
     if output_image.lower().endswith('.nii'):
@@ -366,7 +358,7 @@ def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,fu
           
     ogo.message('Saving output image ' + output_image)
 
-    writer.SetInputData(calibrated_image.GetOutput())
+    writer.SetInputData(calibrated_image)
     writer.SetFileName(output_image)
     writer.SetTimeDimension(reader_image.GetTimeDimension())
     writer.SetTimeSpacing(reader_image.GetTimeSpacing())
@@ -422,7 +414,7 @@ def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,fu
     
     
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image,input_mask,output_image,overwrite,func):
+def internal(input_image,input_mask,output_image,excludeLabels,overwrite,func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -464,35 +456,142 @@ def internal(input_image,input_mask,output_image,overwrite,func):
     reader_mask.SetFileName(input_mask)
     reader_mask.Update()
 
+    # Create list of valid internal calibration labels
+    # Define the dictionary of possible valid labels. If in the future new labels
+    # are defined, add them to this dictionary.
+    valid_labels_dict = OrderedDict()
+    valid_labels_dict[91] = 'Adipose'
+    valid_labels_dict[92] = 'Air'
+    valid_labels_dict[93] = 'Blood'
+    valid_labels_dict[94] = 'Cortical Bone'
+    valid_labels_dict[95] = 'Skeletal Muscle'
+    all_valid_labels = valid_labels_dict.keys() # We need a 'list' of valid labels
+
+    array = vtk_to_numpy(reader_mask.GetOutput().GetPointData().GetScalars()).ravel()
+    labels_found = np.unique(array)
+    valid_labels = []
+    for idx,label in enumerate(all_valid_labels): # Final list only includes labels present in mask image
+        if label in labels_found:
+            valid_labels.append(label)
+    
+    ogo.message('All sample labels available:')
+    for idx,label in enumerate(valid_labels):
+        ogo.message('  {:>16s} = {:d}'.format(valid_labels_dict.get(label),label))
+        
+    if excludeLabels:
+        ogo.message('Excluding:')
+        for idx,label in enumerate(excludeLabels):
+            if label in valid_labels:
+                ogo.message('  {:>16s} = {:d}'.format(valid_labels_dict.get(label),label))
+                valid_labels.pop(valid_labels.index(label))
+    else:
+        ogo.message('No labels to be excluded.')
+        
+    ogo.message('Final labels:')
+    for idx,label in enumerate(valid_labels):
+        ogo.message('  {:>16s} = {:d}'.format(valid_labels_dict.get(label),label))
+
+    if len(valid_labels)<3:
+        os.sys.exit('[ERROR] A minimum of three samples are needed for internal calibration.')
+    
+    
+    # Gather the image and mask
+    image_array = vtk_to_numpy(reader_image.GetOutput().GetPointData().GetScalars())
+    mask_array = vtk_to_numpy(reader_mask.GetOutput().GetPointData().GetScalars())
+    
+    # Calculate the mean and SD of each phantom rod in the image
+    ogo.message('Extracting sample calibration data from image.')
+    ogo.message('  {:>22s} {:>8s} {:>8s} {:>8s}'.format(' ','Mean','StdDev','#Voxels'))
+    sample_HU = []
+    
+    voxel_warning = False
+    voxel_warning_thres = 100 # Minimum number of voxels
+    std_warning = False
+    std_warning_thres = 100 # Maximum stdev
+    
+    for idx,label in enumerate(valid_labels):
+        #rod_name = rod_names[rod]
+        sample_mean = np.mean(image_array[mask_array == label])
+        sample_std = np.std(image_array[mask_array == label])
+        sample_count = len(image_array[mask_array == label])
+        if (sample_count < voxel_warning_thres):
+            voxel_warning = True
+        if (sample_std > std_warning_thres):
+            std_warning = True
+        ogo.message('  {:>22s} {:8.3f} {:8.3f} {:8d}'.format(valid_labels_dict.get(label)+' ('+str(label)+'):',sample_mean,sample_std,sample_count)) # Report mean, SD, # voxels
+        sample_HU.append(sample_mean)
+
+    ogo.message("  {:>16s} = ".format('Image [HU]')+'['+', '.join("{:8.3f}".format(i) for i in sample_HU)+"]")    
+    if (voxel_warning):
+        ogo.message('[WARNING] At least one sample has less than {} voxels. Caution!'.format(voxel_warning_thres))
+    if (std_warning):
+        ogo.message('[WARNING] At least one sample SD greater than {:.2f}. Caution!'.format(std_warning_thres))
+            
+    #print(mat.adipose_table)
+    print(lb.master_labels_dict)
+    
     ogo.message('Done internal calibration.')
     
 def main():
     # Setup description
     description='''
-Density calibration of clinical CT by either use of a phantom in the scan, 
-asynchronous phantom or internal calibration.
+Performs quantitative density calibration of a clinical CT image either
+by phantom calibration or internal calibration. 
+
+Phantom calibration can be performed with the phantom in the image or
+in an asynchronous scan of the phantom. The image mask is used to define
+the rods in the image. If the rods are in an asynchronous scan, then set
+the argument --async_image and the mask will be applied to that image.
 
 Current phantoms are:
-  Mindways Model 3 CT phantom
-  B-MAS 200 CT phantom
-  
+  Mindways Model 3 CT
+  Mindways Model 3 QA
+  QRM-BDC 3-rod
+  QRM-BDC 6-rod
+  Image Analysis QCT-3D Plus
+  B-MAS 200
+
+Internal calibration is typically based on five samples in the image, 
+which are adipose tissue, skeletal muscle, cortical bone, blood, and air.
+However, the user is free to define any number of samples, and samples of
+any type. The only requirement is to use the correct image labels. At least
+three labels must be defined, and current valid labels are:
+
+   91 Adipose tissue
+   92 Air
+   93 Blood (artery)
+   94 Cortical Bone
+   95 Skeletal Muscle
+ 
 Valid file formats are NIFTII: .nii, .nii.gz
 
-Outputs are the K2HPO4 density calibrated image and a text file of calibration
-parameters and results.
+Outputs include the calibrated density image and a text file that includes
+the calibration parameters and results.
+
+Citation:
+Michalski AS, Besler BA, Michalak GJ, Boyd SK, 2020. CT-based internal density 
+calibration for opportunistic skeletal assessment using abdominal CT scans. 
+Med Eng Phys 78, 55-63.
 
 '''
 
     epilog='''
 USAGE: 
-ogoImageCalibration internal input_image.nii.gz input_mask.nii.gz output.nii.gz  
-ogoImageCalibration phantom  input_image.nii.gz asynch_mask.nii.gz --async_image asynch.nii.gz output.nii.gz  
+ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
+                            image_qct.nii.gz  
+ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
+                            image_qct.nii.gz --phantom 'QRM-BDC 3-rod' 
+ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
+                            image_qct.nii.gz --async_image asynch_image.nii.gz 
+ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
+                            image_qct.nii.gz  
 
 ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/kub.nii.gz \
   /Users/skboyd/Desktop/ML/test/kub_mask.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii \
-  --phantom 'Mindways Model 3 CT'
+  --phantom 'Mindways Model 3 CT' \
+  --overwrite
     
 ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/kub.nii.gz \
@@ -509,14 +608,11 @@ ogoImageCalibration phantom \
   --phantom 'B-MAS 200' 
 
 ogoImageCalibration internal \
-  /Users/skboyd/Desktop/ML/test/qct.nii \
-  /Users/skboyd/Desktop/ML/test/qct_mask.nii.gz \
-  /Users/skboyd/Desktop/ML/test/test.nii
+  /Users/skboyd/Desktop/ML/test/retro.nii \
+  /Users/skboyd/Desktop/ML/test/retro_mask.nii.gz \
+  /Users/skboyd/Desktop/ML/test/test.nii \
+  --overwrite
 
-Citation:
-Michalski AS, Besler BA, Michalak GJ, Boyd SK, 2020. CT-based internal density 
-calibration for opportunistic skeletal assessment using abdominal CT scans. 
-Med Eng Phys 78, 55-63.
 '''
 
     # Setup argument parsing
@@ -531,7 +627,7 @@ Med Eng Phys 78, 55-63.
     # Phantom
     parser_phantom = subparsers.add_parser('phantom')
     parser_phantom.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
-    parser_phantom.add_argument('input_mask', help='Input image mask for either input image or asynchronous image, if present (*.nii, *.nii.gz)')
+    parser_phantom.add_argument('input_mask', help='Image mask of rods for input image or asynchronous image (*.nii, *.nii.gz)')
     parser_phantom.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
     parser_phantom.add_argument('--async_image', default='', metavar='IMAGE', help='Asynchronous image of phantom (*.nii, *.nii.gz)')
     parser_phantom.add_argument('--phantom', default='Mindways Model 3 CT', choices=['Mindways Model 3 CT','Mindways Model 3 QA','QRM-BDC 3-rod','QRM-BDC 6-rod','Image Analysis QCT-3D Plus','B-MAS 200'], help='Specify phantom used (default: %(default)s)')
@@ -543,6 +639,7 @@ Med Eng Phys 78, 55-63.
     parser_internal.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
+    parser_internal.add_argument('--excludeLabels', type=int, nargs='*', default=[], metavar='ID', help='Labels to be excluded from internal calibration; space separated (e.g. 93 94)')
     parser_internal.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     parser_internal.set_defaults(func=internal)
     
