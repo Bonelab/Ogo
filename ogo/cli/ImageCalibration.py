@@ -37,6 +37,7 @@ from scipy import stats
 from datetime import date
 from collections import OrderedDict
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+from ogo.cli.internal_calibration import InternalCalibration
 
 import ogo.cli.Helper as ogo
 from ogo.util.echo_arguments import echo_arguments
@@ -304,6 +305,7 @@ def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,fu
         ogo.message('  {:>14s} = {:8.6f}'.format('y-intercept',calibration_yint))
         ogo.message('  {:>14s} = {:8.6f}'.format('r-value',calibration_rvalue))
         ogo.message('  {:>14s} = {:8.6f}'.format('stderr',calibration_stderr))
+        # QCT PRO User Guide, Mindways Software, Inc. v5.0, rev 20110801
         
     elif phantom_dict['type'] is 'CHA':
         x_values = phantom_HU
@@ -414,7 +416,7 @@ def phantom(input_image,input_mask,output_image,async_image,phantom,overwrite,fu
     
     
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image,input_mask,output_image,excludeLabels,overwrite,func):
+def internal(input_image,input_mask,output_image,excludeLabels,useL4,overwrite,func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -456,17 +458,14 @@ def internal(input_image,input_mask,output_image,excludeLabels,overwrite,func):
     reader_mask.SetFileName(input_mask)
     reader_mask.Update()
 
-    # Create list of valid internal calibration labels
-    # Define the dictionary of possible valid labels. If in the future new labels
-    # are defined, add them to this dictionary.
+    # Create list of valid internal calibration labels using the master list lb.labels_dict.
+    # If more than these five labels are needed, add them to lb.labels_dict and adjust this
+    # code accodingly.
     valid_labels_dict = OrderedDict()
-    valid_labels_dict[91] = 'Adipose'
-    valid_labels_dict[92] = 'Air'
-    valid_labels_dict[93] = 'Blood'
-    valid_labels_dict[94] = 'Cortical Bone'
-    valid_labels_dict[95] = 'Skeletal Muscle'
+    for k in (91,92,93,94,95):
+        valid_labels_dict[k] = lb.labels_dict[k].get('LABEL')
     all_valid_labels = valid_labels_dict.keys() # We need a 'list' of valid labels
-
+    
     array = vtk_to_numpy(reader_mask.GetOutput().GetPointData().GetScalars()).ravel()
     labels_found = np.unique(array)
     valid_labels = []
@@ -477,7 +476,21 @@ def internal(input_image,input_mask,output_image,excludeLabels,overwrite,func):
     ogo.message('All sample labels available:')
     for idx,label in enumerate(valid_labels):
         ogo.message('  {:>16s} = {:d}'.format(valid_labels_dict.get(label),label))
-        
+    
+    # Add the cortical bone label if it's not explicitly included (take the top 5th percentile)
+    if (useL4):
+        ogo.message('Option to use L4 vertebra to represent \'cortical bone\' selected.')
+        if (94 in valid_labels):
+            ogo.message('[WARNING] Label 94 \'cortical bone\' is already defined.')
+            ogo.message('          Label 94 will be overridden by L4 bone.')
+        if (7 not in labels_found):
+            os.sys.exit('[ERROR] Label 7 for L4 cannot be found.')
+            
+        ogo.message('Adding label \'cortical bone\' by sampling L4 vertebra.')
+        valid_labels.append(94)
+        valid_labels.sort()
+  
+    # Excludes any labels for internal calibration, otherwise all available labels are used
     if excludeLabels:
         ogo.message('Excluding:')
         for idx,label in enumerate(excludeLabels):
@@ -491,44 +504,70 @@ def internal(input_image,input_mask,output_image,excludeLabels,overwrite,func):
     for idx,label in enumerate(valid_labels):
         ogo.message('  {:>16s} = {:d}'.format(valid_labels_dict.get(label),label))
 
-    if len(valid_labels)<3:
-        os.sys.exit('[ERROR] A minimum of three samples are needed for internal calibration.')
-    
+    if len(valid_labels)<2:
+        os.sys.exit('[ERROR] A minimum of two samples are needed for internal calibration.')
+    if len(valid_labels)==2:
+        ogo.message('[WARNING] Using two samples for internal calibration may result in errors.')
     
     # Gather the image and mask
     image_array = vtk_to_numpy(reader_image.GetOutput().GetPointData().GetScalars())
     mask_array = vtk_to_numpy(reader_mask.GetOutput().GetPointData().GetScalars())
     
-    # Calculate the mean and SD of each phantom rod in the image
+    # Calculate the mean and SD of each sample in the image
     ogo.message('Extracting sample calibration data from image.')
     ogo.message('  {:>22s} {:>8s} {:>8s} {:>8s}'.format(' ','Mean','StdDev','#Voxels'))
     sample_HU = []
     
     voxel_warning = False
     voxel_warning_thres = 100 # Minimum number of voxels
-    std_warning = False
-    std_warning_thres = 100 # Maximum stdev
+    stdev_warning = False
+    stdev_warning_thres = 100 # Maximum stdev
     
     for idx,label in enumerate(valid_labels):
-        #rod_name = rod_names[rod]
-        sample_mean = np.mean(image_array[mask_array == label])
-        sample_std = np.std(image_array[mask_array == label])
-        sample_count = len(image_array[mask_array == label])
+        if (label != 94):
+            sample_mean = np.mean(image_array[mask_array == label])
+            sample_std = np.std(image_array[mask_array == label])
+            sample_count = len(image_array[mask_array == label])
+        else:
+            bone_mask = ogo.maskThreshold(reader_mask.GetOutput(), 7) # 7 is L4
+            bone_VOI = ogo.applyMask(reader_image.GetOutput(), bone_mask)
+            [sample_mean, sample_std, sample_count] = ogo.get_cortical_bone(bone_VOI)
+
         if (sample_count < voxel_warning_thres):
             voxel_warning = True
-        if (sample_std > std_warning_thres):
-            std_warning = True
+        if (sample_std > stdev_warning_thres):
+            stdev_warning = True
         ogo.message('  {:>22s} {:8.3f} {:8.3f} {:8d}'.format(valid_labels_dict.get(label)+' ('+str(label)+'):',sample_mean,sample_std,sample_count)) # Report mean, SD, # voxels
         sample_HU.append(sample_mean)
-
+    
     ogo.message("  {:>16s} = ".format('Image [HU]')+'['+', '.join("{:8.3f}".format(i) for i in sample_HU)+"]")    
     if (voxel_warning):
         ogo.message('[WARNING] At least one sample has less than {} voxels. Caution!'.format(voxel_warning_thres))
-    if (std_warning):
-        ogo.message('[WARNING] At least one sample SD greater than {:.2f}. Caution!'.format(std_warning_thres))
-            
+    if (stdev_warning):
+        ogo.message('[WARNING] At least one sample SD greater than {:.2f}. Caution!'.format(stdev_warning_thres))
+    
+    calib = InternalCalibration(
+        adipose_hu=sample_HU[0],
+        air_hu=sample_HU[1],
+        blood_hu=sample_HU[2],
+        bone_hu=sample_HU[3],
+        muscle_hu=sample_HU[4]
+    )
+    calib.fit()
+    voxel_volume = np.prod(reader_image.GetOutput().GetSpacing())
+    print('voxel_volume = {}'.format(voxel_volume))
+    
+    print(calib._effective_energy)
+    print(calib._max_r2)
+
+    print(calib._adipose_mass_attenuation)
+    print(calib._air_mass_attenuation)
+    print(calib._blood_mass_attenuation)
+    print(calib._bone_mass_attenuation)
+    print(calib._muscle_mass_attenuation)
+    
     #print(mat.adipose_table)
-    print(lb.master_labels_dict)
+    #print(lb.master_labels_dict)
     
     ogo.message('Done internal calibration.')
     
@@ -613,6 +652,41 @@ ogoImageCalibration internal \
   /Users/skboyd/Desktop/ML/test/test.nii \
   --overwrite
 
+
+
+    There is some nuance to performing density calibration with a Mindways
+    phantom. The reason for this is that the material (|K2HPO4|) is
+    dissolved in water. This creates a slightly different calibration equation
+    because the content of water must be controled for.
+    The calibration steps are as follows. First, the densities of water and of
+    |K2HPO4| must be known in the phantom rods. These can be taken from
+    the certificate of calibration provided with your phantom and is different
+    for each phantom.
+    Then, the equation of best fit to the Hounsfield units of each rod:
+    .. math::
+        \\mu_{ROI} = \\rho_{water} + \\sigma_{ref} \cdot \\rho_{K_2HPO_4} +
+            \\beta_{ref}
+    The coefficient of correlation return is of this equation.
+    Next, there is a conversion from the water-dissolved equation to
+    traditional density measures.
+    .. math::
+        \\sigma_{CT} = \\sigma_{ref} - 0.2174
+    .. math::
+        \\beta_{CT} = \\beta_{ref} + 999.6
+    Finally, Hounsfield units and K2HPO4 equivalent density are related by the
+    following equation:
+    .. math::
+        \\mu_{ROI} = \\sigma_{CT} \cdot \\rho_{K_2HPO_4} + \\beta_{CT}
+    In the calibration framework presented in Ogo, we want to solve the
+    equation for :math:`\\rho_{K_2HPO_4}` which gives the parameters in
+    standard calibration of:
+    .. math::
+        m = \\frac{1}{\\sigma_{CT}}
+    .. math::
+        b = \\frac{- \\beta_{CT}}{\\sigma_{CT}}
+    .. |K2HPO4| replace:: K\ :sub:`2`\ HPO\ :sub:`4`
+    [1] QCT PRO User Guide, Mindways Software, Inc. v5.0, rev 20110801
+
 '''
 
     # Setup argument parsing
@@ -640,6 +714,7 @@ ogoImageCalibration internal \
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('--excludeLabels', type=int, nargs='*', default=[], metavar='ID', help='Labels to be excluded from internal calibration; space separated (e.g. 93 94)')
+    parser_internal.add_argument('--useL4', action='store_true', help='Uses a bone (typically L4) if a cortical bone lab (#94) is not defined.')
     parser_internal.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     parser_internal.set_defaults(func=internal)
     

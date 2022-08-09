@@ -18,6 +18,7 @@ from datetime import date
 from collections import OrderedDict
 from ogo.util.echo_arguments import echo_arguments
 import ogo.cli.Helper as ogo
+import ogo.dat.OgoMasterLabels as lb
 from vtk.util.numpy_support import vtk_to_numpy
 
 # Start Script
@@ -27,7 +28,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
         ogo.message("Start of Script...")
 
     # Master list of labels
-    labelsDict = ogo.masterLabels()
+    labelsDict = lb.labels_dict
     
     # Check if output exists and should overwrite (if not None)
     if output_filename:
@@ -91,11 +92,12 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
             print('ERROR: Labels out of range. Must be 0-255.')
             print('       Invalid label is {:d}.'.format(labels[idx]))
             os.sys.exit()
-        if (str(labels[idx]) not in labelsDict):
+#        if (str(labels[idx]) not in labelsDict):
+        if (labels[idx] not in labelsDict):
             print("ERROR: Label {:d} does not exist in master list of labels.".format(labels[idx]))
             os.sys.exit()
         if output_filename:
-            ogo.message('!> label {:3d} {:12s} --> {:d} voxels'.format(labels[idx],labelsDict[str(labels[idx])],np.count_nonzero(array == labels[idx])))
+            ogo.message('!> label {:3d} {:12s} --> {:d} voxels'.format(labels[idx],labelsDict[labels[idx]]['LABEL'],np.count_nonzero(array == labels[idx])))
     
     parameters_dict = OrderedDict()
     
@@ -119,7 +121,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
         parameters_dict['Mask'] = os.path.basename(mask_filename)
         #parameters_dict['MaskDir'] = os.path.dirname(mask_filename)
         parameters_dict['Label'] = lab
-        parameters_dict['LabelDesc'] = labelsDict[str(labels[idx])]
+        parameters_dict['LabelDesc'] = labelsDict[lab]['LABEL']
         
         parameters_dict['Integral BMD [mg/cc]'] = bmd_outcomes['Integral BMD [mg/cc]']
         parameters_dict['Integral BMC [mg]'] = bmd_outcomes['Integral BMC [mg]']

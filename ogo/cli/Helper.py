@@ -487,6 +487,39 @@ def bmd_K2hpo4ToAsh(vtk_image):
     calibrated_image.Update()
     return calibrated_image.GetOutput()
 
+    """Returns the cortical bone by assuming that the top percentile in the
+    bone image must be cortical"""
+def get_cortical_bone(vtk_image):
+    sample_mean = 0
+    sample_std = 0
+    sample_count = 0
+    
+    #histogram(vtk_image,128)
+    array = vtk_to_numpy(vtk_image.GetPointData().GetScalars()).ravel()
+    
+    # We have two possible methods. One uses the concept of taking the top
+    # percentile. The other takes the top N voxel values. 
+    
+    if (False): # Percentile method
+        target_percentile = 99.999
+        rslt = np.percentile(array,target_percentile)
+        print('The {}th percentile is {}'.format(target_percentile,rslt))
+        sample_mean = rslt
+        
+    if (True): # Top voxels method
+        sorted_index_array = np.argsort(array)
+        sorted_array = array[sorted_index_array]
+        n = 899 # number of top voxels
+        offset = 50 # voxels above offset in calculation
+        rslt = sorted_array[-n-offset : -offset]
+  
+        #print("{} largest value:".format(n),rslt)
+        sample_mean = np.mean(rslt)
+        sample_std = np.std(rslt)
+        sample_count = len(rslt)
+
+    return [sample_mean, sample_std, sample_count]
+    
 def bmd_metrics(vtk_image):
     """Computes the BMD metrics for the input vtk image. VTK image should be the isolated
     bone VOI (from applyMask). First, converts to numpy. Analysis performed in Numpy. The

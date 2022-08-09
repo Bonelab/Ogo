@@ -71,8 +71,8 @@ Optionally prints a 128 or 16 palette colormap.
 '''
     epilog='''
 USAGE: 
-ogoPrintLabels --print labels >> ogo-master-labels.txt
-ogoPrintLabels --print colors16
+ogoPrintLabels --echo labels >> ogo-master-labels.txt
+ogoPrintLabels --echo colors16
 '''
 
     # Setup argument parsing
