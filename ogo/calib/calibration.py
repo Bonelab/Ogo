@@ -66,3 +66,8 @@ class Calibration(ABC):
         '''Internal abstract method for making inverse predictions from a \
         model'''
         raise NotImplementedError('Calibration is an abstract class')
+
+    @abstractmethod
+    def get_dict(self):
+        '''Return a dictionary of calibration information'''
+        raise NotImplementedError('Calibration is an abstract class')
