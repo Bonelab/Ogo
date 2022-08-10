@@ -17,7 +17,7 @@ import time
 from datetime import date
 from collections import OrderedDict
 from ogo.util.echo_arguments import echo_arguments
-import ogo.cli.Helper as ogo
+import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
 from vtk.util.numpy_support import vtk_to_numpy
 
@@ -123,10 +123,10 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
         parameters_dict['Label'] = lab
         parameters_dict['LabelDesc'] = labelsDict[lab]['LABEL']
         
-        parameters_dict['Integral BMD [mg/cc]'] = bmd_outcomes['Integral BMD [mg/cc]']
-        parameters_dict['Integral BMC [mg]'] = bmd_outcomes['Integral BMC [mg]']
-        parameters_dict['Bone Volume [mm^3]'] = bmd_outcomes['Bone Volume [mm^3]']
-        parameters_dict['Bone Volume [cm^3]'] = bmd_outcomes['Bone Volume [cm^3]']
+        parameters_dict['Integral BMD [mg/cc]'] = '{:.3f}'.format(bmd_outcomes['Integral BMD [mg/cc]'])
+        parameters_dict['Integral BMC [mg]'] = '{:.3f}'.format(bmd_outcomes['Integral BMC [mg]'])
+        parameters_dict['Bone Volume [mm^3]'] = '{:.3f}'.format(bmd_outcomes['Bone Volume [mm^3]'])
+        parameters_dict['Bone Volume [cm^3]'] = '{:.3f}'.format(bmd_outcomes['Bone Volume [cm^3]'])
             
         if output_filename:
             if (idx==0 and not noheader):
@@ -152,35 +152,24 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
 
 def main():
     description = '''
-This script computes BMD by applying bone mask to the calibrated input image. Several
-bones (i.e., multiple labels) can be defined in one mask file.
+This script computes BMD by applying a mask to the calibrated input image. 
+Multiple labels representing different bones in the mask image can be assessed
+at once. However, if only a subset of labels are needed to be analysed they
+should be defined (see example calls).
 
-Results are written to a text file or output to screen for redirect.
+If no output text file is defined then results are output to the screen.
 
-Valid input and output file formats include: 
-.nii, .nii.gz
-
-Expects a calibrated input image and a mask image with at least one label. Typical
-calibrated input is _K2HPO4.nii and a typical mask is _MASK.nii.
-
-FOR TESTING ONLY:
-ogoAnalyzeBMD \
-/Users/skboyd/Library/CloudStorage/OneDrive-UniversityofCalgary/Normative/ogo_data/Test_QCT_IntCalib.nii \
-/Users/skboyd/Library/CloudStorage/OneDrive-UniversityofCalgary/Normative/ogo_data/Test_QCT_IntCalib_CORR.nii.gz --output_filename output.txt --labels 7 8 9 10
+WARNING: If your input image is not calibrated then the results here will be 
+incorrect. There is no calibration done as part of this application.
 
 '''
     epilog='''
-USAGE: 
-# Redirect screen output to file:
-ogoAnalyzeBMD Test_QCT_IntCalib.nii Test_QCT_IntCalib_CORR.nii.gz >> output.txt
+Example calls:
 
-# Write to specified file:
-ogoAnalyzeBMD Test_QCT_IntCalib.nii Test_QCT_IntCalib_CORR.nii.gz --output_filename output.txt
-
-# Specify specific labels for L1 ot L4 to analyze:
-ogoAnalyzeBMD Test_QCT_IntCalib.nii Test_QCT_IntCalib_CORR.nii.gz --output_filename output.txt --labels 7 8 9 10
-
-
+ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz
+ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz >> results.txt
+ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz --output_filename output.txt
+ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz --labels 7 8 9 10
 '''
 
     # Setup argument parsing
@@ -193,7 +182,7 @@ ogoAnalyzeBMD Test_QCT_IntCalib.nii Test_QCT_IntCalib_CORR.nii.gz --output_filen
     
     parser.add_argument('image_filename', help='Input image file (*.nii, *.nii.gz)')
     parser.add_argument('mask_filename', help='Input image mask file (*.nii, *.nii.gz)')
-    parser.add_argument('--labels', type=int, nargs='*', default=[0], metavar='ID', help='Specify input labels; space separated (e.g. 1 2 3) (Default: report all available)')
+    parser.add_argument('--labels', type=int, nargs='*', default=[0], metavar='ID', help='Specify list of labels; space separated (e.g. 1 2 3) (Default: report all available)')
     parser.add_argument('--output_filename', default=None, metavar='TEXTFILE', help='Output file name (*.txt) (Default: dump to screen)')
     parser.add_argument('--noheader', action='store_true', help='Suppress printing header (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')

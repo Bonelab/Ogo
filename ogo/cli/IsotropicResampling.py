@@ -11,7 +11,7 @@ import os
 import SimpleITK as sitk
 import numpy as np
 from ogo.util.echo_arguments import echo_arguments
-import ogo.cli.Helper as ogo
+import ogo.util.Helper as ogo
 
 def IsotropicResampling(input_filename, output_filename, iso_resolution, overwrite=False):
 
@@ -84,21 +84,12 @@ def IsotropicResampling(input_filename, output_filename, iso_resolution, overwri
 def main():
     # Setup description
     description='''
-Utility to resample a CT image to an isotropic resolution.
-It resamples using BSpline interpolation.
-
-Valid input and output file formats include: 
-.nii, .nii.gz
-
-Currently only accepts NIFTI file formats as input and output.
+Utility to resample a CT image to an isotropic resolution. It resamples using 
+BSpline interpolation.
 '''
     epilog='''
-USAGE: 
-ogoIsotropicResampling Test_QCT_IntCalib.nii Test_QCT_IntCalib_ISO.nii --overwrite
-
-ogoIsotropicResampling /Users/skboyd/Library/CloudStorage/OneDrive-UniversityofCalgary/Normative/ogo_data/Test_QCT_IntCalib.nii \
-                       /Users/skboyd/Desktop/Test_QCT_IntCalib_ISO.nii \
-                       --overwrite
+Example call: 
+ogoIsotropicResampling input.nii output.nii --iso_resolution 1.0
 '''
 
     # Setup argument parsing

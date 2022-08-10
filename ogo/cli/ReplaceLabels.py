@@ -12,7 +12,7 @@ import vtk
 import numpy as np
 from vtk.util.numpy_support import vtk_to_numpy
 from ogo.util.echo_arguments import echo_arguments
-import ogo.cli.Helper as ogo
+import ogo.util.Helper as ogo
 
 def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, overwrite=False):
 
@@ -108,17 +108,16 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ov
 def main():
     # Setup description
     description='''
-Utility to read segmented image and replace specified labels with new labels.
-It can be used to remove labels from an image (replace with background of 0) or 
-to change a label. It works through the list provided sequentially.
-
-Valid file formats are NIFTII: .nii, .nii.gz
+Utility to read a segmented image and replace existing labels with new labels.
+It can be used to remove labels from an image (e.g., replace with background
+of 0) or to change a label. It will replace labels in the order they are 
+listed, so be cautious about overwriting labels.
 
 Valid input and output labels should be within 0 - 255 (inclusive)
 '''
     epilog='''
-USAGE: 
-ogoReplaceLabels input.nii.gz output.nii.gz --inputLabels 4 5 6 --outputLabels 0 0 7
+Example call: 
+ogoReplaceLabels input.nii.gz output.nii.gz --inputLabels 4 5 --outputLabels 0 7
 '''
 
     # Setup argument parsing

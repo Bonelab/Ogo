@@ -10,7 +10,7 @@ import argparse
 import os
 import vtk
 from ogo.util.echo_arguments import echo_arguments
-import ogo.cli.Helper as ogo
+import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
 
 def PrintLabels(echo):
@@ -64,13 +64,24 @@ def PrintLabels(echo):
 def main():
     # Setup description
     description='''
-Prints the labels used for ITK-Snap for identifying bones, tissues, and 
-calibration rods.
+Prints labels that are the standard for all Ogo applications to identify 
+bones, tissues, and calibration rodes. 
 
-Optionally prints a 128 or 16 palette colormap.
+The master list of labels is kept in OgoMasterLabels.py. Any changes or 
+additions should be made in that document. This application reads that 
+document to produce output. 
+
+A text file created by the output from this application can be read in by 
+ITK-Snap:
+
+[Segmentation] --> [Import Label Descriptions]
+
+This application also contains information about 16 and 128 colour maps 
+that can be useful if/when updating OgoMasterLabels.py.
+
 '''
     epilog='''
-USAGE: 
+Example calls: 
 ogoPrintLabels --echo labels >> ogo-master-labels.txt
 ogoPrintLabels --echo colors16
 '''

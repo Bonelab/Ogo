@@ -223,7 +223,7 @@ trailing "_0000". So, for above files they would be referred to as:
 
     epilog='''
 Prior to running this program, it is expected the appropriate directories, 
-file naming, and pre-processing has been completed. Use a script to aid in 
+file naming, and pre-processing are prepared. Use a script to aid in 
 moving raw data into this format.
 
 More details can be found in the publication:
@@ -233,7 +233,15 @@ method for deep learning-based biomedical image segmentation." Nat Methods
 
 And see their GIT repository:
 https://github.com/MIC-DKFZ/nnUNet
- 
+
+Example call:
+ogoCreateDatasetJSON /raw_data_base/nnUNet_raw_data/Task501_Spine \\
+    --name        Task501_Spine \\
+    --description "KUB CT abdomen scans, spine only (L1-L5, sacrum)" \\
+    --reference   "McCaig Institute, University of Calgary" \\
+    --license     "CC-BY-SA 4.0" \\
+    --overwrite
+
 '''
 
     # Setup argument parsing
