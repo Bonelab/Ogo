@@ -13,9 +13,9 @@ import numpy as np
 import math
 from vtk.util.numpy_support import vtk_to_numpy
 from ogo.util.echo_arguments import echo_arguments
-import ogo.cli.Helper as ogo
+import ogo.util.Helper as ogo
     
-def ImageExam(input_filename, header, histo, bins):
+def ImageExam(input_filename, header, histogram, bins):
 
     # Check valid number of histogram bins
     if (bins<1):
@@ -46,7 +46,7 @@ def ImageExam(input_filename, header, histo, bins):
       ogo.message('Header from NIFTII file')
       ogo.infoNIFTII(reader)
 
-    if (histo):
+    if (histogram):
       ogo.message('Histogram of NIFTII image data')
       ogo.histogram(reader.GetOutput(),bins)
     
@@ -55,19 +55,25 @@ def ImageExam(input_filename, header, histo, bins):
 def main():
     # Setup description
     description='''
-Utility to read a NIFTII file and report characteristics such as image type, dimensions,
-histograms, and more.
+Utility to read a NIFTI file and report characteristics such as image type, 
+dimensions, histograms, and header.
+'''
+    epilog='''
+Example calls: 
+ogoImageExam input.nii.gz
+ogoImageExam --histogram input.nii.gz
 '''
 
     # Setup argument parsing
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
         prog="ogoImageExam",
-        description=description
+        description=description,
+        epilog=epilog
     )
     parser.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
     parser.add_argument('--header', action='store_true', help='Show NIFTII header (default: %(default)s)')
-    parser.add_argument('--histo', action='store_true', help='Show histogram (default: %(default)s)')
+    parser.add_argument('--histogram', action='store_true', help='Show histogram (default: %(default)s)')
     parser.add_argument('--bins', type=int, default=128, metavar='#', help='Number of bins in histogram (default: %(default)s)')
 
     # Parse and display
