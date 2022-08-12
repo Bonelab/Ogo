@@ -487,33 +487,33 @@ def bmd_K2hpo4ToAsh(vtk_image):
     calibrated_image.Update()
     return calibrated_image.GetOutput()
 
-    """Returns the cortical bone by assuming that the top percentile in the
-    bone image must be cortical"""
-def get_cortical_bone(vtk_image):
+    """Returns the effective cortical bone density given an image
+    of a complete bone (usually L4 vertebra). Two methods are proposed:
+    1. Take the top 99.999th percentile.
+    2. Take the average of the top N voxels (offset to avoid outliers)
+    """
+def get_cortical_bone(array):
     sample_mean = 0
     sample_std = 0
     sample_count = 0
     
     #histogram(vtk_image,128)
-    array = vtk_to_numpy(vtk_image.GetPointData().GetScalars()).ravel()
+    #array = vtk_to_numpy(vtk_image.GetPointData().GetScalars()).ravel()
     
-    # We have two possible methods. One uses the concept of taking the top
-    # percentile. The other takes the top N voxel values. 
-    
-    if (False): # Percentile method
-        target_percentile = 99.999
+    # Method 1: Percentile
+    if (False):
+        target_percentile = 99.999 # result is very sensitive to this number
         rslt = np.percentile(array,target_percentile)
-        print('The {}th percentile is {}'.format(target_percentile,rslt))
         sample_mean = rslt
-        
-    if (True): # Top voxels method
+    
+    # Method 2: Top voxels
+    if (True):
         sorted_index_array = np.argsort(array)
         sorted_array = array[sorted_index_array]
-        n = 899 # number of top voxels
-        offset = 50 # voxels above offset in calculation
+        n = 899             # number of top voxels
+        offset = 50         # voxels above offset in calculation
         rslt = sorted_array[-n-offset : -offset]
   
-        #print("{} largest value:".format(n),rslt)
         sample_mean = np.mean(rslt)
         sample_std = np.std(rslt)
         sample_count = len(rslt)

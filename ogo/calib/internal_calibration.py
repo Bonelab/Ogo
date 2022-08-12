@@ -1,8 +1,7 @@
 '''Internal density calibration'''
 
 from .standard_calibration import StandardCalibration
-from ogo.dat.ref_mass_attenuation_tables import mass_attenuation_tables
-#from .mass_attenuation_tables import mass_attenuation_tables
+from ogo.dat.MassAttenuationTables import mass_attenuation_tables
 import pandas as pd
 import numpy as np
 import scipy.interpolate as interp
