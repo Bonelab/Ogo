@@ -45,7 +45,7 @@ from ogo.util.echo_arguments import echo_arguments
 from ogo.util.write_txt import write_txt
 
 # PHANTOM CALIBARATION ------------------------------------------------------------------
-def phantom(input_image,input_mask,output_image,calibration_file_name,async_image,phantom,overwrite,func):
+def phantom(input_image,input_mask,output_image,calib_file_name,async_image,phantom,overwrite,func):
     ogo.message('Starting phantom based calibration.')
 
     # Check if output exists and should overwrite
@@ -235,11 +235,11 @@ def phantom(input_image,input_mask,output_image,calibration_file_name,async_imag
     writer.Update()
     
     # Write text file
-    if calibration_file_name:
+    if calib_file_name:
         ogo.message('Saving calibration parameters to file:')
-        ogo.message('      \"{}\"'.format(calibration_file_name))
+        ogo.message('      \"{}\"'.format(calib_file_name))
         
-        txt_file = open(calibration_file_name, "w")
+        txt_file = open(calib_file_name, "w")
         
         txt_file.write('Phantom-based calibration:\n')
         txt_file.write('  {:>14s} = {:s}\n'.format('ID',os.path.basename(output_image)))
@@ -251,7 +251,7 @@ def phantom(input_image,input_mask,output_image,calibration_file_name,async_imag
         txt_file.write('  {:>14s} = {:s}\n'.format('input image',input_image))
         txt_file.write('  {:>14s} = {:s}\n'.format('input mask',input_mask))
         txt_file.write('  {:>14s} = {:s}\n'.format('output image',output_image))
-        txt_file.write('  {:>14s} = {:s}\n'.format('calibration file name',calibration_file_name))
+        txt_file.write('  {:>14s} = {:s}\n'.format('calibration file name',calib_file_name))
         if async_image:
             txt_file.write('  {:>14s} = {:s}\n'.format('async image',async_image))
         else:
@@ -280,7 +280,7 @@ def phantom(input_image,input_mask,output_image,calibration_file_name,async_imag
     
     
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image,input_mask,output_image,calibration_file_name,excludeLabels,useL4,overwrite,func):
+def internal(input_image,input_mask,output_image,calib_file_name,useLabels,useL4,overwrite,func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -294,12 +294,8 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
     if not os.path.isfile(input_image):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_image))
 
-    if input_image.lower().endswith('.nii'):
-        reader_image = vtk.vtkNIFTIImageReader()
-    elif input_image.lower().endswith('.nii.gz'):
-        reader_image = vtk.vtkNIFTIImageReader()
-    else:
-        os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(input_image))
+    if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_image))
 
     ogo.message('Reading input CT image to be calibrated:')
     ogo.message('      \"{}\"'.format(input_image))
@@ -309,12 +305,8 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
     if not os.path.isfile(input_mask):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_mask))
 
-    if input_mask.lower().endswith('.nii'):
-        reader_mask = vtk.vtkNIFTIImageReader()
-    elif input_mask.lower().endswith('.nii.gz'):
-        reader_mask = vtk.vtkNIFTIImageReader()
-    else:
-        os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(input_mask))
+    if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_mask))
 
     ogo.message('Reading input mask used for calibration:')
     ogo.message('      \"{}\"'.format(input_mask))
@@ -325,7 +317,7 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
     for k in (91,92,93,94,95): # if adding a new label, append the ID to the list here
         labels[lb.labels_dict[k].get('LABEL')] = k
 
-    # Determine number of labels
+    # Search for labels in mask image
     ogo.message('Computing calibration data from image.')
     filt = sitk.LabelStatisticsImageFilter()
     filt.Execute(ct, mask)
@@ -337,12 +329,12 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
     for k in np.sort(label_list):
         ogo.message(' {:>22s}'.format(lb.labels_dict[k]['LABEL']+' ('+str(k)+')'))
 
-    # Calculate the values for each label
+    # Calculate the values for each of the five possible valid labels (returns 0 if label unavailable)
     labels_data = OrderedDict()
     for label, value in labels.items():
 
         if not filt.HasLabel(value):
-            ogo.message('Could not find values for label \"{}\" ({})'.format(label, value))
+            ogo.message('[WARNING] Could not find values for label \"{}\" ({})'.format(label, value))
 
         labels_data[label] = {'ID': value, 'mean': filt.GetMean(value), 'stdev': filt.GetVariance(value), 'count': filt.GetCount(value), 'marker': ''}
 
@@ -350,8 +342,7 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
             ogo.message('Calculating \"{}\" ({}) from L4'.format(label, value))
             L4_label = 7
             if (not filt.HasLabel(L4_label)):
-                ogo.message('[ERROR] No L4 found in image.')
-                exit()
+                os.sys.exit('[ERROR] No L4 found in image.')
             else:
                 bone = sitk.MaskImageFilter()
                 bone.SetMaskingValue(L4_label)
@@ -366,6 +357,28 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
         ogo.message('  {:>22s} {:8.3f} {:8.3f} {:8d} {:s}'.format(label+' ('+str(value)+'):',\
             labels_data[label]['mean'],labels_data[label]['stdev'],labels_data[label]['count'],labels_data[label]['marker'])) # Report mean, SD, # voxels
     
+    # Finalize the labels to be used (user may select subset)
+    labelList = []
+    if (useLabels): # User explicitly defines which labels to use
+        for labelID in useLabels:
+            if (labelID not in labels.values()):
+                os.sys.exit('[ERROR] Invalid label selected: ({})'.format(labelID))
+            labelList.append(labelID)
+    else:
+        labelList = [91, 92, 93, 94, 95]
+    
+    if (len(labelList)<3):
+        os.sys.exit('[ERROR] A minimum of three sample tissues needed.')
+        
+    ogo.message('')
+    ogo.message('Labels used for internal calibration:')
+    for label,value in labels.items():
+        if (value in labelList):
+            ogo.message(' {:>22s}'.format(label+' ('+str(value)+')'))
+            if (labels_data[label]['mean'] == 0.0):
+                os.sys.exit('[ERROR] Invalid HU for {} ({}). Explicitly define labels to use \nor define --useL4.'.format(label,value))
+    ogo.message('')
+
     # Perform the internal calibration fit
     ogo.message('Computing calibration parameters.')
     calib = InternalCalibration(
@@ -373,7 +386,8 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
         air_hu=labels_data['Air']['mean'],
         blood_hu=labels_data['Blood']['mean'],
         bone_hu=labels_data['Cortical Bone']['mean'],
-        muscle_hu=labels_data['Skeletal Muscle']['mean']
+        muscle_hu=labels_data['Skeletal Muscle']['mean'],
+        label_list=labelList
     )
     calib.fit()
 
@@ -422,11 +436,11 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
     #print('!> {:30s} = {}'.format('QFormMatrix',reader.GetQFormMatrix()))
     #print('!> {:30s} = {}'.format('NIFTIHeader',reader.GetNIFTIHeader()))
     
-    if calibration_file_name:
+    if calib_file_name:
         ogo.message('Saving calibration parameters to file:')
-        ogo.message('      \"{}\"'.format(calibration_file_name))
+        ogo.message('      \"{}\"'.format(calib_file_name))
         
-        txt_file = open(calibration_file_name, "w")
+        txt_file = open(calib_file_name, "w")
         
         txt_file.write('Internal calibration:\n')
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
@@ -440,7 +454,7 @@ def internal(input_image,input_mask,output_image,calibration_file_name,excludeLa
         txt_file.write('  {:>27s} {:s}\n'.format('input image:',input_image))
         txt_file.write('  {:>27s} {:s}\n'.format('input mask:',input_mask))
         txt_file.write('  {:>27s} {:s}\n'.format('output image:',output_image))
-        txt_file.write('  {:>27s} {:s}\n'.format('calibration file name:',calibration_file_name))
+        txt_file.write('  {:>27s} {:s}\n'.format('calibration file name:',calib_file_name))
         txt_file.write('\n')
         txt_file.write('Calibration parameters:\n')
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
@@ -535,14 +549,16 @@ ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
 ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
                             image_qct.nii.gz --async_image asynch_image.nii.gz 
 ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
-                            image_qct.nii.gz  
+                            image_qct.nii.gz --useL4
+ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
+                            image_qct.nii.gz --useLabels 91 92 93 95
 
 ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/kub.nii.gz \
   /Users/skboyd/Desktop/ML/test/kub_mask.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii \
   --phantom 'Mindways Model 3 CT' \
-  --calibration_file_name /Users/skboyd/Desktop/ML/test/test.txt \
+  --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
   --overwrite
     
 ogoImageCalibration phantom \
@@ -550,7 +566,7 @@ ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/async_mask_mindways.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii \
   --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz \
-  --calibration_file_name /Users/skboyd/Desktop/ML/test/test.txt \
+  --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
   --phantom 'Mindways Model 3 CT' 
 
 ogoImageCalibration phantom \
@@ -558,14 +574,14 @@ ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/async_mask_bmas200.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii \
   --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz \
-  --calibration_file_name /Users/skboyd/Desktop/ML/test/test.txt \
+  --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
   --phantom 'B-MAS 200' 
 
 ogoImageCalibration internal \
   /Users/skboyd/Desktop/ML/test/retro.nii \
   /Users/skboyd/Desktop/ML/test/retro_mask.nii.gz \
   /Users/skboyd/Desktop/ML/test/test.nii \
-  --calibration_file_name /Users/skboyd/Desktop/ML/test/test.txt \
+  --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
   --overwrite --useL4
 
 '''
@@ -584,7 +600,7 @@ ogoImageCalibration internal \
     parser_phantom.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_phantom.add_argument('input_mask', help='Image mask of rods for input image or asynchronous image (*.nii, *.nii.gz)')
     parser_phantom.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
-    parser_phantom.add_argument('--calibration_file_name', help='Calibration results file (*.txt)')
+    parser_phantom.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_phantom.add_argument('--async_image', default='', metavar='IMAGE', help='Asynchronous image of phantom (*.nii, *.nii.gz)')
     parser_phantom.add_argument('--phantom', default='Mindways Model 3 CT', choices=['Mindways Model 3 CT','Mindways Model 3 QA','QRM-BDC 3-rod','QRM-BDC 6-rod','Image Analysis QCT-3D Plus','B-MAS 200'], help='Specify phantom used (default: %(default)s)')
     parser_phantom.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
@@ -595,9 +611,9 @@ ogoImageCalibration internal \
     parser_internal.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
-    parser_internal.add_argument('--calibration_file_name', help='Calibration results file (*.txt)')
-    parser_internal.add_argument('--excludeLabels', type=int, nargs='*', default=[], metavar='ID', help='Labels to be excluded from internal calibration; space separated (e.g. 93 94)')
-    parser_internal.add_argument('--useL4', action='store_true', help='Uses a bone (typically L4) if a cortical bone lab (#94) is not defined.')
+    parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
+    parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID', help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
+    parser_internal.add_argument('--useL4', action='store_true', help='Use when label 94 (cortical bone) is not available (it samples L4).')
     parser_internal.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     parser_internal.set_defaults(func=internal)
     
