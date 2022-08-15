@@ -23,13 +23,13 @@ class InternalCalibration(StandardCalibration):
 
     [1] Michalski, Andrew S., et al. "CT-based internal density calibration for opportunistic skeletal assessment using abdominal CT scans." Medical Engineering & Physics (2020).
 
-    [2] https://www.nist.gov/pml/x-ray-mass-attenuation-coefficients
+    [2] https://www.nist.gov/pml/x-ray-mass-attenuation-coefficientslabel_list
 
     [3] White DR, Wilson IJ, Griffith RV. Report 46. J Int Comm Radiat Units Meas 2016 os24:NP-NP. doi: 10.1093/jicru/os24.1.Report46
     '''  # noqa: W605, E501
 
     def __init__(self,
-                 adipose_hu=0, air_hu=0, blood_hu=0, bone_hu=0, muscle_hu=0):
+                 adipose_hu=0, air_hu=0, blood_hu=0, bone_hu=0, muscle_hu=0, label_list=[91,92,93,94,95]):
         super(InternalCalibration, self).__init__()
 
         # User input values
@@ -38,6 +38,8 @@ class InternalCalibration(StandardCalibration):
         self._blood_hu = blood_hu
         self._bone_hu = bone_hu
         self._muscle_hu = muscle_hu
+
+        self._label_list = label_list
 
         # Computed values
         self._effective_energy = 0
@@ -61,7 +63,7 @@ class InternalCalibration(StandardCalibration):
         self._hu_to_density_intercept = 0
 
         self._voxel_volume = 0
-
+        
     def predict(self, hu, voxel_volume):
         '''Internal calibration predict method
 
@@ -77,7 +79,7 @@ class InternalCalibration(StandardCalibration):
         if self._is_fit:
             return self._predict(hu, voxel_volume)
         else:
-            raise RuntimeError('Must fit before predict can be ran')
+            raise RuntimeError('Must fit before predict can be run.')
 
     def _predict(self, hu, voxel_volume):
         '''Internal calibration _predict method'''
@@ -128,6 +130,24 @@ class InternalCalibration(StandardCalibration):
         self._determine_hu_to_mass_attenuation()
         self._determine_hu_to_density()
 
+    def _subset(self,all_samples):
+        '''Returns only the samples will be employed in linear regressions.
+        '''
+
+        sample_subset = []
+        if 91 in self._label_list:
+            sample_subset.append(all_samples[0]) # adipose
+        if 92 in self._label_list:
+            sample_subset.append(all_samples[1]) # air
+        if 93 in self._label_list:
+            sample_subset.append(all_samples[2]) # blood
+        if 94 in self._label_list:
+            sample_subset.append(all_samples[3]) # bone
+        if 95 in self._label_list:
+            sample_subset.append(all_samples[4]) # muscle
+        
+        return(sample_subset)
+        
     def _interpolate_mass_attenuation(self):
         '''Interpolate the mass attenuation curves'''
         # Constants
@@ -159,22 +179,23 @@ class InternalCalibration(StandardCalibration):
         '''Determine scan effective energy'''
         def _get_mass_attenuation_at_index(idx):
             '''Return the mass attenuation array at a given index'''
-            return [
-                self._interpolate_tables['adipose_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
+            return [self._subset([
+                self._interpolate_tables['adipose_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501                 YYY
                 self._interpolate_tables['air_table'].loc[idx, 'Mass Attenuation [cm2/g]'],      # noqa: E501
                 self._interpolate_tables['blood_table'].loc[idx, 'Mass Attenuation [cm2/g]'],    # noqa: E501
                 self._interpolate_tables['bone_table'].loc[idx, 'Mass Attenuation [cm2/g]'],     # noqa: E501
-                self._interpolate_tables['muscle_table'].loc[idx, 'Mass Attenuation [cm2/g]'],   # noqa: E501
+                self._interpolate_tables['muscle_table'].loc[idx, 'Mass Attenuation [cm2/g]']    # noqa: E501
+                ])
             ]
 
         # Measured HU values
-        HU = [
-            self.adipose_hu,
+        HU = self._subset([
+            self.adipose_hu,                                                            # YYY
             self.air_hu,
             self.blood_hu,
             self.bone_hu,
             self.muscle_hu
-        ]
+        ])
 
         n = len(self._interpolate_tables['adipose_table'])
         max_index = -1
@@ -214,20 +235,21 @@ class InternalCalibration(StandardCalibration):
     def _determine_hu_to_mass_attenuation(self):
         '''Compute HU to mass attenuation relationship'''
         # Get values
-        HU = [
+        HU = self._subset([                                              # YYY
             self.adipose_hu,
             self.air_hu,
             self.blood_hu,
             self.bone_hu,
             self.muscle_hu
-        ]
-        attenuation = [
+        ])
+            
+        attenuation = self._subset([                                     # YYY
             self.adipose_mass_attenuation,
             self.air_mass_attenuation,
             self.blood_mass_attenuation,
             self.bone_mass_attenuation,
             self.muscle_mass_attenuation
-        ]
+        ])
 
         # Perform linear regression
         linreg = stats.linregress(HU, attenuation)
@@ -239,13 +261,13 @@ class InternalCalibration(StandardCalibration):
     def _determine_hu_to_density(self):
         '''Compute HU to density relationship'''
         # Get HU
-        HU = [
+        HU = self._subset([                                              # YYY
             self.adipose_hu,
             self.air_hu,
             self.blood_hu,
             self.bone_hu,
             self.muscle_hu
-        ]
+        ])
 
         # Convert to densities
         def _convert_value(hu, attenuation):
@@ -254,13 +276,13 @@ class InternalCalibration(StandardCalibration):
 
             return (hu/1000*water_attenuation*water_density + water_attenuation*water_density)/attenuation  # noqa: E501
 
-        densities = [
+        densities = self._subset([                                                                    # YYY
             _convert_value(self.adipose_hu, self.adipose_mass_attenuation),
             _convert_value(self.air_hu, self.air_mass_attenuation),
             _convert_value(self.blood_hu, self.blood_mass_attenuation),
             _convert_value(self.bone_hu, self.bone_mass_attenuation),
             _convert_value(self.muscle_hu, self.muscle_mass_attenuation)
-        ]
+        ])
 
         # Perform linear regression
         linreg = stats.linregress(HU, densities)
