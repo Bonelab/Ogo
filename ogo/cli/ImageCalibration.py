@@ -40,6 +40,8 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 import ogo.dat.MassAttenuationTables as mat
 import ogo.dat.OgoMasterLabels as lb
 from ogo.calib.internal_calibration import InternalCalibration
+from ogo.calib.mindways_calibration import MindwaysCalibration
+from ogo.calib.standard_calibration import StandardCalibration
 import ogo.util.Helper as ogo
 from ogo.util.echo_arguments import echo_arguments
 from ogo.util.write_txt import write_txt
@@ -59,51 +61,36 @@ def phantom(input_image,input_mask,output_image,calib_file_name,async_image,phan
     if not os.path.isfile(input_image):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_image))
 
-    if input_image.lower().endswith('.nii'):
-        reader_image = vtk.vtkNIFTIImageReader()
-    elif input_image.lower().endswith('.nii.gz'):
-        reader_image = vtk.vtkNIFTIImageReader()
-    else:
-        os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(input_image))
+    if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_image))
 
-    ogo.message('Reading input image to be calibrated...')
+    ogo.message('Reading input CT image to be calibrated:')
     ogo.message('      \"{}\"'.format(input_image))
-    reader_image.SetFileName(input_image)
-    reader_image.Update()
+    ct = sitk.ReadImage(input_image)
 
     # Read input mask
     if not os.path.isfile(input_mask):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_mask))
 
-    if input_mask.lower().endswith('.nii'):
-        reader_mask = vtk.vtkNIFTIImageReader()
-    elif input_mask.lower().endswith('.nii.gz'):
-        reader_mask = vtk.vtkNIFTIImageReader()
-    else:
-        os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(input_mask))
+    if not (input_mask.lower().endswith('.nii') or input_mask.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_mask))
 
-    ogo.message('Reading input mask used for calibration...')
+    ogo.message('Reading input mask used for calibration:')
     ogo.message('      \"{}\"'.format(input_mask))
-    reader_mask.SetFileName(input_mask)
-    reader_mask.Update()
-    
+    rods = sitk.ReadImage(input_mask)
+
     # Read asynchronous input image, if available
     if (async_image):
         if not os.path.isfile(async_image):
             os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(async_image))
-        if async_image.lower().endswith('.nii'):
-            reader_async = vtk.vtkNIFTIImageReader()
-        elif async_image.lower().endswith('.nii.gz'):
-            reader_async = vtk.vtkNIFTIImageReader()
-        else:
-            os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(async_image))
-        
+    
+        if not (async_image.lower().endswith('.nii') or async_image.lower().endswith('.nii.gz')):
+            os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(async_image))
+    
         ogo.message('Reading asynchronous image of phantom...')
         ogo.message('      \"{}\"'.format(async_image))
-        reader_async.SetFileName(async_image)
-        reader_async.Update()
-
-    if (async_image):
+        async_ct = sitk.ReadImage(async_image)
+    
         ogo.message('NOTE: Asynchronous calibration selected.')
         ogo.message('      Using mask file against asynchronous file:')
         ogo.message('      \"{}\"'.format(input_mask))
@@ -111,8 +98,7 @@ def phantom(input_image,input_mask,output_image,calib_file_name,async_image,phan
     
     # Get the correct reference calibration phantom
     phantom_dict = ogo.get_phantom(phantom)
-    #print("\n".join("{:33s} = {}".format(k,v) for k, v in phantom_dict.items()))
-    ogo.message('Calibration phantom selected is:')
+    ogo.message('Calibration phantom:')
     ogo.message('  {:>14s} = {:s}'.format('name',phantom_dict['name']))
     ogo.message('  {:>14s} = {:s}'.format('type',phantom_dict['type']))
     ogo.message('  {:>14s} = {:s}'.format('serial',phantom_dict['serial']))
@@ -123,156 +109,154 @@ def phantom(input_image,input_mask,output_image,calib_file_name,async_image,phan
     if phantom_dict['h2o_densities'][0] != None:
         ogo.message("  {:>14s} = ".format('h2o_densities')+'['+', '.join("{:8.3f}".format(i) for i in phantom_dict['h2o_densities'])+"]")
 
-    # Gather the image and mask
+    filt = sitk.LabelStatisticsImageFilter()
     if (async_image):
-        image_array = vtk_to_numpy(reader_async.GetOutput().GetPointData().GetScalars())
+        filt.Execute(async_ct, rods)
     else:
-        image_array = vtk_to_numpy(reader_image.GetOutput().GetPointData().GetScalars())
-    mask_array = vtk_to_numpy(reader_mask.GetOutput().GetPointData().GetScalars())
+        filt.Execute(ct, rods)
     
-    # Calculate the mean and SD of each phantom rod in the image
-    ogo.message("Extracting calibration data from image...")
+    all_labels = np.sort(filt.GetLabels())
+    #all_labels = all_labels[all_labels!=0] # remove zero label from list
+    n_labels = len(all_labels)
+    label_list = []
+    
+    ogo.message('Found {} labels in\n'
+                '               {}'.format(n_labels,input_mask))
+                
+    for label in all_labels:
+        ogo.message(' {:>14s} {}'.format('('+str(label)+')',lb.labels_dict[label]['LABEL']))
+        if label in phantom_dict['rod_labels']: # take only the labels for rods and ignore others
+            label_list.append(label)
+
+    if len(label_list)<2:
+        os.sys.exit('[ERROR] Need at least 2 rods to fit a function.\n'
+                    '        Found {} rods.'.format(len(label_list)))
+    
+    ogo.message('Determining mean intensities.')
+    ogo.message('Image HU for rods:')
     ogo.message("       {:>8s} {:>8s} {:>8s}".format('Mean','StdDev','#Voxels'))
-    rod_labels = phantom_dict['rod_labels']
-    rod_names = phantom_dict['rod_names']
-    phantom_HU = []
 
-    for rod in range(phantom_dict['number_rods']):
-        rod_label = rod_labels[rod]
-        if rod_label not in mask_array:
-            os.sys.exit('[ERROR] Mask image does not contain label \"{}\". Are you using the wrong mask?'.format(rod_label))
-        rod_name = rod_names[rod]
-        rod_mean = np.mean(image_array[mask_array == rod_label])
-        rod_std = np.std(image_array[mask_array == rod_label])
-        rod_count = len(image_array[mask_array == rod_label])
+    HU = []
+    for idx,label in enumerate(label_list):
+        rod_name = phantom_dict['rod_names'][idx]
+        rod_mean = filt.GetMean(int(label))
+        rod_std = filt.GetVariance(int(label))
+        rod_count = filt.GetCount(int(label))
         ogo.message('Rod {:s}: {:8.3f} {:8.3f} {:8d}'.format(rod_name,rod_mean,rod_std,rod_count)) # Report mean, SD, # voxels
-        phantom_HU.append(rod_mean)
+        HU.append(rod_mean)
         
-    ogo.message("  {:>14s} = ".format('Image [HU]')+'['+', '.join("{:8.3f}".format(i) for i in phantom_HU)+"]")
-
-    # Calculate slope and intercept
-    ogo.message('Calculating calibration slope and intercept.')
-    ogo.message('Calculating type is: \'{}\''.format(phantom_dict['type']))
-    if phantom_dict['type'] is 'k2hpo4':
-        x_values = phantom_dict['densities']
-        y_values = np.subtract(phantom_HU,phantom_dict['h2o_densities'])
-
-        regression_parameters = stats.linregress(x_values, y_values)
-        sigma_ct = regression_parameters[0] - 0.2174
-        beta_ct = regression_parameters[1] + 999.6
-        calibration_slope = 1/sigma_ct
-        calibration_yint = 1*beta_ct/sigma_ct
-        calibration_rvalue = regression_parameters[2]
-        calibration_stderr = regression_parameters[3]
-        ogo.message('  {:>14s} = {:8.6f}'.format('slope',calibration_slope))
-        ogo.message('  {:>14s} = {:8.6f}'.format('y-intercept',calibration_yint))
-        ogo.message('  {:>14s} = {:8.6f}'.format('r-value',calibration_rvalue))
-        ogo.message('  {:>14s} = {:8.6f}'.format('stderr',calibration_stderr))
-        # QCT PRO User Guide, Mindways Software, Inc. v5.0, rev 20110801
+    # Perform calibration
+    ogo.message('Fitting parameters:')
+    
+    if (phantom_dict['type'] == 'k2hpo4'):     # Mindways calibration (k2hpo4)
+        densities = phantom_dict['densities']
+        water = phantom_dict['h2o_densities']
         
-    elif phantom_dict['type'] is 'CHA':
-        x_values = phantom_HU
-        y_values = phantom_dict['densities']
+        if len(water) != len(densities) or len(water) != len(label_list):
+            os.sys.exit('[ERROR] Number of water, K2HPO4, and segmented labels are\n'
+                        '        not the same: {}, {}, and {}'.format(len(water), len(densities), len(label_list)))
+                        
+        ogo.message('  {:>14s} = '.format('Water')+'['+', '.join("{:8.3f}".format(i) for i in water)+"]")
+        ogo.message('  {:>14s} = '.format('K2HPO4')+'['+', '.join("{:8.3f}".format(i) for i in densities)+"]")
+        ogo.message('  {:>14s} = '.format('HU')+'['+', '.join("{:8.3f}".format(i) for i in HU)+"]")
+    
+        calibrator = MindwaysCalibration()
+        calibrator.fit(HU, densities, water)
+    
+    else:                                      # Calcium hydroxyapetite calibration (CHA)
+        densities = phantom_dict['densities']
+        
+        if len(densities) != len(label_list):
+            os.sys.exit('[ERROR] Number of CHA and segmented labels are\n'
+                        '        not the same: {}, {}, and {}'.format(len(densities), len(label_list)))
+                        
+        ogo.message('  {:>14s} = '.format('K2HPO4')+'['+', '.join("{:8.3f}".format(i) for i in densities)+"]")
+        ogo.message('  {:>14s} = '.format('HU')+'['+', '.join("{:8.3f}".format(i) for i in HU)+"]")
+    
+        calibrator = StandardCalibration()
+        calibrator.fit(HU, densities)
 
-        regression_parameters = stats.linregress(x_values, y_values)
-        calibration_slope = regression_parameters[0]
-        calibration_yint = regression_parameters[1]
-        calibration_rvalue = regression_parameters[2]
-        calibration_stderr = regression_parameters[3]
-        ogo.message('  {:>14s} = {:8.6f}'.format('slope',calibration_slope))
-        ogo.message('  {:>14s} = {:8.6f}'.format('y-intercept',calibration_yint))
-        ogo.message('  {:>14s} = {:8.6f}'.format('r-value',calibration_rvalue))
-        ogo.message('  {:>14s} = {:8.6f}'.format('stderr',calibration_stderr))
-
-    else:
-        os.sys.exit('[ERROR] Unknown calibration phantom type: \"{}\"'.format(phantom_dict['type']))
+    ogo.message('Found fit:')
+    ogo.message('  Slope:     {:8.6f}'.format(calibrator.slope))
+    ogo.message('  Intercept: {:8.6f}'.format(calibrator.intercept))
+    ogo.message('  R^2:       {:8.6f}'.format(calibrator.r_value**2))
+    
+    ogo.message('Calibrating CT file.')
+    density = calibrator.predict(sitk.Cast(ct, sitk.sitkFloat64))
+    density = sitk.Cast(density, ct.GetPixelID())
     
     # Check that the calibration results are within a reasonable range
     threshold_warning = 2 # percent
     threshold_error =  10 # percent
-    if (abs(1.0-calibration_rvalue)*100.0>threshold_error):
-        ogo.message('[ERROR] R-value is too low ({:8.6f}).'.format(calibration_rvalue))
+    if (abs(1.0-(calibrator.r_value**2))*100.0>threshold_error):
+        ogo.message('[ERROR] R-value is too low ({:8.6f}).'.format(calibrator.r_value**2))
         ogo.message('          * did you select the correct phantom?')
         ogo.message('          * do all the rods have a reasonable value?')
         ogo.message('          * is the StdDev of the rods high (i.e. missed the target)?')
         os.sys.exit()
-    if (abs(1.0-calibration_rvalue)*100.0>threshold_warning):
-        ogo.message('[WARNING] R-value is low ({:8.6f}). Checking following:'.format(calibration_rvalue))
+    if (abs(1.0-(calibrator.r_value**2))*100.0>threshold_warning):
+        ogo.message('[WARNING] R-value is below {:.2f} ({:8.6f}). Checking following:'.format((100-threshold_warning)/100.0,calibrator.r_value**2))
         ogo.message('          * did you select the correct phantom?')
         ogo.message('          * do all the rods have a reasonable value?')
         ogo.message('          * is the StdDev of the rods high (i.e. missed the target)?')
-        
-    # Apply calibration parameters to image
-    ogo.message("Applying image calibration.")
     
-    np_image = vtk_to_numpy(reader_image.GetOutput().GetPointData().GetScalars())
-    np_image = np_image * calibration_slope + calibration_yint
-    vtk_image_scalars = numpy_to_vtk(num_array=np_image, deep=True, array_type=vtk.VTK_SHORT) # Cast to short
+    ogo.message('Writing calibrated output image to file:')
+    ogo.message('      \"{}\"'.format(output_image))
+    sitk.WriteImage(density, output_image)
 
-    calibrated_image = vtk.vtkImageData()
-    calibrated_image.DeepCopy(reader_image.GetOutput())
-    calibrated_image.GetPointData().SetScalars(vtk_image_scalars)
-    
-    # Write image
-    if output_image.lower().endswith('.nii'):
-        writer = vtk.vtkNIFTIImageWriter()
-    elif output_image.lower().endswith('.nii.gz'):
-        writer = vtk.vtkNIFTIImageWriter()
-    else:
-        os.sys.exit('[ERROR] Cannot find writer for file \"{}\"'.format(output_image))
-          
-    ogo.message('Saving output image ' + output_image)
-
-    writer.SetInputData(calibrated_image)
-    writer.SetFileName(output_image)
-    writer.SetTimeDimension(reader_image.GetTimeDimension())
-    writer.SetTimeSpacing(reader_image.GetTimeSpacing())
-    writer.SetRescaleSlope(reader_image.GetRescaleSlope())
-    writer.SetRescaleIntercept(reader_image.GetRescaleIntercept())
-    writer.SetQFac(reader_image.GetQFac())
-    writer.SetQFormMatrix(reader_image.GetQFormMatrix())
-    writer.SetNIFTIHeader(reader_image.GetNIFTIHeader())
-    writer.Update()
-    
     # Write text file
     if calib_file_name:
         ogo.message('Saving calibration parameters to file:')
         ogo.message('      \"{}\"'.format(calib_file_name))
-        
+
         txt_file = open(calib_file_name, "w")
         
-        txt_file.write('Phantom-based calibration:\n')
-        txt_file.write('  {:>14s} = {:s}\n'.format('ID',os.path.basename(output_image)))
-        txt_file.write('  {:>14s} = {:s}\n'.format('python script',os.path.splitext(os.path.basename(sys.argv[0]))[0]))
-        txt_file.write('  {:>14s} = {:.2f}\n'.format('version',script_version))
-        txt_file.write('  {:>14s} = {:s}\n'.format('creation date',str(date.today())))
+        txt_file.write('Phantom calibration:\n')
+        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
+        txt_file.write('  {:>27s} {:s}\n'.format('ID:',os.path.basename(output_image)))
+        txt_file.write('  {:>27s} {:s}\n'.format('python script:',os.path.splitext(os.path.basename(sys.argv[0]))[0]))
+        txt_file.write('  {:>27s} {:.2f}\n'.format('version:',script_version))
+        txt_file.write('  {:>27s} {:s}\n'.format('creation date:',str(date.today())))
         txt_file.write('\n')
         txt_file.write('Files:\n')
+        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
         txt_file.write('  {:>14s} = {:s}\n'.format('input image',input_image))
         txt_file.write('  {:>14s} = {:s}\n'.format('input mask',input_mask))
         txt_file.write('  {:>14s} = {:s}\n'.format('output image',output_image))
+        txt_file.write('  {:>14s} = {:s}\n'.format('async image',async_image))
         txt_file.write('  {:>14s} = {:s}\n'.format('calibration file name',calib_file_name))
-        if async_image:
-            txt_file.write('  {:>14s} = {:s}\n'.format('async image',async_image))
-        else:
-            txt_file.write('  {:>14s} = {:s}\n'.format('async image','n/a'))
         txt_file.write('\n')
-        txt_file.write('Calibration phantom:\n')
+        txt_file.write('Calibration parameters:\n')
+        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
+        txt_file.write('  {:>27s} {}\n'.format('Fit:',calibrator._is_fit))
+        txt_file.write('  {:>27s} {:12.6f}\n'.format('Slope:',calibrator.slope))
+        txt_file.write('  {:>27s} {:12.6f}\n'.format('Intercept:',calibrator.intercept))
+        txt_file.write('  {:>27s} {:12.6f}\n'.format('R^2:',calibrator.r_value**2))
+        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
+        txt_file.write('  {:>27s}\n'.format('Density [HU]:'))
+        #txt_file.write('  {:>27s} {:8.3f}'.format('Adipose ',calib.adipose_hu))
+        for idx,label in enumerate(label_list):
+            txt_file.write('  {:45s} = {:8.3f}\n'.format(lb.labels_dict[label]['LABEL'],filt.GetMean(int(label))))
+        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
+        txt_file.write('Phantom:\n')
         txt_file.write('  {:>14s} = {:s}\n'.format('name',phantom_dict['name']))
         txt_file.write('  {:>14s} = {:s}\n'.format('type',phantom_dict['type']))
         txt_file.write('  {:>14s} = {:s}\n'.format('serial',phantom_dict['serial']))
         txt_file.write('  {:>14s} = {:d}\n'.format('number_rods',phantom_dict['number_rods']))
-        txt_file.write('  {:>14s} = '.format('rod_labels')+'['+', '.join("{:d}".format(i) for i in phantom_dict['rod_labels'])+"]\n")
-        txt_file.write('  {:>14s} = '.format('rod_names')+'['+', '.join("{:s}".format(i) for i in phantom_dict['rod_names'])+"]\n")
-        txt_file.write('  {:>14s} = '.format('densities')+'['+', '.join("{:8.3f}".format(i) for i in phantom_dict['densities'])+"]\n")
-        if phantom_dict['h2o_densities'][0] != None:
-            txt_file.write("  {:>14s} = ".format('h2o_densities')+'['+', '.join("{:8.3f}".format(i) for i in phantom_dict['h2o_densities'])+"]\n")
+        for idx,j in enumerate(phantom_dict['densities']):
+            txt_file.write('  Rod {} (label {}): {:8.3f} k2hpo4 mg/cc\n'.format(phantom_dict['rod_names'][idx],phantom_dict['rod_labels'][idx],phantom_dict['densities'][idx]))
+        if (phantom_dict['type'] == 'k2hpo4'):     # Mindways calibration (k2hpo4)
+            txt_file.write('\n')
+            for idx,j in enumerate(phantom_dict['h2o_densities']):
+                txt_file.write('  Rod {} (label {}): {:8.3f} water mg/cc\n'.format(phantom_dict['rod_names'][idx],phantom_dict['rod_labels'][idx],phantom_dict['h2o_densities'][idx]))
+        
+        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
         txt_file.write('\n')
-        txt_file.write('Calibration results:\n')
-        txt_file.write('  {:>14s} = {:8.6f}\n'.format('slope',calibration_slope))
-        txt_file.write('  {:>14s} = {:8.6f}\n'.format('y-intercept',calibration_yint))
-        txt_file.write('  {:>14s} = {:8.6f}\n'.format('r-value',calibration_rvalue))
-        txt_file.write('  {:>14s} = {:8.6f}\n'.format('stderr',calibration_stderr))
+        txt_file.write('Unformatted calibration parameters:\n')
+        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
+        for label,value in calibrator.get_dict().items():
+            txt_file.write('  {:>27s} {}\n'.format(label,value))
+        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
         
         txt_file.close()
     
@@ -300,12 +284,12 @@ def internal(input_image,input_mask,output_image,calib_file_name,useLabels,useL4
     ogo.message('Reading input CT image to be calibrated:')
     ogo.message('      \"{}\"'.format(input_image))
     ct = sitk.ReadImage(input_image)
-
+    
     # Read input mask
     if not os.path.isfile(input_mask):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_mask))
 
-    if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
+    if not (input_mask.lower().endswith('.nii') or input_mask.lower().endswith('.nii.gz')):
         os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_mask))
 
     ogo.message('Reading input mask used for calibration:')
@@ -428,14 +412,6 @@ def internal(input_image,input_mask,output_image,calib_file_name,useLabels,useL4
     ogo.message('Writing result to ' + output_image)
     sitk.WriteImage(den, output_image)
 
-    #print('!> {:30s} = {}'.format('TimeDimension',reader.GetTimeDimension()))
-    #print('!> {:30s} = {}'.format('TimeSpacing',reader.GetTimeSpacing()))
-    #print('!> {:30s} = {}'.format('RescaleSlope',reader.GetRescaleSlope()))
-    #print('!> {:30s} = {}'.format('RescaleIntercept',reader.GetRescaleIntercept()))
-    #print('!> {:30s} = {}'.format('QFac',reader.GetQFac()))
-    #print('!> {:30s} = {}'.format('QFormMatrix',reader.GetQFormMatrix()))
-    #print('!> {:30s} = {}'.format('NIFTIHeader',reader.GetNIFTIHeader()))
-    
     if calib_file_name:
         ogo.message('Saving calibration parameters to file:')
         ogo.message('      \"{}\"'.format(calib_file_name))
@@ -459,15 +435,35 @@ def internal(input_image,input_mask,output_image,calib_file_name,useLabels,useL4
         txt_file.write('Calibration parameters:\n')
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
         txt_file.write('  {:>27s} {}\n'.format('Fit:',calib._is_fit))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Energy [keV]:',calib.effective_energy))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Max R^2:',calib.max_r2))
+        txt_file.write('  {:>27s} {:8.6f}\n'.format('Energy [keV]:',calib.effective_energy))
+        txt_file.write('  {:>27s} {:8.6f}\n'.format('Max R^2:',calib.max_r2))
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
         txt_file.write('  {:>27s}\n'.format('Density [HU]:'))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ',calib.adipose_hu))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Air ',calib.air_hu))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Blood ',calib.blood_hu))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Cortical Bone ',calib.bone_hu))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Skeletal Muscle ',calib.muscle_hu))
+        txt_file.write('  {:>27s} {:8.3f}'.format('Adipose ',calib.adipose_hu))
+        if 91 in labelList:
+            txt_file.write(' [used]\n')
+        else:
+            txt_file.write(' [not used]\n')
+        txt_file.write('  {:>27s} {:8.3f}'.format('Air ',calib.air_hu))
+        if 92 in labelList:
+            txt_file.write(' [used]\n')
+        else:
+            txt_file.write(' [not used]\n')
+        txt_file.write('  {:>27s} {:8.3f}'.format('Blood ',calib.blood_hu))
+        if 93 in labelList:
+            txt_file.write(' [used]\n')
+        else:
+            txt_file.write(' [not used]\n')
+        txt_file.write('  {:>27s} {:8.3f}'.format('Cortical Bone ',calib.bone_hu))
+        if 94 in labelList:
+            txt_file.write(' [used]\n')
+        else:
+            txt_file.write(' [not used]\n')
+        txt_file.write('  {:>27s} {:8.3f}'.format('Skeletal Muscle ',calib.muscle_hu))
+        if 95 in labelList:
+            txt_file.write(' [used]\n')
+        else:
+            txt_file.write(' [not used]\n')
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------','--------'))
         txt_file.write('  {:>27s}\n'.format('Mass Attenuation [cm2/g]:'))
         txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ',calib.adipose_mass_attenuation))
@@ -533,7 +529,7 @@ two labels must be defined, and current valid labels are:
 Outputs include the calibrated density image and a text file that includes
 the calibration parameters and results.
 
-Citation:
+Please cite:
 Michalski AS, Besler BA, Michalak GJ, Boyd SK, 2020. CT-based internal density 
 calibration for opportunistic skeletal assessment using abdominal CT scans. 
 Med Eng Phys 78, 55-63.
@@ -567,7 +563,8 @@ ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/test.nii \
   --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz \
   --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
-  --phantom 'Mindways Model 3 CT' 
+  --phantom 'Mindways Model 3 CT' \
+  --overwrite
 
 ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/kub.nii.gz \
@@ -575,7 +572,8 @@ ogoImageCalibration phantom \
   /Users/skboyd/Desktop/ML/test/test.nii \
   --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz \
   --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
-  --phantom 'B-MAS 200' 
+  --phantom 'B-MAS 200' \
+  --overwrite
 
 ogoImageCalibration internal \
   /Users/skboyd/Desktop/ML/test/retro.nii \
@@ -583,6 +581,20 @@ ogoImageCalibration internal \
   /Users/skboyd/Desktop/ML/test/test.nii \
   --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
   --overwrite --useL4
+
+ogoImageCalibration internal \
+  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00009.nii \
+  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00009_IC_fixed.nii.gz \
+  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00009_int_calib.nii \
+  --calib_file_name /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00009.txt \
+  --overwrite 
+
+ogoImageCalibration internal \
+  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00021.nii \
+  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00021_IC_fixed.nii.gz \
+  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00021_int_calib.nii \
+  --calib_file_name /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00021.txt \
+  --overwrite 
 
 '''
 
