@@ -1,3 +1,10 @@
+# /------------------------------------------------------------------------------+
+# | 22-AUG-2022                                                                  |
+# | Copyright (c) Bone Imaging Laboratory                                        |
+# | All rights reserved                                                          |
+# | bonelab@ucalgary.ca                                                          |
+# +------------------------------------------------------------------------------+
+
 '''Abstract class for calibration'''
 from abc import ABCMeta, abstractmethod
 ABC = ABCMeta('ABC', (object,), {})  # compatible with Python 2 *and* 3

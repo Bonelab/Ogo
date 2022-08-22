@@ -1,3 +1,10 @@
+# /------------------------------------------------------------------------------+
+# | 22-AUG-2022                                                                  |
+# | Copyright (c) Bone Imaging Laboratory                                        |
+# | All rights reserved                                                          |
+# | bonelab@ucalgary.ca                                                          |
+# +------------------------------------------------------------------------------+
+
 '''Mass attenuation tables for internal calibration
 
 The variable ``mass_attenuation_tables`` is defined containing:

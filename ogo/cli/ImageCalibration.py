@@ -4,23 +4,12 @@
 # | All rights reserved                                                          |
 # | bonelab@ucalgary.ca                                                          |
 # +------------------------------------------------------------------------------+
-
-#####
-# ogo_phantom_calibration.py
 #
-# This script performs phantom-based calibration from an input image and mask of the
-# calibration phantom. Density calibration phantom is required to be the Mindways Model 3
-# CT phantom.
+# This script is based on work by Andrew Michalski as part of his PhD. In 2022 it was
+# updated to incorporate a templated version of both internal and phantom calibration.
 #
-#####
+# Steve Boyd, 2022
 #
-# Andrew Michalski
-# University of Calgary
-# Biomedical Engineering Graduate Program
-# April 23, 2019
-# Modified to Py3: March 25, 2020
-#####
-
 script_version = 1.0
 
 ##

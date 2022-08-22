@@ -1,3 +1,10 @@
+# /------------------------------------------------------------------------------+
+# | 22-AUG-2022                                                                  |
+# | Copyright (c) Bone Imaging Laboratory                                        |
+# | All rights reserved                                                          |
+# | bonelab@ucalgary.ca                                                          |
+# +------------------------------------------------------------------------------+
+
 '''Calibration of a standard phantom'''
 
 from scipy import stats
