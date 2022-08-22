@@ -180,7 +180,7 @@ class InternalCalibration(StandardCalibration):
         def _get_mass_attenuation_at_index(idx):
             '''Return the mass attenuation array at a given index'''
             return [self._subset([
-                self._interpolate_tables['adipose_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501                 YYY
+                self._interpolate_tables['adipose_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['air_table'].loc[idx, 'Mass Attenuation [cm2/g]'],      # noqa: E501
                 self._interpolate_tables['blood_table'].loc[idx, 'Mass Attenuation [cm2/g]'],    # noqa: E501
                 self._interpolate_tables['bone_table'].loc[idx, 'Mass Attenuation [cm2/g]'],     # noqa: E501
@@ -190,7 +190,7 @@ class InternalCalibration(StandardCalibration):
 
         # Measured HU values
         HU = self._subset([
-            self.adipose_hu,                                                            # YYY
+            self.adipose_hu,
             self.air_hu,
             self.blood_hu,
             self.bone_hu,
@@ -235,7 +235,7 @@ class InternalCalibration(StandardCalibration):
     def _determine_hu_to_mass_attenuation(self):
         '''Compute HU to mass attenuation relationship'''
         # Get values
-        HU = self._subset([                                              # YYY
+        HU = self._subset([
             self.adipose_hu,
             self.air_hu,
             self.blood_hu,
@@ -243,7 +243,7 @@ class InternalCalibration(StandardCalibration):
             self.muscle_hu
         ])
             
-        attenuation = self._subset([                                     # YYY
+        attenuation = self._subset([
             self.adipose_mass_attenuation,
             self.air_mass_attenuation,
             self.blood_mass_attenuation,
@@ -261,7 +261,7 @@ class InternalCalibration(StandardCalibration):
     def _determine_hu_to_density(self):
         '''Compute HU to density relationship'''
         # Get HU
-        HU = self._subset([                                              # YYY
+        HU = self._subset([
             self.adipose_hu,
             self.air_hu,
             self.blood_hu,
@@ -276,7 +276,7 @@ class InternalCalibration(StandardCalibration):
 
             return (hu/1000*water_attenuation*water_density + water_attenuation*water_density)/attenuation  # noqa: E501
 
-        densities = self._subset([                                                                    # YYY
+        densities = self._subset([
             _convert_value(self.adipose_hu, self.adipose_mass_attenuation),
             _convert_value(self.air_hu, self.air_mass_attenuation),
             _convert_value(self.blood_hu, self.blood_mass_attenuation),
