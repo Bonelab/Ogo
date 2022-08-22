@@ -549,53 +549,6 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
 ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
                             image_qct.nii.gz --useLabels 91 92 93 95
 
-ogoImageCalibration phantom \
-  /Users/skboyd/Desktop/ML/test/kub.nii.gz \
-  /Users/skboyd/Desktop/ML/test/kub_mask.nii.gz \
-  /Users/skboyd/Desktop/ML/test/test.nii \
-  --phantom 'Mindways Model 3 CT' \
-  --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
-  --overwrite
-    
-ogoImageCalibration phantom \
-  /Users/skboyd/Desktop/ML/test/kub.nii.gz \
-  /Users/skboyd/Desktop/ML/test/async_mask_mindways.nii.gz \
-  /Users/skboyd/Desktop/ML/test/test.nii \
-  --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz \
-  --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
-  --phantom 'Mindways Model 3 CT' \
-  --overwrite
-
-ogoImageCalibration phantom \
-  /Users/skboyd/Desktop/ML/test/kub.nii.gz \
-  /Users/skboyd/Desktop/ML/test/async_mask_bmas200.nii.gz \
-  /Users/skboyd/Desktop/ML/test/test.nii \
-  --async_image /Users/skboyd/Desktop/ML/test/async.nii.gz \
-  --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
-  --phantom 'B-MAS 200' \
-  --overwrite
-
-ogoImageCalibration internal \
-  /Users/skboyd/Desktop/ML/test/retro.nii \
-  /Users/skboyd/Desktop/ML/test/retro_mask.nii.gz \
-  /Users/skboyd/Desktop/ML/test/test.nii \
-  --calib_file_name /Users/skboyd/Desktop/ML/test/test.txt \
-  --overwrite --useL4
-
-ogoImageCalibration internal \
-  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00009.nii \
-  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00009_IC_fixed.nii.gz \
-  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00009_int_calib.nii \
-  --calib_file_name /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00009.txt \
-  --overwrite 
-
-ogoImageCalibration internal \
-  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00021.nii \
-  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00021_IC_fixed.nii.gz \
-  /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00021_int_calib.nii \
-  --calib_file_name /Users/skboyd/Desktop/ML/test/SarahSloss/RETRO_00021.txt \
-  --overwrite 
-
 '''
 
     # Setup argument parsing
