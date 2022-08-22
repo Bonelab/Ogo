@@ -27,6 +27,7 @@ import vtk
 import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
+import ogo.dat.OgoMasterLabels as lb
 
 start_time = time.time()
 
@@ -372,6 +373,18 @@ def get_cortical_bone(array):
         sample_count = len(rslt)
 
     return [sample_mean, sample_std, sample_count]
+    
+    """Returns the integer label for a given label string"""
+def get_label(label_string):
+    
+    label = None
+    for k, v in lb.labels_dict.items():
+        #print('k={}, v={}'.format(k,v['LABEL']))
+        if v['LABEL'] in label_string:
+            #print('Found {}, label = {}'.format(v['LABEL'],k))
+            label = k
+            
+    return label
     
 def bmd_metrics(vtk_image):
     """Computes the BMD metrics for the input vtk image. VTK image should be the isolated
@@ -887,6 +900,79 @@ def imageResample(vtk_image, isotropic_voxel_size):
     image_resample.Update()
     return image_resample.GetOutput()
 
+def isotropicResampling(image, iso_resolution, image_type):
+    """An alternative to imageResample that uses SimpleITK
+    and avoids aliasing"""
+
+    message('Resampling to a resolution of {} mm'.format(iso_resolution))
+    
+    # image_type is either 'ct' or 'mask'
+    if image_type in 'ct':
+        sigma = iso_resolution * np.sqrt(2 * np.log(2)) / np.pi
+        message('  For a half-power cut-off frequency of {:0.6f}, \n'
+                '           a standard deviation of {:0.6f} is being used.'.format(1/(2.0*iso_resolution), sigma))
+        
+        # Filter each sampling directions as needed
+        for i, spacing in enumerate(image.GetSpacing()):
+            if spacing > iso_resolution:
+                message('  No antialiasing in direction {}'.format(i))
+                continue
+        
+            message('  Antialiasing in direction {}'.format(i))
+            image = sitk.RecursiveGaussian(
+              image,
+              sigma, False,
+              sitk.RecursiveGaussianImageFilter.ZeroOrder,
+              i
+            )
+        
+    # Determine the output size
+    resolution = [iso_resolution for i in range(image.GetDimension())]
+    size = [int(np.ceil(s * i / o)) for o, i, s in
+            zip(resolution, image.GetSpacing(), image.GetSize())]
+    message('  Input Size:  {}'.format(image.GetSize()))
+    message('  Output Size: {}'.format(size))
+
+    stats = sitk.StatisticsImageFilter()
+    stats.Execute(image)
+    vox_min = stats.GetMinimum()
+    message('  Minimum intensity: {:8.6f}'.format(vox_min))
+    
+    transform = sitk.Euler3DTransform()
+    transform.SetIdentity()
+    
+    if image_type in 'ct':
+        message('  Using BSpline interpolation')
+        output = sitk.Resample(
+          image,
+          size,
+          transform,
+          sitk.sitkBSpline, #sitk.sitkNearestNeighbor, sitk.sitkLinear
+          image.GetOrigin(),
+          resolution,
+          image.GetDirection(),
+          vox_min,
+          image.GetPixelID()
+        )
+    elif image_type in 'mask':
+        message('  Using NearestNeighbor interpolation')
+        output = sitk.Resample(
+          image,
+          size,
+          transform,
+          sitk.sitkNearestNeighbor, #sitk.sitkBSpline, sitk.sitkLinear
+          image.GetOrigin(),
+          resolution,
+          image.GetDirection(),
+          vox_min,
+          image.GetPixelID()
+        )
+    else:
+        os.sys.exit('[ERROR] Unknown input type to resample: \"{}\".'.format(image_type))
+        
+        
+    return output
+    
 def inferiorVertebralPMMA(inferior_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
     """Creates the image data for the inferior vertebral PMMA cap.
     The arguments are the inferior vertebral  model bounds, image spacing, image origin, in value of pmma, out value for pmma, pmma thickness and pmma material ID.
@@ -1304,29 +1390,6 @@ def vtk2numpy(vtk_image):
     numpy_image.shape = vtk_image.GetDimensions()
     return numpy_image
 
-def writeN88Model(model, fileName, pathname):
-    """Writes out a N88Model.
-    The first argument is the model.
-    The second argument is the filename.
-    The third argument is the pathname.
-    Returns the N88model in the directory.
-    """
-    os.chdir(pathname)
-    writer = vtkbone.vtkboneN88ModelWriter()
-    writer.SetInputData(model)
-    writer.SetFileName(fileName)
-    writer.Update()
-
-def writeNii(imageData, fileName, output_directory):
-    """Writes out an input image as a NIFTI file.
-    The first argument is the image Data. The second argument is the filename. The third argument is the output directory where the file is to be written to.
-    """
-    os.chdir(output_directory)
-    writer = vtk.vtkNIFTIImageWriter()
-    writer.SetInputData(imageData)
-    writer.SetFileName(fileName)
-    writer.Write()
-
 def writeTXTfile(input_dict, fileName, output_directory):
     """Write a text file containing the parameters in the input array.
     The first argument is the input array of two columns. The first column is the
@@ -1340,8 +1403,30 @@ def writeTXTfile(input_dict, fileName, output_directory):
         txt_file.write(str(key) + '\t' + str(value) + '\n')
     txt_file.close()
 
-#  ##
-#  # Functions for Ogo Calibration Scripts
+
+# def writeN88Model(model, fileName, pathname):
+#     """Writes out a N88Model.
+#     The first argument is the model.
+#     The second argument is the filename.
+#     The third argument is the pathname.
+#     Returns the N88model in the directory.
+#     """
+#     os.chdir(pathname)
+#     writer = vtkbone.vtkboneN88ModelWriter()
+#     writer.SetInputData(model)
+#     writer.SetFileName(fileName)
+#     writer.Update()
+# 
+# def writeNii(imageData, fileName, output_directory):
+#     """Writes out an input image as a NIFTI file.
+#     The first argument is the image Data. The second argument is the filename. The third argument is the output directory where the file is to be written to.
+#     """
+#     os.chdir(output_directory)
+#     writer = vtk.vtkNIFTIImageWriter()
+#     writer.SetInputData(imageData)
+#     writer.SetFileName(fileName)
+#     writer.Write()
+#
 #  def applyInternalCalibration(imageData, cali_parameters):
 #      """ Applies the internal calibration to the image.
 #      The first argument is the image.
