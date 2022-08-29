@@ -1,0 +1,42 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Python CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  schedule:
+    [cron: "0 12 * * 0"]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macOS-latest]
+        python-version: [3.6, 3.7, 3.8]
+    
+    name: ${{ matrix.os }}, Python ${{ matrix.python-version }}
+    
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: conda-incubator/setup-miniconda@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: conda create -y -n test -c numerics88 -c conda-forge -c simpleitk python=$(python.version) n88tools simpleitk
+      - run: conda activate test
+      - run: pip install -e .
+      - name: Test
+        run: nosetests tests
