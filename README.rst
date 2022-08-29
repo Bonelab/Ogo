@@ -16,8 +16,9 @@ Help build a fracture free future.
     :target: http://ogo.readthedocs.io/en/latest/?badge=latest
     :alt: Documentation Status
 
-.. |Azure| image:: https://dev.azure.com/babesler/Bone%20Imaging%20Laboratory/_apis/build/status/Bonelab.Ogo?branchName=master
-    :target: https://dev.azure.com/babesler/Bone%20Imaging%20Laboratory/_build/latest?definitionId=14&branchName=master
+.. |Azure| image:: https://github.com/Bonelab/Ogo/actions/workflows/main.yml/badge.svg
+    :target: https://github.com/Bonelab/Ogo/actions/workflows/main.yml/badge.svg
+    :alt: Tests Status
 
 
 Developer Install
