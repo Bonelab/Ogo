@@ -1,3 +1,10 @@
+# /------------------------------------------------------------------------------+
+# | 22-AUG-2022                                                                  |
+# | Copyright (c) Bone Imaging Laboratory                                        |
+# | All rights reserved                                                          |
+# | bonelab@ucalgary.ca                                                          |
+# +------------------------------------------------------------------------------+
+
 '''Abstract class for calibration'''
 from abc import ABCMeta, abstractmethod
 ABC = ABCMeta('ABC', (object,), {})  # compatible with Python 2 *and* 3
@@ -65,4 +72,9 @@ class Calibration(ABC):
     def _predict_inverse(self, density):
         '''Internal abstract method for making inverse predictions from a \
         model'''
+        raise NotImplementedError('Calibration is an abstract class')
+
+    @abstractmethod
+    def get_dict(self):
+        '''Return a dictionary of calibration information'''
         raise NotImplementedError('Calibration is an abstract class')

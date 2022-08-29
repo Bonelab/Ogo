@@ -1,7 +1,15 @@
+# /------------------------------------------------------------------------------+
+# | 22-AUG-2022                                                                  |
+# | Copyright (c) Bone Imaging Laboratory                                        |
+# | All rights reserved                                                          |
+# | bonelab@ucalgary.ca                                                          |
+# +------------------------------------------------------------------------------+
+
 '''Calibration of a standard phantom'''
 
-import numpy as np
 from scipy import stats
+import copy
+from collections import OrderedDict
 from .calibration import Calibration
 
 
@@ -13,14 +21,14 @@ class StandardCalibration(Calibration):
     solid phantoms. The calibration equation is straight forward:
 
     .. math::
-        \\rho = m * HU + b
+        \\rho = m \cdot HU + b
 
     Given sames of density and Hounsfield Units in the scan field of view,
     an equation of best fit is determined.
 
     The output densities are in units of whatever calibration phantom was used.
     It is the users responsibility to know what those units are.
-    '''
+    '''  # noqa: W605
 
     def __init__(self):
         super(StandardCalibration, self).__init__()
@@ -29,6 +37,9 @@ class StandardCalibration(Calibration):
         self._r_value = 0.0
         self._p_value = 0.0
         self._std_err = 0.0
+
+        self._hu = None
+        self._rho = None
 
     @property
     def slope(self):
@@ -61,10 +72,28 @@ class StandardCalibration(Calibration):
             self._p_value, self._std_err = \
             stats.linregress(hounsfield_units, densities)
 
+        # Save for printing
+        self._hu = copy.deepcopy(hounsfield_units)
+        self._rho = copy.deepcopy(densities)
+
     def _predict(self, hu):
         '''Standard linear equation prediction'''
-        return self._slope * np.array(hu) + self._intercept
+        return hu * self._slope + self._intercept
 
     def _predict_inverse(self, density):
         '''Standard linear equation inverse prediction'''
-        return (np.array(density) - self._intercept) / self._slope
+        return (density - self._intercept) / self._slope
+
+    def get_dict(self):
+        return OrderedDict([
+            ('Is fit',          self._is_fit),
+
+            ('Slope',           self.slope),
+            ('Intercept',       self.intercept),
+            ('R value',         self.r_value),
+            ('P value',         self.p_value),
+            ('Standard Error',  self.std_err),
+
+            ('HU',          str(self._hu)),
+            ('Densities',   str(self._rho))
+        ])
