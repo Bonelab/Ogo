@@ -35,7 +35,7 @@ jobs:
       - uses: conda-incubator/setup-miniconda@v2
         with:
           python-version: ${{ matrix.python-version }}
-      - run: conda create -y -n test -c numerics88 -c conda-forge -c simpleitk python=$(python.version) n88tools simpleitk
+      - run: conda create -y -n test -c numerics88 -c conda-forge -c simpleitk python=$(python.version) n88tools matplotlib simpleitk
       - run: conda activate test
       - run: pip install -e .
       - name: Test
