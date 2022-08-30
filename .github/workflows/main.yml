@@ -35,7 +35,7 @@ jobs:
       - uses: conda-incubator/setup-miniconda@v2
         with:
           python-version: ${{ matrix.python-version }}
-      - run: conda create -n test -c numerics88 -c simpleitk -c conda-forge python=3 n88tools pbr nose six simpleitk pydicom gdcm pandas
+      - run: conda create -n test -c numerics88 -c simpleitk -c conda-forge python=3 n88tools matplotlib pbr nose six simpleitk pydicom gdcm pandas
       - run: conda activate test
       - run: pip install -e .
       - name: Test
