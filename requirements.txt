@@ -1,13 +1,13 @@
 # Internal tools
-pbr~=5.10.0
+pbr
 click
 
 # Image processing
-simpleitk~=2.1.1
-numpy~=1.16.6
+simpleitk
+numpy
 
 # Statistics
-scipy~=1.6.1
+scipy
 
 # Documentation
 Sphinx
@@ -15,9 +15,3 @@ Sphinx
 # Testings
 nose
 flake8
-n88tools~=9.0.0
-vtk~=8.2.0
-vtkbone~=1.1.0
-pandas~=1.2.3
-setuptools~=59.8.0
-packaging~=21.3
