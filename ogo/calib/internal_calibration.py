@@ -180,7 +180,8 @@ class InternalCalibration(StandardCalibration):
                 'Mass Attenuation [cm2/g]': interp_table
             })
 
-        self._interpolate_tables
+        # Save memory
+        del self._interpolate_tables
 
     def _determine_scan_effective_energy(self):
         '''Determine scan effective energy'''
