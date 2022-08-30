@@ -5,13 +5,13 @@
 # | bonelab@ucalgary.ca                                                          |
 # +------------------------------------------------------------------------------+
 
-'''Utility function for echoing command line arguments'''
+"""Utility function for echoing command line arguments"""
 
 import os
 
 
 def echo_arguments(title, args):
-    '''Echo the arguments passed to a function'''
+    """Echo the arguments passed to a function"""
     # Title
     message = title + ':' + os.linesep
 

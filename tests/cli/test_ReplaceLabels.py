@@ -1,9 +1,9 @@
 import unittest
 
-from ogo.util.echo_arguments import echo_arguments
+from ogo.cli.ReplaceLabels import ReplaceLabels
 
 
-class Test_Echo_Arguments(unittest.TestCase):
+class Test_ReplaceLabels(unittest.TestCase):
 
     def setUp(self) -> None:
         """ Use this method to prep data or files for other tests, if necessary. """
@@ -15,5 +15,5 @@ class Test_Echo_Arguments(unittest.TestCase):
 
     @unittest.skip("Placeholder - add more tests here")
     def test_placeholder(self) -> None:
-        """ ogo.util.Test_EchoArguments """
+        """ ogo.cli.Test_ReplaceLabels """
         pass

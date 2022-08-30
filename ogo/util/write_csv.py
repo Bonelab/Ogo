@@ -5,13 +5,13 @@
 # | bonelab@ucalgary.ca                                                          |
 # +------------------------------------------------------------------------------+
 
-'''Utility function for writing to a csv file'''
+"""Utility function for writing to a csv file"""
 
 import os
 
 
 def write_csv(entry, csv_file, delimiter=','):
-    '''Write data to a CSV file.
+    """Write data to a CSV file.
 
     `entry` should be a collections.OrderedDict object to preserve the
     ordering of the variables.
@@ -21,7 +21,7 @@ def write_csv(entry, csv_file, delimiter=','):
 
     Note that if you want specific formatting on numerics - i.e. precision
     - the numerical value should be passed as a string and precision set
-    before calling this function.'''
+    before calling this function."""
     # If we doesn't exist, need to write header
     if not os.path.exists(csv_file):
         with open(csv_file, 'w') as f:
