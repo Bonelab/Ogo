@@ -173,6 +173,9 @@ def femur(input_image,input_mask,output_model,side,iso_resolution,overwrite,func
 def main():
     # Setup description
     description='''
+
+UNDER CONSTRUCTION. This script is not functional yet. August 30, 2022.
+
 Uses a calibrated CT scan and mask to generate an input file for finite 
 element modelling. There are two main types of FE model supported: an L4
 vertebral body or a femur (left or right).
