@@ -5,13 +5,13 @@
 # | bonelab@ucalgary.ca                                                          |
 # +------------------------------------------------------------------------------+
 
-'''Utility function for writing to a text file'''
+"""Utility function for writing to a text file"""
 
 import os
 
 
 def write_txt(entry, filename, mode='w', delimiter=','):
-    '''Write data to a text file.
+    """Write data to a text file.
 
     `entry` should be a collections.OrderedDict object to preserve the
     ordering of the variables.
@@ -20,7 +20,7 @@ def write_txt(entry, filename, mode='w', delimiter=','):
 
     Note that if you want specific formatting on numerics - i.e. precision
     - the numerical value should be passed as a string and precision set
-    before calling this function.'''
+    before calling this function."""
     # Write entry
     with open(filename, mode) as f:
         for key, value in entry.items():

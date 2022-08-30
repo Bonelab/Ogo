@@ -68,31 +68,31 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
 
     array = vtk_to_numpy(reader_mask.GetOutput().GetPointData().GetScalars())
 
-    # Check that at least least one label is defined
+    # Check that at least one label is defined
     if len(labels) < 1:
         print('ERROR: At least one label must be defined.')
         os.sys.exit()
 
     # If user does not define labels, then select all labels available
-    if (labels[0] == 0):
+    if labels[0] == 0:
         if output_filename:
             ogo.message('No labels specified. Building list...')
         labels = np.unique(array)
 
     # Remove label 0 from list (background)
-    if (labels[0] == 0):
+    if labels[0] == 0:
         labels = labels[1:]
 
     # Check that labels are in range
     if output_filename:
         ogo.message('Labels to be applied:')
     for idx, ids in enumerate(labels):
-        if (labels[idx] < 0 or labels[idx] > 255):
+        if labels[idx] < 0 or labels[idx] > 255:
             print('ERROR: Labels out of range. Must be 0-255.')
             print('       Invalid label is {:d}.'.format(labels[idx]))
             os.sys.exit()
         #        if (str(labels[idx]) not in labelsDict):
-        if (labels[idx] not in labelsDict):
+        if labels[idx] not in labelsDict:
             print("ERROR: Label {:d} does not exist in master list of labels.".format(labels[idx]))
             os.sys.exit()
         if output_filename:
@@ -129,7 +129,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
         parameters_dict['Bone Volume [cm^3]'] = '{:.3f}'.format(bmd_outcomes['Bone Volume [cm^3]'])
 
         if output_filename:
-            if (idx == 0 and not noheader):
+            if idx == 0 and not noheader:
                 txt_file.write(",".join("{}".format(k) for k, v in parameters_dict.items()))
                 txt_file.write("\n")
             txt_file.write(",".join("{}".format(v) for k, v in parameters_dict.items()))
@@ -138,7 +138,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
             print("!> ---------------------------------------------------- RECORD")
             print("\n".join("{} = {}".format(k, v) for k, v in parameters_dict.items()))
         else:
-            if (idx == 0 and not noheader):
+            if idx == 0 and not noheader:
                 print(",".join("{}".format(k) for k, v in parameters_dict.items()))
             print(",".join("{}".format(v) for k, v in parameters_dict.items()))
 
