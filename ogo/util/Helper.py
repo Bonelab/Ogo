@@ -31,93 +31,95 @@ import ogo.dat.OgoMasterLabels as lb
 
 start_time = time.time()
 
+
 ##
 # Returns a dictionary of calibration phantoms for each phantom requested
 def get_phantom(phantom_type):
-    
     calibration_dict = OrderedDict()
-    
-    if (phantom_type in 'Mindways Model 3 CT'):
-        calibration_dict['name']                = 'Mindways Model 3 CT'
-        calibration_dict['units']               = 'mg/cc'
-        calibration_dict['type']                = 'k2hpo4'
-        calibration_dict['serial']              = '#4541A, #4560'
-        calibration_dict['number_rods']         = 5
-        calibration_dict['rod_labels']          = [111,112,113,114,115]
-        calibration_dict['rod_names']           = ['A','B','C','D','E']
-        calibration_dict['densities']           = [-51.83, -53.40, 58.88, 157.05, 375.83]
-        calibration_dict['h2o_densities']       = [1012.25, 1056.95, 1103.57, 1119.52, 923.20]
 
-    elif (phantom_type in 'Mindways Model 3 QA'):
-        calibration_dict['name']                = 'Mindways Model 3 QA'
-        calibration_dict['units']               = 'mg/cc'
-        calibration_dict['type']                = 'k2hpo4'
-        calibration_dict['serial']              = '#4408'
-        calibration_dict['number_rods']         = 4
-        calibration_dict['rod_labels']          = [131,132,133,134]
-        calibration_dict['rod_names']           = ['A','B','C','D']
-        calibration_dict['densities']           = [58.88, -53.40, 157.05, 157.13]
-        calibration_dict['h2o_densities']       = [1103.57, 1056.95, 1119.52, 1120.10]
+    if phantom_type in 'Mindways Model 3 CT':
+        calibration_dict['name'] = 'Mindways Model 3 CT'
+        calibration_dict['units'] = 'mg/cc'
+        calibration_dict['type'] = 'k2hpo4'
+        calibration_dict['serial'] = '#4541A, #4560'
+        calibration_dict['number_rods'] = 5
+        calibration_dict['rod_labels'] = [111, 112, 113, 114, 115]
+        calibration_dict['rod_names'] = ['A', 'B', 'C', 'D', 'E']
+        calibration_dict['densities'] = [-51.83, -53.40, 58.88, 157.05, 375.83]
+        calibration_dict['h2o_densities'] = [1012.25, 1056.95, 1103.57, 1119.52, 923.20]
 
-    elif (phantom_type in 'QRM-BDC 3-rod'):
-        calibration_dict['name']                = 'QRM-BDC 3-rod'
-        calibration_dict['units']               = 'mg/cc'
-        calibration_dict['type']                = 'CHA'
-        calibration_dict['serial']              = '#BDC-71'
-        calibration_dict['number_rods']         = 3
-        calibration_dict['rod_labels']          = [141,142,143]
-        calibration_dict['rod_names']           = ['A','B','C']
-        calibration_dict['densities']           = [0, 400, 800]
-        calibration_dict['h2o_densities']       = [None]
+    elif phantom_type in 'Mindways Model 3 QA':
+        calibration_dict['name'] = 'Mindways Model 3 QA'
+        calibration_dict['units'] = 'mg/cc'
+        calibration_dict['type'] = 'k2hpo4'
+        calibration_dict['serial'] = '#4408'
+        calibration_dict['number_rods'] = 4
+        calibration_dict['rod_labels'] = [131, 132, 133, 134]
+        calibration_dict['rod_names'] = ['A', 'B', 'C', 'D']
+        calibration_dict['densities'] = [58.88, -53.40, 157.05, 157.13]
+        calibration_dict['h2o_densities'] = [1103.57, 1056.95, 1119.52, 1120.10]
 
-    elif (phantom_type in 'QRM-BDC 6-rod'):
-        calibration_dict['name']                = 'QRM-BDC 6-rod'
-        calibration_dict['units']               = 'mg/cc'
-        calibration_dict['type']                = 'CHA'
-        calibration_dict['serial']              = '#BDC-106'
-        calibration_dict['number_rods']         = 6
-        calibration_dict['rod_labels']          = [151,152,153,154,155,156]
-        calibration_dict['rod_names']           = ['A','B','C','D','E','F']
-        calibration_dict['densities']           = [0, 100, 200, 400, 600, 800]
-        calibration_dict['h2o_densities']       = [None]
+    elif phantom_type in 'QRM-BDC 3-rod':
+        calibration_dict['name'] = 'QRM-BDC 3-rod'
+        calibration_dict['units'] = 'mg/cc'
+        calibration_dict['type'] = 'CHA'
+        calibration_dict['serial'] = '#BDC-71'
+        calibration_dict['number_rods'] = 3
+        calibration_dict['rod_labels'] = [141, 142, 143]
+        calibration_dict['rod_names'] = ['A', 'B', 'C']
+        calibration_dict['densities'] = [0, 400, 800]
+        calibration_dict['h2o_densities'] = [None]
 
-    elif (phantom_type in 'Image Analysis QCT-3D Plus'):
-        calibration_dict['name']                = 'Image Analysis QCT-3D Plus'
-        calibration_dict['units']               = 'mg/cc'
-        calibration_dict['type']                = 'CHA'
-        calibration_dict['serial']              = '#G2730'
-        calibration_dict['number_rods']         = 3
-        calibration_dict['rod_labels']          = [161, 162, 163]
-        calibration_dict['rod_names']           = ['A','B','C']
-        calibration_dict['densities']           = [8.0, 97.3, 189.8]
-        calibration_dict['h2o_densities']       = [None]
+    elif phantom_type in 'QRM-BDC 6-rod':
+        calibration_dict['name'] = 'QRM-BDC 6-rod'
+        calibration_dict['units'] = 'mg/cc'
+        calibration_dict['type'] = 'CHA'
+        calibration_dict['serial'] = '#BDC-106'
+        calibration_dict['number_rods'] = 6
+        calibration_dict['rod_labels'] = [151, 152, 153, 154, 155, 156]
+        calibration_dict['rod_names'] = ['A', 'B', 'C', 'D', 'E', 'F']
+        calibration_dict['densities'] = [0, 100, 200, 400, 600, 800]
+        calibration_dict['h2o_densities'] = [None]
 
-    elif (phantom_type in 'B-MAS 200'):
-        calibration_dict['name']                = 'B-MAS 200'
-        calibration_dict['units']               = 'mg/cc'
-        calibration_dict['type']                = 'CHA'
-        calibration_dict['serial']              = 'unknown'
-        calibration_dict['number_rods']         = 5
-        calibration_dict['rod_labels']          = [121,122,123,124,125]
-        calibration_dict['rod_names']           = ['A','B','C','D','E']
-        calibration_dict['densities']           = [0, 50, 100, 150, 200]
-        calibration_dict['h2o_densities']       = [None]
-        
+    elif phantom_type in 'Image Analysis QCT-3D Plus':
+        calibration_dict['name'] = 'Image Analysis QCT-3D Plus'
+        calibration_dict['units'] = 'mg/cc'
+        calibration_dict['type'] = 'CHA'
+        calibration_dict['serial'] = '#G2730'
+        calibration_dict['number_rods'] = 3
+        calibration_dict['rod_labels'] = [161, 162, 163]
+        calibration_dict['rod_names'] = ['A', 'B', 'C']
+        calibration_dict['densities'] = [8.0, 97.3, 189.8]
+        calibration_dict['h2o_densities'] = [None]
+
+    elif phantom_type in 'B-MAS 200':
+        calibration_dict['name'] = 'B-MAS 200'
+        calibration_dict['units'] = 'mg/cc'
+        calibration_dict['type'] = 'CHA'
+        calibration_dict['serial'] = 'unknown'
+        calibration_dict['number_rods'] = 5
+        calibration_dict['rod_labels'] = [121, 122, 123, 124, 125]
+        calibration_dict['rod_names'] = ['A', 'B', 'C', 'D', 'E']
+        calibration_dict['densities'] = [0, 50, 100, 150, 200]
+        calibration_dict['h2o_densities'] = [None]
+
     else:
+        # TODO - should raise an exception rather than sys.exit
         os.sys.exit('[ERROR] Cannot find appropriate phantom density for \"{}\"'.format(phantom_type))
-        
+
     return calibration_dict
-    
-def histogram(image,nbins):
+
+
+def histogram(image, nbins):
     array = vtk_to_numpy(image.GetPointData().GetScalars()).ravel()
     guard = '!-------------------------------------------------------------------------------'
 
     # Define formatting
-    line_format_data       = '!>  {:>8d} {:>8.3f} {:>12d}'
+    line_format_data = '!>  {:>8d} {:>8.3f} {:>12d}'
     line_format_data_stars = '!>  {:>8d} {:>8.3f} {:>12d} {:s}'
-    line_format_summary    = '!>  {:>8s} {:>8.3f} {:>12d}'
-    line_format_header     = '!>  {:>8s} {:>8s} {:>12s}'
-    line_format_bin_edge   = '!>  {:>8d} {:>8s} {:>12s}'
+    line_format_summary = '!>  {:>8s} {:>8.3f} {:>12d}'
+    line_format_header = '!>  {:>8s} {:>8s} {:>12s}'
+    line_format_bin_edge = '!>  {:>8d} {:>8s} {:>12s}'
     line_skip = '!> ...'
 
     # Find the range of the data type. Options are:
@@ -126,135 +128,138 @@ def histogram(image,nbins):
     #        narrow:      0 to   127  (unsigned char)
     data_minimum = array.min()
     if (data_minimum < -128):
-      data_type_minimum = -32768
+        data_type_minimum = -32768
     elif (data_minimum < 0):
-      data_type_minimum = -128
+        data_type_minimum = -128
     else:
-      data_type_minimum = 0
-    
+        data_type_minimum = 0
+
     data_maximum = array.max()
     if (data_maximum > 255):
-      data_type_maximum = 32767
+        data_type_maximum = 32767
     elif (data_maximum > 127):
-      data_type_maximum = 255
+        data_type_maximum = 255
     else:
-      data_type_maximum = 127
-    
-    level_4 = False # Show every possible value within data type range
+        data_type_maximum = 127
+
+    level_4 = False  # Show every possible value within data type range
     level_3 = False  # Show non-zero range within data type range
-    level_2 = False   # Show non-zero range with number_bins fixed
-    level_1 = True # Same as level 2, but adds star ('*') outputs
-    
+    level_2 = False  # Show non-zero range with number_bins fixed
+    level_1 = True  # Same as level 2, but adds star ('*') outputs
+
     if (level_4):
-      number_bins = data_type_maximum - data_type_minimum + 1
-      data_range = [data_type_minimum, data_type_maximum]
+        number_bins = data_type_maximum - data_type_minimum + 1
+        data_range = [data_type_minimum, data_type_maximum]
     if (level_3):
-      number_bins = data_type_maximum - data_type_minimum + 1
-      data_range = [data_type_minimum, data_type_maximum]
+        number_bins = data_type_maximum - data_type_minimum + 1
+        data_range = [data_type_minimum, data_type_maximum]
     if (level_2 or level_1):
-      data_range = [data_minimum, data_maximum]
-      number_bins = nbins
+        data_range = [data_minimum, data_maximum]
+        number_bins = nbins
 
     # Make sure number of bins isn't greater than the data range
     data_range_span = data_maximum - data_minimum + 1
     if (data_range_span < number_bins):
-      number_bins = data_range_span
-      print('!> WARNING: Histogram data range reset to {} bins.'.format(number_bins))
-      
+        number_bins = data_range_span
+        print('!> WARNING: Histogram data range reset to {} bins.'.format(number_bins))
+
     # Generate the histogram
     # https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
-    image_histogram,bin_edges = np.histogram(array,number_bins,data_range,None,None,False)
+    image_histogram, bin_edges = np.histogram(array, number_bins, data_range, None, None, False)
 
     total_number_voxels = sum(image_histogram)
     first_nonzero_idx = np.min(np.nonzero(image_histogram))
     last_nonzero_idx = np.max(np.nonzero(image_histogram))
-    bin_width = (data_maximum - data_minimum)/(number_bins-1)
-    
+    bin_width = (data_maximum - data_minimum) / (number_bins - 1)
+
     # Initialize variables
     total_percent = 0.0
     total_voxels = 0
     max_number_stars = 30
-    
+
     # Start output to screen
-    #print(guard)
+    # print(guard)
     print('!>  Number of bins:            {:8d}'.format(number_bins))
     print('!>  Bin width:                 {:8.3f}'.format(bin_width))
-    print('!>  Data type range: minimum = {:8d}, maximum = {:8d}'.format(data_type_minimum,data_type_maximum))
-    print('!>  Data range:      minimum = {:8d}, maximum = {:8d}'.format(data_minimum,data_maximum))
-    print('!>  Non-zero:          first = {:8d},    last = {:8d}'.format(first_nonzero_idx,last_nonzero_idx))
+    print('!>  Data type range: minimum = {:8d}, maximum = {:8d}'.format(data_type_minimum, data_type_maximum))
+    print('!>  Data range:      minimum = {:8d}, maximum = {:8d}'.format(data_minimum, data_maximum))
+    print('!>  Non-zero:          first = {:8d},    last = {:8d}'.format(first_nonzero_idx, last_nonzero_idx))
     print('!>  ')
-    print(line_format_header.format('ImageValue','Percent','#Voxels'))
+    print(line_format_header.format('ImageValue', 'Percent', '#Voxels'))
 
     for idx in range(number_bins):
-      
-      if (level_4):
-        image_value = idx + data_type_minimum
-        number_voxels = image_histogram[idx]
-        percent_number_voxels = number_voxels/total_number_voxels
-        print(line_format_data.format(image_value,percent_number_voxels,number_voxels))
-      
-      if (level_3):
-        image_value = idx + data_type_minimum
-        number_voxels = image_histogram[idx]
-        percent_number_voxels = number_voxels/total_number_voxels
-        if (idx==number_bins-1):
-          print(line_skip)
-        if ((idx>first_nonzero_idx and idx<last_nonzero_idx) or (idx==0) or (idx==number_bins-1)):
-          print(line_format_data.format(image_value,percent_number_voxels,number_voxels))
-        if (idx==0):
-          print(line_skip)
-          
-      if (level_2):
-        image_value = int((idx*bin_width) + data_minimum)
-        number_voxels = image_histogram[idx]
-        percent_number_voxels = number_voxels/total_number_voxels
-        print(line_format_data.format(image_value,percent_number_voxels,number_voxels))
-        if (idx == (number_bins-1)):
-          bin_edge = int(((idx+1)*bin_width) + data_minimum)
-          print(line_format_bin_edge.format(bin_edge,'-----','-----'))
 
-      if (level_1):
-        image_value = int((idx*bin_width) + data_minimum)
-        number_voxels = image_histogram[idx]
-        percent_number_voxels = number_voxels/total_number_voxels
-        number_stars = int(percent_number_voxels*100)
-        if (number_stars > max_number_stars):
-          print(line_format_data_stars.format(image_value,percent_number_voxels,number_voxels,max_number_stars*'*'+'...('+ str(number_stars)+'*)'))
-        else:
-          print(line_format_data_stars.format(image_value,percent_number_voxels,number_voxels,number_stars*'*'))
-        if (idx == (number_bins-1)):
-          bin_edge = int(((idx+1)*bin_width) + data_minimum)
-          print(line_format_bin_edge.format(bin_edge,'-----','-----'))
-  
-      total_percent += percent_number_voxels
-      total_voxels += number_voxels
-      
+        if (level_4):
+            image_value = idx + data_type_minimum
+            number_voxels = image_histogram[idx]
+            percent_number_voxels = number_voxels / total_number_voxels
+            print(line_format_data.format(image_value, percent_number_voxels, number_voxels))
+
+        if (level_3):
+            image_value = idx + data_type_minimum
+            number_voxels = image_histogram[idx]
+            percent_number_voxels = number_voxels / total_number_voxels
+            if (idx == number_bins - 1):
+                print(line_skip)
+            if ((idx > first_nonzero_idx and idx < last_nonzero_idx) or (idx == 0) or (idx == number_bins - 1)):
+                print(line_format_data.format(image_value, percent_number_voxels, number_voxels))
+            if (idx == 0):
+                print(line_skip)
+
+        if (level_2):
+            image_value = int((idx * bin_width) + data_minimum)
+            number_voxels = image_histogram[idx]
+            percent_number_voxels = number_voxels / total_number_voxels
+            print(line_format_data.format(image_value, percent_number_voxels, number_voxels))
+            if (idx == (number_bins - 1)):
+                bin_edge = int(((idx + 1) * bin_width) + data_minimum)
+                print(line_format_bin_edge.format(bin_edge, '-----', '-----'))
+
+        if (level_1):
+            image_value = int((idx * bin_width) + data_minimum)
+            number_voxels = image_histogram[idx]
+            percent_number_voxels = number_voxels / total_number_voxels
+            number_stars = int(percent_number_voxels * 100)
+            if (number_stars > max_number_stars):
+                print(line_format_data_stars.format(image_value, percent_number_voxels, number_voxels,
+                                                    max_number_stars * '*' + '...(' + str(number_stars) + '*)'))
+            else:
+                print(line_format_data_stars.format(image_value, percent_number_voxels, number_voxels,
+                                                    number_stars * '*'))
+            if (idx == (number_bins - 1)):
+                bin_edge = int(((idx + 1) * bin_width) + data_minimum)
+                print(line_format_bin_edge.format(bin_edge, '-----', '-----'))
+
+        total_percent += percent_number_voxels
+        total_voxels += number_voxels
+
     print('!> -------------------------------')
-    print(line_format_summary.format('TOTAL',total_percent,total_voxels))
+    print(line_format_summary.format('TOTAL', total_percent, total_voxels))
     print(guard)
     if (total_voxels != len(array)):
-      print('!> WARNING: Not all voxels in the image were included in the histogram.')
-      print('!>          Image voxel count     = {}.'.format(len(array)))
-      print('!>          Histogram voxel count = {}.'.format(total_voxels))
+        print('!> WARNING: Not all voxels in the image were included in the histogram.')
+        print('!>          Image voxel count     = {}.'.format(len(array)))
+        print('!>          Histogram voxel count = {}.'.format(total_voxels))
 
-def aix(infile,image):
+
+def aix(infile, image):
     guard = '!-------------------------------------------------------------------------------'
-    phys_dim = [x*y for x,y in zip(image.GetDimensions(), image.GetSpacing())]
-    position = [math.floor(x/y) for x,y in zip(image.GetOrigin(), image.GetSpacing())]
-    size = os.path.getsize(infile) # gets size of file; used to calculate K,M,G bytes
+    phys_dim = [x * y for x, y in zip(image.GetDimensions(), image.GetSpacing())]
+    position = [math.floor(x / y) for x, y in zip(image.GetOrigin(), image.GetSpacing())]
+    size = os.path.getsize(infile)  # gets size of file; used to calculate K,M,G bytes
     names = ['Bytes', 'KBytes', 'MBytes', 'GBytes']
     n_image_voxels = image.GetDimensions()[0] * image.GetDimensions()[1] * image.GetDimensions()[2]
     voxel_volume = image.GetSpacing()[0] * image.GetSpacing()[1] * image.GetSpacing()[2]
     i = 0
     while int(size) > 1024 and i < len(names):
-        i+=1
-        size = size / 2.0**10
-    
+        i += 1
+        size = size / 2.0 ** 10
+
     # Print header
     print(guard)
     print('!>')
     print('!> dim                            {:>8}  {:>8}  {:>8}'.format(*image.GetDimensions()))
-    print('!> off                            {:>8}  {:>8}  {:>8}'.format('-','-','-'))
+    print('!> off                            {:>8}  {:>8}  {:>8}'.format('-', '-', '-'))
     print('!> pos                            {:>8}  {:>8}  {:>8}'.format(*position))
     print('!> element size in mm             {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*image.GetSpacing()))
     print('!> phys dim in mm                 {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*phys_dim))
@@ -263,17 +268,19 @@ def aix(infile,image):
     print('!> Total memory size          {:.1f} {: <10}'.format(size, names[i]))
     print(guard)
 
+
 def infoNIFTII(reader):
     guard = '!-------------------------------------------------------------------------------'
     print('!> HEADER')
-    print('!> {:30s} = {}'.format('TimeDimension',reader.GetTimeDimension()))
-    print('!> {:30s} = {}'.format('TimeSpacing',reader.GetTimeSpacing()))
-    print('!> {:30s} = {}'.format('RescaleSlope',reader.GetRescaleSlope()))
-    print('!> {:30s} = {}'.format('RescaleIntercept',reader.GetRescaleIntercept()))
-    print('!> {:30s} = {}'.format('QFac',reader.GetQFac()))
-    print('!> {:30s} = {}'.format('QFormMatrix',reader.GetQFormMatrix()))
-    print('!> {:30s} = {}'.format('NIFTIHeader',reader.GetNIFTIHeader()))
+    print('!> {:30s} = {}'.format('TimeDimension', reader.GetTimeDimension()))
+    print('!> {:30s} = {}'.format('TimeSpacing', reader.GetTimeSpacing()))
+    print('!> {:30s} = {}'.format('RescaleSlope', reader.GetRescaleSlope()))
+    print('!> {:30s} = {}'.format('RescaleIntercept', reader.GetRescaleIntercept()))
+    print('!> {:30s} = {}'.format('QFac', reader.GetQFac()))
+    print('!> {:30s} = {}'.format('QFormMatrix', reader.GetQFormMatrix()))
+    print('!> {:30s} = {}'.format('NIFTIHeader', reader.GetNIFTIHeader()))
     print(guard)
+
 
 def applyMask(imageData, maskData):
     """Applies the mask to the image.
@@ -288,6 +295,7 @@ def applyMask(imageData, maskData):
     mask.Update()
     return mask.GetOutput()
 
+
 def applyTestBase(mesh, material_table):
     """Constructs to the FEM object.
     The first argument is the Image Mesh.
@@ -300,6 +308,7 @@ def applyTestBase(mesh, material_table):
     generator.Update()
 
     return generator.GetOutput()
+
 
 def applyTransform(vtk_image, matrix):
     """Applies the transform matrix to the image.
@@ -319,6 +328,7 @@ def applyTransform(vtk_image, matrix):
     reslice.Update()
 
     return reslice.GetOutput()
+
 
 def bmd_K2hpo4ToAsh(vtk_image):
     """Converts K2HPO4 density to ash density using equation from:
@@ -346,46 +356,50 @@ def bmd_K2hpo4ToAsh(vtk_image):
     1. Take the top 99.999th percentile.
     2. Take the average of the top N voxels (offset to avoid outliers)
     """
+
+
 def get_cortical_bone(array):
     sample_mean = 0
     sample_std = 0
     sample_count = 0
-    
-    #histogram(vtk_image,128)
-    #array = vtk_to_numpy(vtk_image.GetPointData().GetScalars()).ravel()
-    
+
+    # histogram(vtk_image,128)
+    # array = vtk_to_numpy(vtk_image.GetPointData().GetScalars()).ravel()
+
     # Method 1: Percentile
     if (False):
-        target_percentile = 99.999 # result is very sensitive to this number
-        rslt = np.percentile(array,target_percentile)
+        target_percentile = 99.999  # result is very sensitive to this number
+        rslt = np.percentile(array, target_percentile)
         sample_mean = rslt
-    
+
     # Method 2: Top voxels
     if (True):
         sorted_index_array = np.argsort(array)
         sorted_array = array[sorted_index_array]
-        n = 899             # number of top voxels
-        offset = 50         # voxels above offset in calculation
-        rslt = sorted_array[-n-offset : -offset]
-  
+        n = 899  # number of top voxels
+        offset = 50  # voxels above offset in calculation
+        rslt = sorted_array[-n - offset: -offset]
+
         sample_mean = np.mean(rslt)
         sample_std = np.std(rslt)
         sample_count = len(rslt)
 
     return [sample_mean, sample_std, sample_count]
-    
+
     """Returns the integer label for a given label string"""
+
+
 def get_label(label_string):
-    
     label = None
     for k, v in lb.labels_dict.items():
-        #print('k={}, v={}'.format(k,v['LABEL']))
+        # print('k={}, v={}'.format(k,v['LABEL']))
         if v['LABEL'] in label_string:
-            #print('Found {}, label = {}'.format(v['LABEL'],k))
+            # print('Found {}, label = {}'.format(v['LABEL'],k))
             label = k
-            
+
     return label
-    
+
+
 def bmd_metrics(vtk_image):
     """Computes the BMD metrics for the input vtk image. VTK image should be the isolated
     bone VOI (from applyMask). First, converts to numpy. Analysis performed in Numpy. The
@@ -403,17 +417,18 @@ def bmd_metrics(vtk_image):
     if voxel_count > 0:
         BMD_AVG = BMD_total / voxel_count  # [mg/cc K2HPO4]
     else:
-        BMD_AVG = 0.0 # Set to zero when there are no voxels (avoid divide by 0)
+        BMD_AVG = 0.0  # Set to zero when there are no voxels (avoid divide by 0)
     VOLUME_mm = voxel_count * voxel_volume
     VOLUME_cm = voxel_count * voxel_volume2  # [cm^3]
     BMC = BMD_AVG * VOLUME_cm  # [mg HA]
 
     return {
-    'Integral BMD [mg/cc]':BMD_AVG,
-    'Integral BMC [mg]':BMC,
-    'Bone Volume [mm^3]':VOLUME_mm,
-    'Bone Volume [cm^3]':VOLUME_cm
+        'Integral BMD [mg/cc]': BMD_AVG,
+        'Integral BMC [mg]': BMC,
+        'Bone Volume [mm^3]': VOLUME_mm,
+        'Bone Volume [cm^3]': VOLUME_cm
     }
+
 
 def bmd_preprocess(vtk_image, thresh_value):
     """Preprocess the calibrated image to remove densities less than 0 mg/cc
@@ -430,6 +445,7 @@ def bmd_preprocess(vtk_image, thresh_value):
     threshold.Update()
     return threshold.GetOutput()
 
+
 def cast2short(vtk_image):
     """Cast image data to Short"""
     cast = vtk.vtkImageCast()
@@ -437,6 +453,7 @@ def cast2short(vtk_image):
     cast.SetOutputScalarTypeToShort()
     cast.Update()
     return cast.GetOutput()
+
 
 def cast2unsignchar(vtk_image):
     """Cast Image Data to Unsigned Char"""
@@ -446,13 +463,15 @@ def cast2unsignchar(vtk_image):
     cast.Update()
     return cast.GetOutput()
 
+
 def changeInfo(vtk_image):
     """Changes the origin of image to 0,0,0"""
     change = vtk.vtkImageChangeInformation()
     change.SetInputData(vtk_image)
-    change.SetOutputOrigin(0,0,0)
+    change.SetOutputOrigin(0, 0, 0)
     change.Update()
     return change.GetOutput()
+
 
 def combineImageData_SF(image, fh_pmma_id_pad, gt_pmma_id_pad, pmma_mat_id):
     """Combines the 3 image data together to get final image.
@@ -529,6 +548,7 @@ def combineImageData_SF(image, fh_pmma_id_pad, gt_pmma_id_pad, pmma_mat_id):
 
     return final_image
 
+
 def combineImageData_VC(image, sup_pmma_id_pad, inf_pmma_id_pad, pmma_mat_id):
     """Combines the 3 image data together to get final image.
     The first argument is the original image data.
@@ -604,6 +624,7 @@ def combineImageData_VC(image, sup_pmma_id_pad, inf_pmma_id_pad, pmma_mat_id):
 
     return final_image
 
+
 def extractBox(extraction_bounds, model):
     """Extracts the geometry within the specific bounds.
     The first argument are the extraction bounds of the box.
@@ -621,6 +642,7 @@ def extractBox(extraction_bounds, model):
     geometry.Update()
 
     return geometry.GetOutput()
+
 
 def femoralHeadPMMA(femoral_head_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
     """Creates the image data for the femoral head PMMA cap.
@@ -674,6 +696,7 @@ def femoralHeadPMMA(femoral_head_model_bounds, spacing, origin, inval, outval, t
     fh_pmma_id_pad.Update()
     return fh_pmma_id_pad.GetOutput()
 
+
 def femoralHeadPMMA_SLS(femoral_head_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
     """Creates the image data for the femoral head PMMA cap.
     The arguments are the femoral head model bounds, image spacing, image origin, in value of pmma, out value for pmma, pmma thickness and pmma material ID.
@@ -726,6 +749,7 @@ def femoralHeadPMMA_SLS(femoral_head_model_bounds, spacing, origin, inval, outva
     fh_pmma_id_pad.Update()
     return fh_pmma_id_pad.GetOutput()
 
+
 def finalRegistration(ref_image):
     """Performs final 3D image registration in SimpleITK.
     The first argument is the image.
@@ -740,10 +764,10 @@ def finalRegistration(ref_image):
 
     message("Performing initial registration transform...")
     initial_transform = sitk.CenteredTransformInitializer(fixed_image,
-                                                      moving_image,
-                                                      sitk.Euler3DTransform(),
-                                                      sitk.CenteredTransformInitializerFilter.MOMENTS
-                                                      )
+                                                          moving_image,
+                                                          sitk.Euler3DTransform(),
+                                                          sitk.CenteredTransformInitializerFilter.MOMENTS
+                                                          )
     moving_resampled = sitk.Resample(
         moving_image,
         fixed_image,
@@ -751,13 +775,13 @@ def finalRegistration(ref_image):
         sitk.sitkLinear,
         0.0,
         moving_image.GetPixelIDValue()
-        )
+    )
 
     message("Setting up registration parameters...")
     registration_method = sitk.ImageRegistrationMethod()
     registration_method.SetMetricAsJointHistogramMutualInformation(
         numberOfHistogramBins=100
-        )
+    )
     registration_method.SetMetricSamplingStrategy(registration_method.RANDOM)
     registration_method.SetMetricSamplingPercentage(0.01)
     registration_method.SetInterpolator(sitk.sitkLinear)
@@ -766,48 +790,48 @@ def finalRegistration(ref_image):
         numberOfIterations=100,
         convergenceMinimumValue=1e-6,
         convergenceWindowSize=10
-        )
+    )
     registration_method.SetOptimizerScalesFromPhysicalShift()
     registration_method.SetShrinkFactorsPerLevel(shrinkFactors=[4, 2, 1])
     registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas=[2, 1, 0])
     registration_method.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
     registration_method.SetInitialTransform(initial_transform,
-        inPlace=False
-        )
+                                            inPlace=False
+                                            )
 
     message("Executing the registration...")
     final_transform = registration_method.Execute(sitk.Cast(fixed_image,
-        sitk.sitkFloat32),
-        sitk.Cast(moving_image,
-        sitk.sitkFloat32)
-        )
+                                                            sitk.sitkFloat32),
+                                                  sitk.Cast(moving_image,
+                                                            sitk.sitkFloat32)
+                                                  )
     message("Registration complete...")
 
     print(('Final metric value: {0}'.format(registration_method.GetMetricValue())))
     print(('Optimizer\'s stopping condition, {0}'.format(
-    registration_method.GetOptimizerStopConditionDescription())))
+        registration_method.GetOptimizerStopConditionDescription())))
 
     message("Resampling the images...")
     moving_resampled = sitk.Resample(moving_image,
-        fixed_image,
-        final_transform,
-        sitk.sitkLinear,
-        0.0,
-        moving_image.GetPixelIDValue()
-        )
+                                     fixed_image,
+                                     final_transform,
+                                     sitk.sitkLinear,
+                                     0.0,
+                                     moving_image.GetPixelIDValue()
+                                     )
     moving_thres = sitk.BinaryThreshold(moving_resampled,
-        lowerThreshold=0.01,
-        insideValue=1,
-        outsideValue=0
-        )
+                                        lowerThreshold=0.01,
+                                        insideValue=1,
+                                        outsideValue=0
+                                        )
 
     org_trans = sitk.Resample(trans_image,
-    fixed_image,
-    final_transform,
-    sitk.sitkBSpline,
-    0.0,
-    trans_image.GetPixelIDValue()
-    )
+                              fixed_image,
+                              final_transform,
+                              sitk.sitkBSpline,
+                              0.0,
+                              trans_image.GetPixelIDValue()
+                              )
 
     message("Writing out temp images...")
     sitk.WriteImage(moving_thres, "temp_mask2.nii")
@@ -868,6 +892,7 @@ def greaterTrochanterPMMA(greater_trochanter_model_bounds, spacing, origin, inva
     gt_pmma_id_pad.Update()
     return gt_pmma_id_pad.GetOutput()
 
+
 def Image2Mesh(vtk_image):
     """Mesh image data to hexahedral elements."""
     mesher = vtkbone.vtkboneImageToMesh()
@@ -877,12 +902,14 @@ def Image2Mesh(vtk_image):
     message("Generated %d nodes" % mesher.GetOutput().GetNumberOfPoints())
     return mesher.GetOutput()
 
+
 def imageConnectivity(vtk_image):
     """Performd image connectivity filter"""
     conn = vtkbone.vtkboneImageConnectivityFilter()
     conn.SetInputData(vtk_image)
     conn.Update()
     return conn.GetOutput()
+
 
 def imageResample(vtk_image, isotropic_voxel_size):
     """Resample the input vtk image to isotropic voxel size as specified.
@@ -894,38 +921,39 @@ def imageResample(vtk_image, isotropic_voxel_size):
     image_resample.SetInputData(vtk_image)
     image_resample.SetInterpolationModeToCubic()
     image_resample.SetDimensionality(3)
-    image_resample.SetAxisOutputSpacing(0,isotropic_voxel_size)
-    image_resample.SetAxisOutputSpacing(1,isotropic_voxel_size)
-    image_resample.SetAxisOutputSpacing(2,isotropic_voxel_size)
+    image_resample.SetAxisOutputSpacing(0, isotropic_voxel_size)
+    image_resample.SetAxisOutputSpacing(1, isotropic_voxel_size)
+    image_resample.SetAxisOutputSpacing(2, isotropic_voxel_size)
     image_resample.Update()
     return image_resample.GetOutput()
+
 
 def isotropicResampling(image, iso_resolution, image_type):
     """An alternative to imageResample that uses SimpleITK
     and avoids aliasing"""
 
     message('Resampling to a resolution of {} mm'.format(iso_resolution))
-    
+
     # image_type is either 'ct' or 'mask'
     if image_type in 'ct':
         sigma = iso_resolution * np.sqrt(2 * np.log(2)) / np.pi
         message('  For a half-power cut-off frequency of {:0.6f}, \n'
-                '           a standard deviation of {:0.6f} is being used.'.format(1/(2.0*iso_resolution), sigma))
-        
+                '           a standard deviation of {:0.6f} is being used.'.format(1 / (2.0 * iso_resolution), sigma))
+
         # Filter each sampling directions as needed
         for i, spacing in enumerate(image.GetSpacing()):
             if spacing > iso_resolution:
                 message('  No antialiasing in direction {}'.format(i))
                 continue
-        
+
             message('  Antialiasing in direction {}'.format(i))
             image = sitk.RecursiveGaussian(
-              image,
-              sigma, False,
-              sitk.RecursiveGaussianImageFilter.ZeroOrder,
-              i
+                image,
+                sigma, False,
+                sitk.RecursiveGaussianImageFilter.ZeroOrder,
+                i
             )
-        
+
     # Determine the output size
     resolution = [iso_resolution for i in range(image.GetDimension())]
     size = [int(np.ceil(s * i / o)) for o, i, s in
@@ -937,42 +965,42 @@ def isotropicResampling(image, iso_resolution, image_type):
     stats.Execute(image)
     vox_min = stats.GetMinimum()
     message('  Minimum intensity: {:8.6f}'.format(vox_min))
-    
+
     transform = sitk.Euler3DTransform()
     transform.SetIdentity()
-    
+
     if image_type in 'ct':
         message('  Using BSpline interpolation')
         output = sitk.Resample(
-          image,
-          size,
-          transform,
-          sitk.sitkBSpline, #sitk.sitkNearestNeighbor, sitk.sitkLinear
-          image.GetOrigin(),
-          resolution,
-          image.GetDirection(),
-          vox_min,
-          image.GetPixelID()
+            image,
+            size,
+            transform,
+            sitk.sitkBSpline,  # sitk.sitkNearestNeighbor, sitk.sitkLinear
+            image.GetOrigin(),
+            resolution,
+            image.GetDirection(),
+            vox_min,
+            image.GetPixelID()
         )
     elif image_type in 'mask':
         message('  Using NearestNeighbor interpolation')
         output = sitk.Resample(
-          image,
-          size,
-          transform,
-          sitk.sitkNearestNeighbor, #sitk.sitkBSpline, sitk.sitkLinear
-          image.GetOrigin(),
-          resolution,
-          image.GetDirection(),
-          vox_min,
-          image.GetPixelID()
+            image,
+            size,
+            transform,
+            sitk.sitkNearestNeighbor,  # sitk.sitkBSpline, sitk.sitkLinear
+            image.GetOrigin(),
+            resolution,
+            image.GetDirection(),
+            vox_min,
+            image.GetPixelID()
         )
     else:
         os.sys.exit('[ERROR] Unknown input type to resample: \"{}\".'.format(image_type))
-        
-        
+
     return output
-    
+
+
 def inferiorVertebralPMMA(inferior_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
     """Creates the image data for the inferior vertebral PMMA cap.
     The arguments are the inferior vertebral  model bounds, image spacing, image origin, in value of pmma, out value for pmma, pmma thickness and pmma material ID.
@@ -1025,6 +1053,7 @@ def inferiorVertebralPMMA(inferior_model_bounds, spacing, origin, inval, outval,
     iv_pmma_id_pad.Update()
     return iv_pmma_id_pad.GetOutput()
 
+
 def iterativeClosestPoint(source, target):
     """Performs ICP to get a transformation.
     The first argument is the source.
@@ -1044,6 +1073,7 @@ def iterativeClosestPoint(source, target):
     icp.Update()
     return icp.GetMatrix()
 
+
 def marchingCubes(vtk_image):
     """Performs Marching cubes to get a surface.
     The first argument is the vtk image data.
@@ -1051,9 +1081,10 @@ def marchingCubes(vtk_image):
     """
     march = vtk.vtkImageMarchingCubes()
     march.SetInputData(vtk_image)
-    march.SetValue(1,1.0)
+    march.SetValue(1, 1.0)
     march.Update()
     return march.GetOutput()
+
 
 def maskThreshold(imageData, threshold_value):
     """Applies the threshold value to the input image.
@@ -1070,6 +1101,7 @@ def maskThreshold(imageData, threshold_value):
     thres.SetOutputScalarTypeToUnsignedChar()
     thres.Update()
     return thres.GetOutput()
+
 
 def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):
     """Defines the material table for the FE model.
@@ -1095,21 +1127,20 @@ def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat
 
     ##
     # Determine maximum material ID: exclude PMMA
-    values = vtk_to_numpy (mesh.GetCellData().GetScalars())
+    values = vtk_to_numpy(mesh.GetCellData().GetScalars())
     max_id = int(max(values))
     # message("Maximum ID: %d" % max_id)
 
     # Create array of Young's Modulus values
-    bone_E = np.arange(1, max_id+2, dtype=np.float32)
+    bone_E = np.arange(1, max_id + 2, dtype=np.float32)
     # Create array of Poisson's ratio values
-    bone_nu = poissons_ratio * np.ones(max_id+1, dtype=np.float32)
+    bone_nu = poissons_ratio * np.ones(max_id + 1, dtype=np.float32)
     bone_nu_vtk = numpy_to_vtk(bone_nu, deep=True, array_type=vtk.VTK_FLOAT)
 
     ##
     # Define the For loop to create the elastic modulus array
     message("Deriving Density-Elastic Modulus values for material table...")
-    for i in range(1, max_id+1, 1):
-
+    for i in range(1, max_id + 1, 1):
         # Power law density-Elastic Modulus conversion. Requires Density in [g/cc], not [mg/cc].
         den_bin_step = 0.001
         den = i * den_bin_step
@@ -1132,6 +1163,7 @@ def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat
     material_table.AddMaterial(1, bone_material_array)
     return material_table
 
+
 def message(msg, *additionalLines):
     """Print message with time stamp
     The first argument is printed with the a time stamp
@@ -1140,6 +1172,7 @@ def message(msg, *additionalLines):
     print("%8.2f %s" % (time.time() - start_time, msg))
     for line in additionalLines:
         print(" " * 9 + line)
+
 
 def numpy2vtk(numpy_image, extent, spacing, origin):
     """Convert numpy image to vtk Image Data.
@@ -1159,6 +1192,7 @@ def numpy2vtk(numpy_image, extent, spacing, origin):
     vtk_image.CopyImportVoidPointer(numpy_image, numpy_image.nbytes)
     return vtk_image.GetOutput()
 
+
 def point2cellData(vtk_image):
     """ Converts vtk image point data to cell data.
     The first argument is the vtk image.
@@ -1170,6 +1204,7 @@ def point2cellData(vtk_image):
     pt2cell.Update()
     return pt2cell.GetOutput()
 
+
 def preRotateImage(image, mask, z_rotation):
     """Pre-rotation the image for ICP alignment."""
     message("Pre-rotating image...")
@@ -1177,10 +1212,10 @@ def preRotateImage(image, mask, z_rotation):
     origin = image.GetOrigin()
     extent = image.GetExtent()
     bounds = image.GetBounds()
-    center = [None]*3
-    center[0] = (bounds[1] + bounds[0])/2.0
-    center[1] = (bounds[3] + bounds[2])/2.0
-    center[2] = (bounds[5] + bounds[4])/2.0
+    center = [None] * 3
+    center[0] = (bounds[1] + bounds[0]) / 2.0
+    center[1] = (bounds[3] + bounds[2]) / 2.0
+    center[2] = (bounds[5] + bounds[4]) / 2.0
 
     transform = vtk.vtkTransform()
     transform.Translate(center[0], center[1], center[2])
@@ -1205,6 +1240,7 @@ def preRotateImage(image, mask, z_rotation):
 
     return image_reslice.GetOutput(), mask_reslice.GetOutput()
 
+
 def readPolyData(vtk_poly):
     """Reads a VTK Legacy file in PolyData Format.
     The first argument is the filename.
@@ -1215,6 +1251,7 @@ def readPolyData(vtk_poly):
     poly.Update()
     return poly.GetOutput()
 
+
 def readTransform(transform_file):
     """Reads a *.dat file and extracts 4x4 rotation matrix.
     The first argument is the filename.
@@ -1224,37 +1261,38 @@ def readTransform(transform_file):
     data = transform_data.readlines()
     transform_data.close()
 
-
     matrix = [
-            data[2].strip().split(),
-            data[3].strip().split(),
-            data[4].strip().split(),
-            data[5].strip().split()
-            ]
+        data[2].strip().split(),
+        data[3].strip().split(),
+        data[4].strip().split(),
+        data[5].strip().split()
+    ]
 
     m = vtk.vtkMatrix4x4()
-    m.SetElement(0,0, float(matrix[0][0]))
-    m.SetElement(0,1, float(matrix[0][1]))
-    m.SetElement(0,2, float(matrix[0][2]))
-    m.SetElement(0,3, float(matrix[0][3]))
-    m.SetElement(1,0, float(matrix[1][0]))
-    m.SetElement(1,1, float(matrix[1][1]))
-    m.SetElement(1,2, float(matrix[1][2]))
-    m.SetElement(1,3, float(matrix[1][3]))
-    m.SetElement(2,0, float(matrix[2][0]))
-    m.SetElement(2,1, float(matrix[2][1]))
-    m.SetElement(2,2, float(matrix[2][2]))
-    m.SetElement(2,3, float(matrix[2][3]))
-    m.SetElement(3,0, float(matrix[3][0]))
-    m.SetElement(3,1, float(matrix[3][1]))
-    m.SetElement(3,2, float(matrix[3][2]))
-    m.SetElement(3,3, float(matrix[3][3]))
+    m.SetElement(0, 0, float(matrix[0][0]))
+    m.SetElement(0, 1, float(matrix[0][1]))
+    m.SetElement(0, 2, float(matrix[0][2]))
+    m.SetElement(0, 3, float(matrix[0][3]))
+    m.SetElement(1, 0, float(matrix[1][0]))
+    m.SetElement(1, 1, float(matrix[1][1]))
+    m.SetElement(1, 2, float(matrix[1][2]))
+    m.SetElement(1, 3, float(matrix[1][3]))
+    m.SetElement(2, 0, float(matrix[2][0]))
+    m.SetElement(2, 1, float(matrix[2][1]))
+    m.SetElement(2, 2, float(matrix[2][2]))
+    m.SetElement(2, 3, float(matrix[2][3]))
+    m.SetElement(3, 0, float(matrix[3][0]))
+    m.SetElement(3, 1, float(matrix[3][1]))
+    m.SetElement(3, 2, float(matrix[3][2]))
+    m.SetElement(3, 3, float(matrix[3][3]))
 
     return m
+
 
 def sitk2numpy(sitk_image):
     numpy_image = sitk.GetArrayFromImage(sitk_image)
     return numpy_image
+
 
 def superiorVertebralPMMA(superior_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
     """Creates the image data for the superior vertebral PMMA cap.
@@ -1309,6 +1347,7 @@ def superiorVertebralPMMA(superior_model_bounds, spacing, origin, inval, outval,
 
     return sv_pmma_id_pad.GetOutput()
 
+
 def vertebralBodyExtract(image, mask_image):
     """Extracts the body of the vertebra from the whole vertebra for FE.
     The first argument is the vertebra mask.
@@ -1319,26 +1358,26 @@ def vertebralBodyExtract(image, mask_image):
     bounds = surface.GetBounds()
     message("Model Bounds: %s" % str(bounds))
     image_bounds = [
-                    int(bounds[0]),
-                    int(bounds[1]),
-                    int((bounds[2]+bounds[3])/2),
-                    int(bounds[3]),
-                    int(bounds[4]),
-                    int(bounds[5])
-                    ]
+        int(bounds[0]),
+        int(bounds[1]),
+        int((bounds[2] + bounds[3]) / 2),
+        int(bounds[3]),
+        int(bounds[4]),
+        int(bounds[5])
+    ]
 
     message("Extracting Body VOI...")
     extract = vtk.vtkExtractVOI()
     extract.SetInputData(mask_image)
     extract.SetVOI(image_bounds)
-    extract.SetSampleRate(1,1,1)
+    extract.SetSampleRate(1, 1, 1)
     extract.IncludeBoundaryOn()
     extract.Update()
 
     message("Eroding the body mask...")
     erode = vtk.vtkImageContinuousErode3D()
     erode.SetInputData(extract.GetOutput())
-    erode.SetKernelSize(21,21,21)
+    erode.SetKernelSize(21, 21, 21)
     erode.Update()
 
     message("Extracting Largest connected component...")
@@ -1347,7 +1386,7 @@ def vertebralBodyExtract(image, mask_image):
     message("Dilating the body mask...")
     dilate = vtk.vtkImageContinuousDilate3D()
     dilate.SetInputData(conn)
-    dilate.SetKernelSize(50,25,50)
+    dilate.SetKernelSize(50, 25, 50)
     dilate.Update()
 
     message("Boolean of vertebra and dialtion masks...")
@@ -1381,6 +1420,7 @@ def vertebralBodyExtract(image, mask_image):
 
     return image, final_body_mask
 
+
 def vtk2numpy(vtk_image):
     """Convert vtk image data to a numpy array in same shape.
     The first argument is the vtk image data.
@@ -1389,6 +1429,7 @@ def vtk2numpy(vtk_image):
     numpy_image = vtk_to_numpy(vtk_image.GetPointData().GetScalars())
     numpy_image.shape = vtk_image.GetDimensions()
     return numpy_image
+
 
 def writeTXTfile(input_dict, fileName, output_directory):
     """Write a text file containing the parameters in the input array.
@@ -1402,7 +1443,6 @@ def writeTXTfile(input_dict, fileName, output_directory):
     for key, value in list(input_dict.items()):
         txt_file.write(str(key) + '\t' + str(value) + '\n')
     txt_file.close()
-
 
 # def writeN88Model(model, fileName, pathname):
 #     """Writes out a N88Model.

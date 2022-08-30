@@ -13,7 +13,8 @@ from ogo.util.echo_arguments import echo_arguments
 from datetime import date
 import json
 
-def printFiles(imagesTr_files,labelsTr_files,imagesTs_files):
+
+def printFiles(imagesTr_files, labelsTr_files, imagesTs_files):
     guard = '!-------------------------------------------------------------------------------'
     print(guard)
     print('imagesTr:')
@@ -28,27 +29,31 @@ def printFiles(imagesTr_files,labelsTr_files,imagesTs_files):
     for fname in imagesTs_files:
         print('{:s}'.format(fname))
     print()
-        
+
+
 def getOnlyNIFTI(file_list):
     for fname in file_list:
         if 'nii' not in fname:
             file_list.remove(fname)
     return file_list
-        
+
+
 def getSortedFileList(dir_name):
-    list_of_files = sorted( filter( lambda x: os.path.isfile(os.path.join(dir_name, x)),os.listdir(dir_name) ) )
+    list_of_files = sorted(filter(lambda x: os.path.isfile(os.path.join(dir_name, x)), os.listdir(dir_name)))
     return list_of_files
 
-def appendSubdirectory(file_list,subdir):
+
+def appendSubdirectory(file_list, subdir):
     idx = 0
     for fname in file_list:
-        file_list[idx] = os.path.join(subdir,fname)
+        file_list[idx] = os.path.join(subdir, fname)
         idx += 1
     return file_list
- 
-#!-------------------------------------------------------------------------------
-def CreateDatasetJSON(task_directory, name, description, reference, license, release, modality, tensorImageSize, overwrite=False):
 
+
+# !-------------------------------------------------------------------------------
+def CreateDatasetJSON(task_directory, name, description, reference, license, release, modality, tensorImageSize,
+                      overwrite=False):
     # Set some variables
     dataset_name = name
     dataset_description = description
@@ -66,10 +71,10 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
         if result.lower() not in ['y', 'yes']:
             print('Not overwriting. Exiting...')
             os.sys.exit()
-    
+
     # Check for mandatory imagesTr and labelsTr directories
-    imagesTr_path = os.path.join(task_directory,'imagesTr/')
-    labelsTr_path = os.path.join(task_directory,'labelsTr/')
+    imagesTr_path = os.path.join(task_directory, 'imagesTr/')
+    labelsTr_path = os.path.join(task_directory, 'labelsTr/')
     if not os.path.exists(imagesTr_path):
         print('ERROR: Expected path to imagesTr. This is a required path.')
         print('       {:s}'.format(imagesTr_path))
@@ -78,14 +83,14 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
         print('ERROR: Expected path to labelsTr. This is a required path.')
         print('       {:s}'.format(labelsTr_path))
         os.sys.exit()
-    
+
     # Check for optional imagesTs directory
-    imagesTs_path = os.path.join(task_directory,'imagesTs/')
+    imagesTs_path = os.path.join(task_directory, 'imagesTs/')
     if not os.path.exists(imagesTs_path):
         print('WARNING: Path to imagesTs does not exist. This is an optional path.')
         print('       {:s}'.format(imagesTs_path))
         print()
-    
+
     # Generate a list of files in each directory
     imagesTr_files = getOnlyNIFTI(getSortedFileList(imagesTr_path))
     labelsTr_files = getOnlyNIFTI(getSortedFileList(labelsTr_path))
@@ -93,42 +98,42 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
         imagesTs_files = getOnlyNIFTI(getSortedFileList(imagesTs_path))
     else:
         imagesTs_files = []
-            
+
     # Check there are files in each mandatory directory
-    if len(imagesTr_files)<1:
+    if len(imagesTr_files) < 1:
         print('ERROR: No files found in imagesTr.')
         os.sys.exit()
-    if len(labelsTr_files)<1:
+    if len(labelsTr_files) < 1:
         print('ERROR: No files found in labelsTr.')
         os.sys.exit()
-        
+
     # Check that number of imagesTr files is equal number of labelsTr files
     if len(imagesTr_files) != len(labelsTr_files):
-        print('ERROR: Number of files in imagesTr must equal labelsTr: {:d} != {:d}.'\
-        .format(len(imagesTr_files),len(labelsTr_files)))
+        print('ERROR: Number of files in imagesTr must equal labelsTr: {:d} != {:d}.' \
+              .format(len(imagesTr_files), len(labelsTr_files)))
         os.sys.exit()
-    
+
     # Check that the files are named the same and in order
     idx = 0
     for fname in imagesTr_files:
-        name,ext = os.path.splitext(fname)
+        name, ext = os.path.splitext(fname)
         if 'gz' in ext:
-            name = os.path.splitext(name)[0] # Manages files with double extension
+            name = os.path.splitext(name)[0]  # Manages files with double extension
         if '_0000' in name:
-            name = name.replace('_0000','') # We account for using _0000 in imagesTr but not labelsTr
+            name = name.replace('_0000', '')  # We account for using _0000 in imagesTr but not labelsTr
         if name not in labelsTr_files[idx]:
             print('ERROR: Expected matching names in imagesTr and labelsTr.')
-            print('       File {:s} does not match {:s}'.format(name,labelsTr_files[idx]))
+            print('       File {:s} does not match {:s}'.format(name, labelsTr_files[idx]))
             os.sys.exit()
         idx += 1
-    
+
     # Complete the path for each file by adding subdirectory
-    appendSubdirectory(imagesTr_files,'./imagesTr')
-    appendSubdirectory(labelsTr_files,'./labelsTr')
-    appendSubdirectory(imagesTs_files,'./imagesTs')
-    
+    appendSubdirectory(imagesTr_files, './imagesTr')
+    appendSubdirectory(labelsTr_files, './labelsTr')
+    appendSubdirectory(imagesTs_files, './imagesTs')
+
     # Show the final list file files
-    printFiles(imagesTr_files,labelsTr_files,imagesTs_files)
+    printFiles(imagesTr_files, labelsTr_files, imagesTs_files)
 
     # Create labels
     labels = {
@@ -142,20 +147,20 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
         7: "L4",
         8: "L3",
         9: "L2",
-       10: "L1"
-   }
+        10: "L1"
+    }
 
     # Create an array of dict for image/label pairs
     # Help! I cannot figure out this more compact version:
     #     json_dict['training'] = [{'image': "%s" % i, 'label': "%s" % i} for i in imagesTr_files]
     # So instead I do it the long way...
     training = []
-    for idx,fname in enumerate(imagesTr_files):
+    for idx, fname in enumerate(imagesTr_files):
         tmp_dict = {}
-        tmp_dict["image"] = imagesTr_files[idx].replace('_0000','') # Remove trailing labels for imagesTr
+        tmp_dict["image"] = imagesTr_files[idx].replace('_0000', '')  # Remove trailing labels for imagesTr
         tmp_dict["label"] = labelsTr_files[idx]
         training.append(tmp_dict)
-    
+
     # Create the json file
     json_dict = {}
     json_dict['name'] = dataset_name
@@ -166,28 +171,29 @@ def CreateDatasetJSON(task_directory, name, description, reference, license, rel
     json_dict['release'] = dataset_release
     json_dict['modality'] = {str(0): dataset_modality}
     json_dict['labels'] = {str(i): labels[i] for i in labels.keys()}
-    
+
     json_dict['numTraining'] = len(imagesTr_files)
     json_dict['numTest'] = len(imagesTs_files)
     json_dict['training'] = training
-    json_dict['test'] = ["%s" % fn.replace('_0000','') for fn in imagesTs_files]
+    json_dict['test'] = ["%s" % fn.replace('_0000', '') for fn in imagesTs_files]
 
     print('Saving JSON file:\n{:s}'.format(json_filename))
     print(json_dict)
-    
+
     print('Saving JSON file:')
     print(' {:s}'.format(json_filename))
-  
+
     # Dump directly from dictionary
     with open(json_filename, 'w') as outfile:
         json.dump(json_dict, outfile)
-    
-    #json_string = json.dumps(json_dict)
-    #print(json_string)
-    
+
+    # json_string = json.dumps(json_dict)
+    # print(json_string)
+
+
 def main():
     # Setup description
-    description='''
+    description = '''
 Data wrangling to prepare for running nnUNet. 
 
 The output of this program is the dataset.json file required for nnUNet.
@@ -221,7 +227,7 @@ trailing "_0000". So, for above files they would be referred to as:
 
 '''
 
-    epilog='''
+    epilog = '''
 Prior to running this program, it is expected the appropriate directories, 
 file naming, and pre-processing are prepared. Use a script to aid in 
 moving raw data into this format.
@@ -253,12 +259,17 @@ ogoCreateDatasetJSON /raw_data_base/nnUNet_raw_data/Task501_Spine \\
     )
     parser.add_argument('task_directory', default=".", metavar='DIR', help='Directory path for Task5XX_...')
     parser.add_argument('--name', metavar='TEXT', default="RETROData", help='Name of dataset (default: %(default)s)')
-    parser.add_argument('--description', metavar='TEXT', default="KUB CT abdomen scans including L4 and both femurs", help='Description of dataset (default: %(default)s)')
-    parser.add_argument('--reference', metavar='TEXT', default="McCaig Institute, University of Calgary", help='Reference of dataset (default: %(default)s)')
-    parser.add_argument('--license', metavar='TEXT', default="CC-BY-SA 4.0", help='License for dataset (default: %(default)s)')
-    parser.add_argument('--release', metavar='TEXT', default=date.today().strftime("%B %d, %Y"), help='Date of dataset (default: %(default)s)')
+    parser.add_argument('--description', metavar='TEXT', default="KUB CT abdomen scans including L4 and both femurs",
+                        help='Description of dataset (default: %(default)s)')
+    parser.add_argument('--reference', metavar='TEXT', default="McCaig Institute, University of Calgary",
+                        help='Reference of dataset (default: %(default)s)')
+    parser.add_argument('--license', metavar='TEXT', default="CC-BY-SA 4.0",
+                        help='License for dataset (default: %(default)s)')
+    parser.add_argument('--release', metavar='TEXT', default=date.today().strftime("%B %d, %Y"),
+                        help='Date of dataset (default: %(default)s)')
     parser.add_argument('--modality', metavar='TEXT', default="CT", help='Modality of dataset (default: %(default)s)')
-    parser.add_argument('--tensorImageSize', metavar='TEXT', default="3D", help='TensorImageSize of dataset (default: %(default)s)')
+    parser.add_argument('--tensorImageSize', metavar='TEXT', default="3D",
+                        help='TensorImageSize of dataset (default: %(default)s)')
     parser.add_argument('-o', '--overwrite', action='store_true', help='Overwrite output without asking')
 
     print()
@@ -268,6 +279,7 @@ ogoCreateDatasetJSON /raw_data_base/nnUNet_raw_data/Task501_Spine \\
 
     # Run program
     CreateDatasetJSON(**vars(args))
+
 
 if __name__ == '__main__':
     main()
