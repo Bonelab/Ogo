@@ -1073,7 +1073,7 @@ def iterativeClosestPoint(source, target):
     icp.Update()
     return icp.GetMatrix()
 
-
+    
 def marchingCubes(vtk_image):
     """Performs Marching cubes to get a surface.
     The first argument is the vtk image data.

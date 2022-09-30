@@ -134,7 +134,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
     for idx, label in enumerate(label_list):
         rod_name = phantom_dict['rod_names'][idx]
         rod_mean = filt.GetMean(int(label))
-        rod_std = filt.GetVariance(int(label))
+        rod_std = np.sqrt(filt.GetVariance(int(label)))
         rod_count = filt.GetCount(int(label))
         ogo.message('Rod {:s}: {:8.3f} {:8.3f} {:8d}'.format(rod_name, rod_mean, rod_std,
                                                              rod_count))  # Report mean, SD, # voxels
@@ -321,7 +321,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
         if not filt.HasLabel(value):
             ogo.message('[WARNING] Could not find values for label \"{}\" ({})'.format(label, value))
 
-        labels_data[label] = {'ID': value, 'mean': filt.GetMean(value), 'stdev': filt.GetVariance(value),
+        labels_data[label] = {'ID': value, 'mean': filt.GetMean(value), 'stdev': np.sqrt(filt.GetVariance(value)),
                               'count': filt.GetCount(value), 'marker': ''}
 
         if (useL4 and label in 'Cortical Bone'):
@@ -409,12 +409,14 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
     ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
     ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
+    ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
     imfilt.Execute(den)
     ogo.message('  {:>27s} {:s}'.format('OUTPUT Image Information:', ''))
     ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
     ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
     ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
     ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
+    ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
     ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
 
     ogo.message('Writing result to ' + output_image)
@@ -443,8 +445,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
         txt_file.write('Calibration parameters:\n')
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
         txt_file.write('  {:>27s} {}\n'.format('Fit:', calib._is_fit))
-        txt_file.write('  {:>27s} {:8.6f}\n'.format('Energy [keV]:', calib.effective_energy))
-        txt_file.write('  {:>27s} {:8.6f}\n'.format('Max R^2:', calib.max_r2))
+        txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
+        txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
         txt_file.write('  {:>27s}\n'.format('Density [HU]:'))
         txt_file.write('  {:>27s} {:8.3f}'.format('Adipose ', calib.adipose_hu))
@@ -486,18 +488,18 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
         txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
         txt_file.write('\n')
         txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('HU-u/p Slope', calib.hu_to_mass_attenuation_slope))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('HU-u/p Y-Intercept', calib.hu_to_mass_attenuation_intercept))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('HU-Material Density Slope', calib.hu_to_density_slope))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('HU-Material Density Y-Intercept', calib.hu_to_density_intercept))
+        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Slope', calib.hu_to_mass_attenuation_slope))
+        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Y-Intercept', calib.hu_to_mass_attenuation_intercept))
+        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Slope', calib.hu_to_density_slope))
+        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept', calib.hu_to_density_intercept))
 
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
         txt_file.write('\n')
-        txt_file.write('Unformatted calibration parameters:\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        for label, value in calib.get_dict().items():
-            txt_file.write('  {:>27s} {}\n'.format(label, value))
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+        #txt_file.write('Unformatted calibration parameters:\n')
+        #txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+        #for label, value in calib.get_dict().items():
+        #    txt_file.write('  {:>27s} {}\n'.format(label, value))
+        #txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
 
         txt_file.close()
 

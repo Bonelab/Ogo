@@ -55,8 +55,11 @@ def vertebra(input_image, input_mask, output_model, vertebra, iso_resolution, ov
 
     ogo.message('Reading calibrated input CT image:')
     ogo.message('      \"{}\"'.format(input_image))
-    ct = sitk.ReadImage(input_image)
-
+    ct_reader = vtk.vtkNIFTIImageReader()
+    ct_reader.SetFileName(input_image)
+    ct_reader.Update()
+    ct = ct_reader.GetOutput()
+    
     # Read input mask
     if not os.path.isfile(input_mask):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_mask))
@@ -66,16 +69,74 @@ def vertebra(input_image, input_mask, output_model, vertebra, iso_resolution, ov
 
     ogo.message('Reading input mask:')
     ogo.message('      \"{}\"'.format(input_mask))
-    mask = sitk.ReadImage(input_mask)
-
-    # Check for the appropriate label in mask
-    filt = sitk.LabelStatisticsImageFilter()
-    filt.Execute(ct, mask)
-
-    vertebra_label = ogo.get_label(vertebra)
-    if vertebra_label not in filt.GetLabels():
+    mask_reader = vtk.vtkNIFTIImageReader()
+    mask_reader.SetFileName(input_mask)
+    mask_reader.Update()
+    mask = mask_reader.GetOutput()
+    
+    # Check that mask contains label
+    vertebra_label = ogo.get_label(vertebra) # Gets label ID from name of label
+    if vertebra_label not in vtk_to_numpy(mask.GetPointData().GetScalars()).ravel():
         os.sys.exit('[ERROR] Mask does not contain label {} for \"{}\" vertebra.'.format(vertebra_label, vertebra))
 
+    # Extract isosurface of bone mask
+    thres = vtk.vtkImageThreshold()
+    thres.SetInputConnection(mask_reader.GetOutputPort())
+    thres.ThresholdBetween(vertebra_label, vertebra_label)
+    thres.ReplaceInOn()
+    thres.SetInValue(1)
+    thres.ReplaceOutOn()
+    thres.SetOutValue(0)
+    thres.SetOutputScalarTypeToUnsignedChar()
+    
+    mcubes = vtk.vtkImageMarchingCubes()
+    mcubes.SetInputConnection(thres.GetOutputPort())
+    mcubes.SetValue(1, 1.0)
+    mcubes.Update()
+    
+    # Use iterative closest points
+    reference_bone = vtk.vtkPolyDataReader()
+    reference_bone.SetFileName("/Users/skboyd/Desktop/ML/code/Ogo/ogo/dat/L4_BODY_SPINE_COMPRESSION_REF.vtk")
+    reference_bone.Update()
+    
+    icp = vtk.vtkIterativeClosestPointTransform()
+    icp.SetTarget(reference_bone.GetOutput())
+    icp.SetSource(mcubes.GetOutput())
+    icp.StartByMatchingCentroidsOn()
+    icp.GetLandmarkTransform().SetModeToRigidBody()
+    icp.SetMeanDistanceModeToRMS()
+    icp.SetMaximumMeanDistance(0.05)
+    icp.CheckMeanDistanceOn()
+    icp.SetMaximumNumberOfLandmarks(250)
+    icp.SetMaximumNumberOfIterations(75)
+    icp.Update()
+    
+    transform = vtk.vtkTransform()
+    transform.SetMatrix(icp.GetMatrix())
+    transform.Update()
+
+    transformFilter = vtk.vtkTransformFilter()
+    transformFilter.SetInputConnection( mcubes.GetOutputPort() )
+    transformFilter.SetTransform( transform )
+    transformFilter.Update()
+    
+    #reslice = vtk.vtkImageReslice()
+    #reslice.SetInputData(vtk_image)
+    #reslice.SetInterpolationModeToCubic()
+    #reslice.SetResliceTransform(transform)
+    #reslice.AutoCropOutputOn()
+    #reslice.Update()
+    
+    
+    #print(icp.GetMatrix())
+    
+    writer = vtk.vtkPolyDataWriter()
+    writer.SetInputConnection(transformFilter.GetOutputPort())
+    writer.SetFileName("/Users/skboyd/Desktop/ML/code/Ogo/ogo/dat/tmp_transform.vtk")
+    writer.Update()
+    
+    
+    exit()
     # Resample to isotropic voxel size
     ogo.message('Resample mask.')
     mask_iso = ogo.isotropicResampling(mask, iso_resolution, 'mask')
@@ -203,6 +264,10 @@ Med Eng Phys 78, 55-63.
 Example calls: 
 ogoGenerateFEM vertebra image.nii.gz mask.nii.gz vertL4.n88model
 ogoGenerateFEM femur image.nii.gz mask.nii.gz --side left femurL.n88model
+
+ogoGenerateFEM vertebra /Users/skboyd/Desktop/ML/test/retro.nii /Users/skboyd/Desktop/ML/test/retro_mask.nii.gz vertL4.n88model
+
+ogoGenerateFEM femur /Users/skboyd/Desktop/ML/test/retro.nii /Users/skboyd/Desktop/ML/test/retro_mask.nii.gz --side left femurL.n88model
 
 '''
 
