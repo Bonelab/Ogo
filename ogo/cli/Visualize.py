@@ -57,7 +57,7 @@ def boundingbox(image):
     
     return rmin, rmax, cmin, cmax, zmin, zmax
 
-def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isosurface, elevation, azimuth, overwrite=False):
+def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isosurface, elevation, azimuth, flip, overwrite=False):
     
     # Check if output exists and should overwrite
     if os.path.isfile(outfile) and not overwrite:
@@ -175,7 +175,11 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
         renderer.AddActor( actor[idx] )
     
     # Set up the camera
-    renderer.GetActiveCamera().SetViewUp(0,0,-1) # Orients camera along Z axis
+    if flip:  # Orients camera along Z axis
+        renderer.GetActiveCamera().SetViewUp(0,0,1)
+    else:
+        renderer.GetActiveCamera().SetViewUp(0,0,-1)
+        
     renderer.GetActiveCamera().SetPosition((ibounds[1]-ibounds[0]),\
                                            (ibounds[3]-ibounds[2])*5,\
                                            (ibounds[5]-ibounds[4])) # Coordinates of camera 
@@ -230,6 +234,7 @@ ogoVisualize bone.nii.gz --outfile image.tif --overwrite
     parser.add_argument('--isosurface', type=int, default=100, metavar='ISOSURF',help='Isosurface extraction (default: %(default)s)')
     parser.add_argument('--elevation', type=int, default=10, metavar='ELEV',help='Camera elevation (default: %(default)s deg)')
     parser.add_argument('--azimuth', type=int, default=40, metavar='AZI',help='Camera azimuth (default: %(default)s deg)')
+    parser.add_argument('--flip', action='store_true', help='Camera ViewUp flip (default: %(default)s)')
     parser.add_argument('-o','--outfile', default='None', metavar='FN', help='Output image file (*.tif) (default: %(default)s)')
     parser.add_argument('--offscreen', action='store_true', help='Set to offscreen rendering (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
