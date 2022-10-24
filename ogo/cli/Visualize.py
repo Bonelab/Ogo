@@ -202,6 +202,8 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
         writer.SetInputConnection(windowToImage.GetOutputPort())
         writer.Write()
     
+    ogo.message('Done.')
+    
 def main():
     # Setup description
     description='''
