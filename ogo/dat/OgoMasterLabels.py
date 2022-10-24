@@ -78,6 +78,7 @@ labels_dict = {
    31: {'RGB': [    0,  206,  209], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Navicular Left'},
    32: {'RGB': [  138,   43,  226], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Talus Right'},
    33: {'RGB': [  176,  224,  230], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Talus Left'},
+   34: {'RGB': [  152,  251,  152], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'L6'},
    81: {'RGB': [  192,  192,  192], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Not bone'},
    91: {'RGB': [  128,    0,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Adipose'},
    92: {'RGB': [  128,  128,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Air'},

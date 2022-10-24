@@ -1,5 +1,5 @@
 # /------------------------------------------------------------------------------+
-# | 2-AUG-2022                                                                  |
+# | 23-OCT-2022                                                                  |
 # | Copyright (c) Bone Imaging Laboratory                                        |
 # | All rights reserved                                                          |
 # | bonelab@ucalgary.ca                                                          |
@@ -57,22 +57,27 @@ def boundingbox(image):
     
     return rmin, rmax, cmin, cmax, zmin, zmax
 
-def Visualize(input_filename, picture, offscreen, select, gaussian, radius, isosurface, elevation, azimuth, overwrite=False):
+def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isosurface, elevation, azimuth, overwrite=False):
     
     # Check if output exists and should overwrite
-    if os.path.isfile(picture) and not overwrite:
-        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(picture))
+    if os.path.isfile(outfile) and not overwrite:
+        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(outfile))
         if result.lower() not in ['y', 'yes']:
             ogo.message('Not overwriting. Exiting...')
             os.sys.exit()
     
-    if picture is not 'None' and not (picture.lower().endswith('.tif')):
-        os.sys.exit('[ERROR] Output must be a TIF file ending with .tif: \"{}\"'.format(picture))
+    if outfile is not 'None' and not (outfile.lower().endswith('.tif')):
+        os.sys.exit('[ERROR] Output must be a TIF file ending with .tif: \"{}\"'.format(outfile))
     
-    if offscreen and picture is 'None':
-        ogo.message('[ERROR]: No image will be saved while attempting offscreen rendering.')
-        ogo.message('         You need to define a filename for \'picture\'.')
-        exit()
+    if offscreen and outfile is 'None':
+        # Create default output filename for image
+        name, ext = os.path.splitext(input_filename)
+        if 'gz' in ext:
+            name = os.path.splitext(name)[0]  # Manages files with double extension
+        outfile = '{}_e{:03d}_a{:03d}.tif'.format(name,elevation,azimuth)
+        ogo.message('[WARNING]: No filename specified for output image.')
+        ogo.message('           Creating a filename based on input file.')
+        ogo.message('           {}'.format(outfile))
     
     # Read input
     if not os.path.isfile(input_filename):
@@ -106,7 +111,7 @@ def Visualize(input_filename, picture, offscreen, select, gaussian, radius, isos
             else:
                 ogo.message('[WARNING]: Selected label {} does not exist.'.format(label))
         labels = tmp
-        
+    
     # Create lists for VTK classes
     thres = []
     extract = []
@@ -188,12 +193,12 @@ def Visualize(input_filename, picture, offscreen, select, gaussian, radius, isos
         renderWindowInteractor.Start()
 
     # Print image
-    if picture is not 'None':
+    if outfile is not 'None':
         windowToImage = vtk.vtkWindowToImageFilter()
         windowToImage.SetInput(renderWindow)
         
         writer = vtk.vtkTIFFWriter()
-        writer.SetFileName(picture)
+        writer.SetFileName(outfile)
         writer.SetInputConnection(windowToImage.GetOutputPort())
         writer.Write()
     
@@ -205,8 +210,8 @@ Generates an offscreen rendering of a NIFTI file.
     epilog='''
 USAGE: 
 ogoVisualize bone.nii.gz
-ogoVisualize bone.nii.gz --picture image.tif
-ogoVisualize bone.nii.gz --picture image.tif --overwrite
+ogoVisualize bone.nii.gz --outfile image.tif
+ogoVisualize bone.nii.gz --outfile image.tif --overwrite
 '''
 
     # Setup argument parsing
@@ -217,13 +222,13 @@ ogoVisualize bone.nii.gz --picture image.tif --overwrite
         epilog=epilog
     )
     parser.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
-    parser.add_argument('--select', type=int, nargs='*', default=[], metavar='LABEL',help='Select labels to view (e.g. 1 2 3 4 5)')
+    parser.add_argument('--select', type=int, nargs='*', default=[], metavar='#',help='Select specific labels (e.g. 1 2 3; default: all)')
     parser.add_argument('--gaussian', type=float, default=0.7, metavar='GAUSS',help='Gaussian filter (default: %(default)s)')
     parser.add_argument('--radius', type=int, default=2, metavar='RAD',help='Radius of Gaussian filter (default: %(default)s)')
-    parser.add_argument('--isosurface', type=int, default=50, metavar='ISOSURF',help='Isosurface extraction (default: %(default)s)')
-    parser.add_argument('--elevation', type=int, default=0, metavar='ELEV',help='Camera elevation (default: %(default)s deg)')
-    parser.add_argument('--azimuth', type=int, default=0, metavar='AZI',help='Camera azimuth (default: %(default)s deg)')
-    parser.add_argument('--picture', default='None', metavar='FILENAME', help='Output image file (*.tif) (default: %(default)s)')
+    parser.add_argument('--isosurface', type=int, default=100, metavar='ISOSURF',help='Isosurface extraction (default: %(default)s)')
+    parser.add_argument('--elevation', type=int, default=10, metavar='ELEV',help='Camera elevation (default: %(default)s deg)')
+    parser.add_argument('--azimuth', type=int, default=40, metavar='AZI',help='Camera azimuth (default: %(default)s deg)')
+    parser.add_argument('-o','--outfile', default='None', metavar='FN', help='Output image file (*.tif) (default: %(default)s)')
     parser.add_argument('--offscreen', action='store_true', help='Set to offscreen rendering (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
 
