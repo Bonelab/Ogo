@@ -137,6 +137,7 @@ def repair(input_image, output_image, component, label, overwrite, func):
 
     # Check if output exists and should overwrite
     ogo.message('This option does nothing for now.')
+    #ogo.message('Done.')
     
     
 def main():
