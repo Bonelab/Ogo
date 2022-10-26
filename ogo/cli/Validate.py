@@ -65,7 +65,7 @@ def validate(input_image, report_file, overwrite, func):
     stats = sitk.LabelIntensityStatisticsImageFilter()
     
     report += '  {:>27s} {:s}\n'.format('number of labels:',str(n_labels))
-    report += '  {:>27s} {:>8s} {:>6s} {:>10s} {:>22s}\n'.format('______________________LABEL','SIZE','#PARTS','PART_Sz','CENTROID')
+    report += '  {:>27s} {:>8s} {:>6s} {:>10s} {:>22s}\n'.format('______________________LABEL','SIZE','PART','PART_Sz','CENTROID')
     
     for idx,label in enumerate(labels):
         desc = lb.labels_dict[label]['LABEL']
@@ -77,18 +77,20 @@ def validate(input_image, report_file, overwrite, func):
         
         ct_thres = thres.Execute(ct)
         ct_conn = conn.Execute(ct,ct_thres)
-        stats.Execute(ct_conn,ct)
+        ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
+        stats.Execute(ct_conn_sorted,ct)
         n_parts = stats.GetNumberOfLabels()
-
-        report += '  {:>22s}{:>5s} {:8.0f} {:6d} '.format('('+desc+')',str(label),size,n_parts)
+        
+        report += '  {:>22s}{:>5s} {:8.0f} '.format('('+desc+')',str(label),size)
         for part in stats.GetLabels():
             c = stats.GetCentroid(part)
             if part>1:
-                report += '  {:>22s}{:>5s} {:8s} {:6s} {:10.1f} ({:6.1f},{:6.1f},{:6.1f})\n'.format('','','','',stats.GetPhysicalSize(part),c[0],c[1],c[2])
+                report += '  {:>22s}{:>5s} {:8s} {:6d} {:10.1f} ({:6.1f},{:6.1f},{:6.1f})\n'.format('','','',part,stats.GetPhysicalSize(part),c[0],c[1],c[2])
             else:
-                report += '{:10.1f} ({:6.1f},{:6.1f},{:6.1f})\n'.format(stats.GetPhysicalSize(part),c[0],c[1],c[2])
-        #report += '\n'
+                report += '{:6d} {:10.1f} ({:6.1f},{:6.1f},{:6.1f})\n'.format(part,stats.GetPhysicalSize(part),c[0],c[1],c[2])
     report += '\n'
+    # largest_component_binary_image = sorted_component_image == 1   # gets the component 1 from the image
+
     
     # # Erode
     # erode = sitk.BinaryErodeImageFilter()
@@ -100,7 +102,7 @@ def validate(input_image, report_file, overwrite, func):
 #    sitk.WriteImage(component_labelled, '/Users/skboyd/Desktop/ML/test/robust/frag/RETRO_01638_NNUNET_clTrue.nii.gz')
 #    sitk.WriteImage(component_labelled, '/Users/skboyd/Desktop/ML/test/robust/frag/RETRO_01638_NNUNET_clFalse.nii.gz')
 
-
+    print('\n')
     print(report)
     exit()
 
@@ -134,7 +136,7 @@ def validate(input_image, report_file, overwrite, func):
 def repair(input_image, output_image, component, label, overwrite, func):
 
     # Check if output exists and should overwrite
-    ogo.message('Done.')
+    ogo.message('This option does nothing for now.')
     
     
 def main():
