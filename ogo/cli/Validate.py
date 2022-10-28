@@ -20,7 +20,8 @@ from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
 
-def validate(input_image, report_file, overwrite, func):
+# +------------------------------------------------------------------------------+
+def validate(input_image, report_file, print_parts, overwrite, func):
     
     # Check if output exists and should overwrite
     if not report_file is None:
@@ -41,6 +42,14 @@ def validate(input_image, report_file, overwrite, func):
     ogo.message('\"{}\"'.format(input_image))
     ct = sitk.ReadImage(input_image)
     
+    # Create base filename (and some extra information)
+    basename = os.path.basename(input_image)
+    name, ext = os.path.splitext(input_image)
+    if 'gz' in ext:
+        name = os.path.splitext(name)[0]  # Manages files with double extension
+        ext = '.nii' + ext
+    dirname = os.path.dirname(input_image)
+    
     # Start the report
     report = ''
     report += '  {:>27s}\n'.format('_________________Validation')
@@ -50,6 +59,18 @@ def validate(input_image, report_file, overwrite, func):
     report += '  {:>27s} {:s}\n'.format('creation date:', str(date.today()))
     report += '\n'
     
+    # Command line
+    cmd_line = ''
+    cmd_line += '  {:>27s}\n'.format('_________________Command line')
+    cmd_line += '\n'
+    cmd_line += '  {}\n'.format('Edit the command below. Replace NL with the new labels.')
+    cmd_line += '\n'
+    #cmd_line += '  {}\n'.format('ogoValidate repair \\')
+    cmd_line += '  {}\n'.format('python ../../code/Ogo/ogo/cli/Validate.py repair \\')
+    cmd_line += '    {} \\\n'.format(input_image)    
+    cmd_line += '    {}_REPAIR{} \\\n'.format(name,ext)
+    cmd_line += '    {}\n'.format('--relabel_parts \\')
+        
     # Gather all labels in image and determine number of parts each label is broken into
     ogo.message('Gather list labels in image and determine number of parts.')
     filt = sitk.LabelShapeStatisticsImageFilter() # Used to get labels in image
@@ -64,31 +85,46 @@ def validate(input_image, report_file, overwrite, func):
     conn.SetFullyConnected(True)
     stats = sitk.LabelIntensityStatisticsImageFilter()
     
+    report += '  {:>27s}\n'.format('___________________Report')
     report += '  {:>27s} {:s}\n'.format('number of labels:',str(n_labels))
-    report += '  {:>27s} {:>8s} {:>6s} {:>10s} {:>22s}\n'.format('______________________LABEL','SIZE','PART','PART_Sz','CENTROID')
-    
+    report += '  {:>27s} {:>8s} {:>6s} {:>10s} {:>22s}\n'.format('LABEL','SIZE','PART','PART_Sz','CENTROID')
+        
     for idx,label in enumerate(labels):
+        ogo.message('  processing label {} ({})'.format(label,lb.labels_dict[label]['LABEL']))
         desc = lb.labels_dict[label]['LABEL']
         #centroid = filt.GetCentroid(label)
         size = filt.GetPhysicalSize(label)
         
         thres.SetUpperThreshold(label)
         thres.SetLowerThreshold(label)
-        
         ct_thres = thres.Execute(ct)
+        
         ct_conn = conn.Execute(ct,ct_thres)
+        
         ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
+        
         stats.Execute(ct_conn_sorted,ct)
         n_parts = stats.GetNumberOfLabels()
         
-        report += '  {:>22s}{:>5s} {:8.0f} '.format('('+desc+')',str(label),size)
-        for part in stats.GetLabels():
+        if (print_parts):
+            label_fname = '{}_lab{:02}{}'.format(name,label,ext)
+            sitk.WriteImage(ct_conn_sorted, label_fname)
+        
+        report += '  {:>22s}{:>5s} {:8.0f} '.format('('+desc+')',str(label),size)        
+        # Generate report data
+        for part in stats.GetLabels(): # for each part of a given label
             c = stats.GetCentroid(part)
             if part>1:
                 report += '  {:>22s}{:>5s} {:8s} {:6d} {:10.1f} ({:6.1f},{:6.1f},{:6.1f})\n'.format('','','',part,stats.GetPhysicalSize(part),c[0],c[1],c[2])
             else:
                 report += '{:6d} {:10.1f} ({:6.1f},{:6.1f},{:6.1f})\n'.format(part,stats.GetPhysicalSize(part),c[0],c[1],c[2])
-    report += '\n'
+        
+        # Generate command line
+        if n_parts>1 and label <80:
+            cmd_line += '    {:d} \\\n'.format(label)                  # current label
+            for part in stats.GetLabels(): 
+                cmd_line += '      {:d} {:s} \\\n'.format(part,'NL')      # part number and new label
+
     # largest_component_binary_image = sorted_component_image == 1   # gets the component 1 from the image
 
     
@@ -97,13 +133,11 @@ def validate(input_image, report_file, overwrite, func):
     # erode.SetKernelRadius(4)
     # erode.SetForegroundValue(1)
     # ct_erode = erode.Execute(ct)
-#    ogo.message('Writing output file.')
-#    sitk.WriteImage(ct_erode, '/Users/skboyd/Desktop/ML/test/robust/perfect/RETRO_TRAIN_CORR_cl.nii.gz')
-#    sitk.WriteImage(component_labelled, '/Users/skboyd/Desktop/ML/test/robust/frag/RETRO_01638_NNUNET_clTrue.nii.gz')
-#    sitk.WriteImage(component_labelled, '/Users/skboyd/Desktop/ML/test/robust/frag/RETRO_01638_NNUNET_clFalse.nii.gz')
 
+    ogo.message('Printing report')
     print('\n')
     print(report)
+    print(cmd_line)
     exit()
 
 
@@ -132,11 +166,28 @@ def validate(input_image, report_file, overwrite, func):
         txt_file.close()
     
     ogo.message('Done.')
-    
-def repair(input_image, output_image, component, label, overwrite, func):
+
+# +------------------------------------------------------------------------------+
+def repair(input_image, output_image, relabel_parts, overwrite, func):
 
     # Check if output exists and should overwrite
-    ogo.message('This option does nothing for now.')
+    if os.path.isfile(output_image) and not overwrite:
+        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
+        if result.lower() not in ['y', 'yes']:
+            ogo.message('Not overwriting. Exiting...')
+            os.sys.exit()
+    
+    # Read input
+    if not os.path.isfile(input_image):
+        os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_image))
+
+    if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_image))
+    
+    ogo.message('Reading image: ')
+    ogo.message('\"{}\"'.format(input_image))
+    ct = sitk.ReadImage(input_image)
+    
     #ogo.message('Done.')
     
     
@@ -188,6 +239,7 @@ python Validate.py validate /Users/skboyd/Desktop/ML/test/robust/mixed/RETRO_019
     parser_validate = subparsers.add_parser('validate')
     parser_validate.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_validate.add_argument('--report_file', metavar='FILE', help='Write validation report to file (*.txt)')
+    parser_validate.add_argument('--print_parts', action='store_true', help='Writes N label output images showing component parts')
     parser_validate.add_argument('--overwrite', action='store_true', help='Overwrite validation report without asking')
     parser_validate.set_defaults(func=validate)
 
@@ -195,8 +247,9 @@ python Validate.py validate /Users/skboyd/Desktop/ML/test/robust/mixed/RETRO_019
     parser_repair = subparsers.add_parser('repair')
     parser_repair.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_repair.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
-    parser_repair.add_argument('--component', type=int, default=0, metavar='#',help='Connected component number (default: %(default)s)')
-    parser_repair.add_argument('--label', type=int, default=0, metavar='#',help='Label of bone (default: %(default)s)')
+    parser_repair.add_argument('--relabel_parts', type=int, nargs='*', default=[0], metavar='LABEL PART NEWLABEL', help='List of labels, parts, and new labels; space separated. Example shows relabelling L4 part 2 to  L3: (e.g. 7 2 8)')
+    #parser_repair.add_argument('--component', type=int, default=0, metavar='#',help='Connected component number (default: %(default)s)')
+    #parser_repair.add_argument('--label', type=int, default=0, metavar='#',help='Label of bone (default: %(default)s)')
     parser_repair.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
     parser_repair.set_defaults(func=repair)
 
