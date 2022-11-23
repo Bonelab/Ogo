@@ -88,7 +88,7 @@ def dcm2nii(dicom_directory, output_folder, report_only, overwrite):
     report += '{:30s} {}\n'.format('Instance Number',v['InstanceNumber'])
     report += '{:30s} {}\n'.format('Study Instance UID',v['StudyInstanceUID'])
     report += '\n'
-    report += '{:15s} {:30s} {:20s} {:10s} {:20s} {:20s}\n'.format('Series Number',\
+    report += '{:15s} {:40s} {:20s} {:10s} {:20s} {:20s}\n'.format('Series Number',\
                                                             'Description',\
                                                             'Dimensions',\
                                                             'Images',\
@@ -113,7 +113,7 @@ def dcm2nii(dicom_directory, output_folder, report_only, overwrite):
             highlight = ' '
             cmds_remove += 'rm ' + output_folder + '/' + series_filename + '\n'
 
-        report += '{:<10d}{:5s} {:30s} {:20s} {:<10d} {:20s} {}\n'.format(v['SeriesNumber'],\
+        report += '{:<10d}{:5s} {:40s} {:20s} {:<10d} {:20s} {}\n'.format(v['SeriesNumber'],\
                                                               highlight,\
                                                               v['SeriesDescription'],\
                                                               dims,\
@@ -123,7 +123,7 @@ def dcm2nii(dicom_directory, output_folder, report_only, overwrite):
     
     report += '\n'
     report += 'Helpful Commands:\n'
-    report += '-- keep --\n'
+    report += '-- keep -- (criteria: \'axial\' or \'torso\' and >100 slices and slice spacing <3.0mm)\n'
     report += cmds
     report += '\n'
     report += '-- remove --\n'
