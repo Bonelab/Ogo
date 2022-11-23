@@ -82,6 +82,7 @@ def dcm2nii(dicom_directory, output_folder, report_only, overwrite):
     el = list(series_dict.keys())[0]
     v = series_dict.get(el)
     cmds = ''
+    cmds_remove = ''
     report = ''
     report += '{:30s} {}\n'.format('Directory',dicom_directory)
     report += '{:30s} {}\n'.format('Instance Number',v['InstanceNumber'])
@@ -110,6 +111,7 @@ def dcm2nii(dicom_directory, output_folder, report_only, overwrite):
             cmds += 'ls ' + output_folder + '/' + series_filename + '\n'
         else:
             highlight = ' '
+            cmds_remove += 'rm ' + output_folder + '/' + series_filename + '\n'
 
         report += '{:<10d}{:5s} {:30s} {:20s} {:<10d} {:20s} {}\n'.format(v['SeriesNumber'],\
                                                               highlight,\
@@ -120,8 +122,12 @@ def dcm2nii(dicom_directory, output_folder, report_only, overwrite):
                                                               series_filename)
     
     report += '\n'
-    report += 'Helpful commands:\n'
+    report += 'Helpful Commands:\n'
+    report += '-- keep --\n'
     report += cmds
+    report += '\n'
+    report += '-- remove --\n'
+    report += cmds_remove
     
     # Save report
     if report_file:
