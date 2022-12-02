@@ -269,7 +269,7 @@ def aix(infile, image):
     print(guard)
 
 
-def infoNIFTII(reader):
+def infoNIFTI(reader):
     guard = '!-------------------------------------------------------------------------------'
     print('!> HEADER')
     print('!> {:30s} = {}'.format('TimeDimension', reader.GetTimeDimension()))

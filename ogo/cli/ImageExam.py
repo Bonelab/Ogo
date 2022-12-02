@@ -43,11 +43,11 @@ def ImageExam(input_filename, header, histogram, bins):
     ogo.aix(input_filename, reader.GetOutput())
 
     if header:
-        ogo.message('Header from NIFTII file')
-        ogo.infoNIFTII(reader)
+        ogo.message('Header from NIFTI file')
+        ogo.infoNIFTI(reader)
 
     if histogram:
-        ogo.message('Histogram of NIFTII image data')
+        ogo.message('Histogram of NIFTI image data')
         ogo.histogram(reader.GetOutput(), bins)
 
     # ogo.message('Done ogoImageExam!')
@@ -73,7 +73,7 @@ ogoImageExam --histogram input.nii.gz
         epilog=epilog
     )
     parser.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
-    parser.add_argument('--header', action='store_true', help='Show NIFTII header (default: %(default)s)')
+    parser.add_argument('--header', action='store_true', help='Show NIFTI header (default: %(default)s)')
     parser.add_argument('--histogram', action='store_true', help='Show histogram (default: %(default)s)')
     parser.add_argument('--bins', type=int, default=128, metavar='#',
                         help='Number of bins in histogram (default: %(default)s)')
