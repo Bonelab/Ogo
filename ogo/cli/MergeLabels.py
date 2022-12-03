@@ -36,7 +36,7 @@ def get_labels(ct):
     labels = filt.GetLabels()
     return labels
     
-def merge_labels(input_filenames, output_filename, merge_method, labels, collection, overwrite=False):
+def merge_labels(input_filenames, output_filename, add_multilabel, merge_method, collection, overwrite=False):
         
     # Check if output exists and should overwrite
     if os.path.isfile(output_filename) and not overwrite:
@@ -65,11 +65,9 @@ def merge_labels(input_filenames, output_filename, merge_method, labels, collect
         
     if len(input_filenames)<2:
         os.sys.exit('[ERROR] At least two input files are required.')
-
+        
     # Establish a valid list of images for collection
-    if collection == 'any':
-        valid_list = []
-    elif collection == 'all':
+    if collection == 'all':
         valid_list = [v['LABEL'] for k, v in lb.labels_dict.items()]
     elif collection == 'ossai':
         valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1']
@@ -93,6 +91,7 @@ def merge_labels(input_filenames, output_filename, merge_method, labels, collect
     labelimagefilt = sitk.LabelMapToLabelImageFilter()
     changefilt = sitk.ChangeLabelImageFilter()
     mergefilt = sitk.MergeLabelMapFilter()
+    successful_merge = False
     
     # Set type of merge
     ogo.message('Merge method is \'' + merge_method + '\'')
@@ -107,40 +106,75 @@ def merge_labels(input_filenames, output_filename, merge_method, labels, collect
     else:
         os.sys.exit('[ERROR] Unknown merge method.')
     
-    # Cycle through all input images that are part of the collection. 
-    ogo.message('Collection is \'' + collection + '\'')
-    n_valid_images = 0
-    first_image = True
-    for fn in input_filenames:
-        label_name,label_id = resolve_totalsegmentator_label_and_id(fn)
-        if label_name in valid_list: # found a valid image
-            ct = sitk.ReadImage(fn)
-            input_labels = get_labels(ct)
-            if len(input_labels)==1:
-                n_valid_images += 1
-                ogo.message('  {:>23s} (changing label {:3d} to {:3d})'.format(label_name,input_labels[0],label_id))
-                map = {input_labels[0]: label_id}
-                changefilt.SetChangeMap(map)
-                ct = changefilt.Execute(ct)
-                ct = labelmapfilt.Execute(ct)
-                
-                if first_image:
-                    ct_base = ct
-                    first_image = False
+    # This option adds multi-label images together
+    if add_multilabel:
+        ogo.message('Adding multi-label images together.')
+        if len(input_filenames)>2:
+            ogo.message('[WARNING] Only first 2 of {} input images will be added together.'.format(len(input_filenames)))
+            ogo.message('          The remaining input images are ignored.')
+            
+        ct1 = sitk.ReadImage(input_filenames[0])
+        ct2 = sitk.ReadImage(input_filenames[1])
+        ct1_labels = get_labels(ct1)
+        ct2_labels = get_labels(ct2)
+        ogo.message('  Image 1:')
+        ogo.message('  {}'.format(input_filenames[0]))
+        ogo.message('  labels are [' + ', '.join('{:d}'.format(i) for i in ct1_labels) + ']')
+        ogo.message('  Image 2:')
+        ogo.message('  {}'.format(input_filenames[1]))
+        ogo.message('  labels are [' + ', '.join('{:d}'.format(i) for i in ct2_labels) + ']')
+        ct1 = labelmapfilt.Execute(ct1)
+        ct2 = labelmapfilt.Execute(ct2)
+        ct_final = mergefilt.Execute(ct1, ct2)
+        successful_merge = True
+
+    else:
+        # Cycle through all input images that are part of the collection. 
+        ogo.message('Collection is \'' + collection + '\'')
+        n_valid_images = 0
+        first_image = True
+        for fn in input_filenames:
+            label_name,label_id = resolve_totalsegmentator_label_and_id(fn)
+            if label_name in valid_list: # found a valid image
+                ct = sitk.ReadImage(fn)
+                input_labels = get_labels(ct)
+                if len(input_labels)==1:
+                    n_valid_images += 1
+                    ogo.message('  {:>23s} (changing label {:3d} to {:3d})'.format(label_name,input_labels[0],label_id))
+                    map = {input_labels[0]: label_id}
+                    changefilt.SetChangeMap(map)
+                    ct = changefilt.Execute(ct)
+                    ct = labelmapfilt.Execute(ct)
+                    
+                    if first_image:
+                        ct_final = ct
+                        first_image = False
+                    else:
+                        ct_final = mergefilt.Execute(ct_final, ct)
+                        successful_merge = True
                 else:
-                    ct_base = mergefilt.Execute(ct_base, ct)
-                
-    ct_final = labelimagefilt.Execute(ct_base)
+                    ogo.message('[WARNING] Image with {} labels cannot be merged.'.format(len(input_labels)))
+                    ogo.message('  {}'.format(fn))
+            #else:
+            #    ogo.message('[WARNING] Input file is not part of any collection. Most')
+            #    ogo.message('          likely it is a multi-label image and should be')
+            #    ogo.message('          combined with other images using --add_multilabel')
+            #    ogo.message('          option.')
+            #    ogo.message('  {}'.format(fn))
+               
+        if n_valid_images != len(valid_list):
+            ogo.message('')
+            ogo.message('[WARNING]: Found only {} of total possible {} images for collection \'{}\''.format(n_valid_images,len(valid_list),collection))
+        
+    if not successful_merge:
+        os.sys.exit('[ERROR] Merging of listed input files is unsuccessful. Try --add_multilabel option?')
+         
+    ct_final = labelimagefilt.Execute(ct_final)
     ogo.message('')
     ogo.message('Final merged image contains the following labels:')
     final_labels = get_labels(ct_final)
     ogo.message('  [' + ', '.join('{:d}'.format(i) for i in final_labels) + ']')
-    
-    if n_valid_images != len(valid_list):
-        ogo.message('')
-        ogo.message('[WARNING]: Found only {} of total possible {} images for collection \'{}\''.format(n_valid_images,len(valid_list),collection))
-        #ogo.message('  '+', '.join('{}'.format(i) for i in valid_list))
-        
+            
     ogo.message('')
     ogo.message('Writing merged output image to file:')
     ogo.message('  {}'.format(output_filename))
@@ -152,22 +186,21 @@ def merge_labels(input_filenames, output_filename, merge_method, labels, collect
 def main():
     # Setup description
     description='''
-A utility to merge labels and ensuring correct labels for each 
+A utility to merge labels in an image and ensuring correct labels for each 
 component. 
 
-This is a useful utility if using TotalSegmentator
+This is a particularly useful utility if using TotalSegmentator
 https://arxiv.org/abs/2208.05868
 
 All merged images are expected to have the same number of dimensions.
 
 Merge methods are:
-    aggregate: If the same label is found several times in the label 
-               maps, the label objects with the same label are merged.
-    strict:    Keeps the labels unchanged and raises an exception if 
-               the same label is found in several images.
-    keep:      Does its best to keep the label unchanged, but if a label
-               is already used in a previous label map, a new label is 
-               assigned.
+    aggregate: If the same label is found several times in the label maps, the
+               label objects with the same label are merged.
+    strict:    Keeps the labels unchanged and raises an exception if the same
+               label is found in several images.
+    keep:      Does its best to keep the label unchanged, but if a label is
+               already used in a previous label map, a new label is assigned.
     pack:      Relabel all the label objects by order of processing.
 
 '''
@@ -188,11 +221,10 @@ Example calls:
     parser.add_argument('input_filenames', nargs='*', metavar='FILES IN', help='Input files')
     parser.add_argument('output_filename', metavar='FILE OUT', help='Output NIFTI file (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
+    parser.add_argument('--add_multilabel', action='store_true', help='Adds multi-label images')
     parser.add_argument('--merge_method', default='strict',choices=['aggregate', 'strict', 'keep', 'pack'],
-                                                           help='Select merge type (default: %(default)s)')
-    parser.add_argument('--labels', type=int, nargs='*', default=[0], metavar='ID', 
-                                                           help='List of labels in same order as input images (e.g. 1 2 3)')
-    parser.add_argument('--collection', default='all', choices=['any', 'all', 'ossai', 'skeleton', 'cardio', 'organs', 'muscle', 'gastro'],
+                                                           help='Select merge rules (default: %(default)s)')
+    parser.add_argument('--collection', default='all', choices=['all', 'ossai', 'skeleton', 'cardio', 'organs', 'muscle', 'gastro'],
                                                            help='Select collection (default: %(default)s)')
 
     # Parse and display

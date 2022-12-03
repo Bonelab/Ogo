@@ -45,6 +45,12 @@ labels_hdr = \
     '# IND    R    G    B    A  VIS  IDX  LABEL\n'  + \
     '################################################'
 
+# Note that the LABEL is what we use in Ogo to define various anatomy or objects we may encounter, and TOTSEG
+# is the name that TotalSegmentator uses to create their files. We need TOTSEG so we can identify the correct
+# key (label) for each anatomy or object encountered.
+#
+# The maximum number of labels is 255, otherwise ITK-Snap has problems showing correct labels
+
 labels_dict = {
     0: {'RGB': [    0,    0,    0], 'A': 0.0, 'VIS': 0, 'IDX': 0, 'LABEL': 'Clear Label', 'TOTSEG': 'empty'},
     1: {'RGB': [  255,    0,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Femur Right', 'TOTSEG': 'femur_right'},
