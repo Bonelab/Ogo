@@ -149,7 +149,7 @@ labels_dict = {
   132: {'RGB': [  255,  182,  193], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Rod B - Mindways Model 3 QA', 'TOTSEG': 'empty'},
   133: {'RGB': [  245,  245,  220], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Rod C - Mindways Model 3 QA', 'TOTSEG': 'empty'},
   134: {'RGB': [  154,  205,   50], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Rod D - Mindways Model 3 QA - High K2HPO4', 'TOTSEG': 'empty'},
-  141: {'RGB': [  100,  149,  237], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Rod A - QRM-BDC 3-rod -   0 mg/cc CHA', 'TOTSEG': 'empty'},
+  141: {'RGB': [  100,  149,  237], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Rod A - QRM-BDC 3-rod - 100 mg/cc CHA', 'TOTSEG': 'empty'},
   142: {'RGB': [  173,  216,  230], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Rod B - QRM-BDC 3-rod - 400 mg/cc CHA', 'TOTSEG': 'empty'},
   143: {'RGB': [    0,    0,  139], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Rod C - QRM-BDC 3-rod - 800 mg/cc CHA', 'TOTSEG': 'empty'},
   151: {'RGB': [  205,  133,   63], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Rod A - QRM-BDC 6-rod -   0 mg/cc CHA', 'TOTSEG': 'empty'},
