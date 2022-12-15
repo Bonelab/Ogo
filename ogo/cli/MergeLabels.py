@@ -96,13 +96,13 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
     # Set type of merge
     ogo.message('Merge method is \'' + merge_method + '\'')
     if merge_method == 'aggregate':
-        sitk.MergeLabelMapFilter.Aggregate
+        mergefilt.Aggregate
     elif merge_method == 'strict':
-        sitk.MergeLabelMapFilter.Strict
+        mergefilt.Strict
     elif merge_method == 'keep':
-        sitk.MergeLabelMapFilter.Keep
+        mergefilt.Keep
     elif merge_method == 'pack':
-        sitk.MergeLabelMapFilter.Pack
+        mergefilt.Pack
     else:
         os.sys.exit('[ERROR] Unknown merge method.')
     
