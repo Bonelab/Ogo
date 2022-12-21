@@ -290,8 +290,6 @@ def dcm2nii(dicom_directory, output_folder, report_only, skip_report, overwrite)
     # validate_slice_increment
     # validate_slicecount
 
-    
-    
     ogo.message('Done.')
     
 def main():
