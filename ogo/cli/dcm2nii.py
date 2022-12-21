@@ -45,35 +45,97 @@ def dcm2nii(dicom_directory, output_folder, report_only, skip_report, overwrite)
         ogo.message('Scanning the DICOM images for meta data.')
         series_dict = OrderedDict()
         for FileDataset in dicom_dir_data:
-            SeriesDescription = FileDataset.data_element('SeriesDescription').value # returns a pydicom.dataelem.DataElement
-            StudyID = FileDataset.data_element('StudyID').value
-            SeriesNumber = FileDataset.data_element('SeriesNumber').value
-            InstanceNumber = FileDataset.data_element('InstanceNumber').value
-            Rows = FileDataset.data_element('Rows').value
-            Columns = FileDataset.data_element('Columns').value
-            PixelSpacing = FileDataset.data_element('PixelSpacing').value
-            PatientBirthDate = FileDataset.data_element('PatientBirthDate').value
-            PatientID = FileDataset.data_element('PatientID').value
-            PatientName = FileDataset.data_element('PatientName').value
+
+            try:
+                SeriesDescription = FileDataset.data_element('SeriesDescription').value # returns a pydicom.dataelem.DataElement
+            except KeyError:
+                ogo.message('WARNING: Could not find SeriesDescription')
+                SeriesDescription = 'n/a'
+                
+            try:
+                StudyID = FileDataset.data_element('StudyID').value
+            except KeyError:
+                ogo.message('WARNING: Could not find StudyID')
+                StudyID = 0
             
-            #(0031, 1020) [Global Patient ID]                 LO: '609617610'
-        
+            try:
+                PatientBirthDate = FileDataset.data_element('PatientBirthDate').value
+            except KeyError:
+                ogo.message('WARNING: Could not find PatientBirthDate')
+                PatientBirthDate = 0
+               
+            try:
+                PatientID = FileDataset.data_element('PatientID').value
+            except KeyError:
+                ogo.message('WARNING: Could not find PatientID')
+                PatientID = 'n/a'
+            
+            try:
+                PatientName = FileDataset.data_element('PatientName').value
+            except KeyError:
+                ogo.message('WARNING: Could not find PatientName')
+                PatientName = 'n/a'
+            
+            try:
+                SeriesNumber = FileDataset.data_element('SeriesNumber').value
+            except KeyError:
+                ogo.message('WARNING: Could not find SeriesNumber')
+                SeriesNumber = 0
+            
+            try:
+                InstanceNumber = FileDataset.data_element('InstanceNumber').value
+            except KeyError:
+                ogo.message('WARNING: Could not find InstanceNumber')
+                InstanceNumber = 0
+
             try:
                 AccessionNumber = FileDataset.data_element('AccessionNumber').value
             except KeyError:
                 ogo.message('WARNING: Could not find AccessionNumber')
                 AccessionNumber = 0
+
+            try:
+                Rows = FileDataset.data_element('Rows').value
+            except KeyError:
+                ogo.message('WARNING: Could not find Rows')
+                Rows = 0
+                
+            try:
+                Columns = FileDataset.data_element('Columns').value
+            except KeyError:
+                ogo.message('WARNING: Could not find Columns')
+                Columns = 0
+            
             try:
                 SliceThickness = FileDataset.data_element('SliceThickness').value
             except KeyError:
+                ogo.message('WARNING: Could not find SliceThickness')
                 SliceThickness = 0
+            
             try:
                 SpacingBetweenSlices = FileDataset.data_element('SpacingBetweenSlices').value
             except KeyError:
+                ogo.message('WARNING: Could not find SpacingBetweenSlices')
                 SpacingBetweenSlices = 0
-            StudyInstanceUID = FileDataset.data_element('StudyInstanceUID').value
-            SeriesInstanceUID = FileDataset.data_element('SeriesInstanceUID').value
             
+            try:
+                StudyInstanceUID = FileDataset.data_element('StudyInstanceUID').value
+            except KeyError:
+                ogo.message('WARNING: Could not find StudyInstanceUID')
+                StudyInstanceUID = 'n/a'
+            
+            try:
+                SeriesInstanceUID = FileDataset.data_element('SeriesInstanceUID').value
+            except KeyError:
+                ogo.message('WARNING: Could not find SeriesInstanceUID')
+                SeriesInstanceUID = 'n/a'
+
+            try:
+                PixelSpacing = FileDataset.data_element('PixelSpacing').value
+            except KeyError:
+                ogo.message('WARNING: Could not find PixelSpacing')
+                PixelSpacing = 0
+
             sn = SeriesNumber
             if sn not in series_dict.keys():
                 series_dict[sn] = {
@@ -175,12 +237,19 @@ def dcm2nii(dicom_directory, output_folder, report_only, skip_report, overwrite)
             txt_file = open(report_file, "w")
             txt_file.write(report)
             txt_file.close()
-
+    
     # Generate the NIFTI files
     if not report_only:
         ogo.message('Generating NIFTI files:')
         ogo.message('  {}'.format(output_folder))
         settings.disable_validate_slice_increment()
+        settings.disable_validate_slicecount()
+
+        #settings.disable_validate_slice_increment()
+        #settings.enable_resampling()
+        #settings.set_resample_spline_interpolation_order(1)
+        #settings.set_resample_padding(-1000)
+
         dicom2nifti.convert_directory(dicom_directory, output_folder, compression=True, reorient=True)
     else:
         ogo.message('No NIFTI generated.')

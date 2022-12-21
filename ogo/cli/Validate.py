@@ -20,8 +20,20 @@ from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
 
+def get_labels(ct):
+    filt = sitk.LabelShapeStatisticsImageFilter()
+    filt.Execute(ct)
+    labels = filt.GetLabels()
+    return labels
+
 # +------------------------------------------------------------------------------+
-def validate(input_image, report_file, print_parts, overwrite, func):
+def validate(input_image, report_file, print_parts, expected_labels, overwrite, func):
+    
+    passed_all_tests = True
+    validate_expected_labels_in_image = True
+    validate_singulary_connected_bone = True
+    #validate_positions_of_bones = True   # implement later?
+    #validate_bone_size_within_range = True             # implement later?
     
     # Check if output exists and should overwrite
     if not report_file is None:
@@ -60,7 +72,6 @@ def validate(input_image, report_file, print_parts, overwrite, func):
     report += '\n'
             
     # Gather all labels in image and determine number of parts each label is broken into
-    ogo.message('Gather list labels in image and determine number of parts.')
     filt = sitk.LabelShapeStatisticsImageFilter() # Used to get labels in image
     filt.Execute(ct)
     n_labels = filt.GetNumberOfLabels()
@@ -74,7 +85,25 @@ def validate(input_image, report_file, print_parts, overwrite, func):
     conn.SetFullyConnected(True)
     stats = sitk.LabelIntensityStatisticsImageFilter()
     
-    report += '  {:>27s}\n'.format('___________________Report')
+    # Check if expected labels are in image
+    test_labels = []
+    for label in expected_labels:
+        if label in labels:
+            test_labels.append(label)
+        else:
+            try:
+                label_name = lb.labels_dict[label]['LABEL']
+            except KeyError:
+                label_name = 'unknown label'
+            ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,label_name))
+            validate_expected_labels_in_image = False
+    if test_labels == []:
+        os.sys.exit('[ERROR] None of the expected labels were found in image.')
+    labels = test_labels
+    
+    ogo.message('Gather each label in the image and determine number of parts.')
+    
+    report += '  {:>27s}\n'.format('_____________________Report')
     report += '  {:>27s} {:s}\n'.format('number of labels:',str(n_labels))
     report += '  {:>27s} {:>8s} {:>6s} {:>10s} {:>22s} {:>6s}\n'.format('LABEL','SIZE','PART','VOL','CENTROID','OFFSET')
     report += '  {:>27s} {:>8s} {:>6s} {:>10s} {:>22s} {:>6s}\n'.format('#','voxels','#','mm3','(mm,mm,mm)','mm')
@@ -108,22 +137,44 @@ def validate(input_image, report_file, print_parts, overwrite, func):
                 ref_c = c
                 report += '{:6d} {:10.1f} ({:6.1f},{:6.1f},{:6.1f})\n'.format(part,stats.GetPhysicalSize(part),c[0],c[1],c[2])
             else:
+                validate_singulary_connected_bone = False
                 distance_between_centroids = np.sqrt((ref_c[0] - c[0])**2 + (ref_c[1] - c[1])**2 + (ref_c[2] - c[2])**2)
                 report += '  {:>22s}{:>5s} {:8s} {:6d} {:10.1f} ({:6.1f},{:6.1f},{:6.1f}) {:6.1f}\n'\
                           .format('','','',part,stats.GetPhysicalSize(part),c[0],c[1],c[2],distance_between_centroids)
         
         # Generate suggestion of new label for command line suggestion
-        if n_parts>1 and label <80:
+        if n_parts>1:
             for part in stats.GetLabels():
                 if part>1:
                     swap = [label,part,label]
                     label_repair_list.append(swap)
     
+    # Final report
+    report += '\n'
+    report += '  {:>27s}\n'.format('_______________Final report')
+    if validate_expected_labels_in_image:
+        report += '  {:>27s} {:s}\n'.format('Each expected label found:','PASSED')
+    else:
+        report += '  {:>27s} {:s}\n'.format('Each expected label found:','FAILED')
+    if validate_singulary_connected_bone:
+        report += '  {:>27s} {:s}\n'.format('Each label a single part:','PASSED')
+    else:
+        report += '  {:>27s} {:s}\n'.format('Each label a single part:','FAILED')
+    report += '\n'
+    if validate_singulary_connected_bone and validate_expected_labels_in_image:
+        passed_all_tests = True
+    else:
+        passed_all_tests = False
+    if passed_all_tests:
+        report += '  {:>27s} {:s}\n'.format('ALL:','PASSED')
+    else:
+        report += '  {:>27s} {:s}\n'.format('ALL:','FAILED')
+    
     # Command line
     cmd_line = ''
-    cmd_line += '  {:>27s}\n'.format('_________________Command line')
+    cmd_line += '  {:>27s}\n'.format('_______________Command line')
     cmd_line += '\n'
-    cmd_line += '  {}\n'.format('Edit the command below. Should replaced label be zero?')
+    cmd_line += '  {}\n'.format('Edit the command below. Should replaced labels be zero?')
     cmd_line += '\n'
     cmd_line += '  {}\n'.format('ogoValidate repair \\')
     cmd_line += '    {} \\\n'.format(input_image)    
@@ -136,29 +187,6 @@ def validate(input_image, report_file, print_parts, overwrite, func):
         else:
             cmd_line += '\n'
              
-    #ogo.message('  [' + ', '.join('{:d}'.format(i) for i in final_labels) + ']')
-    
-    #print('length = ',len(label_repair_list))
-    #count_label = 0
-    #for label, swap in label_repair_dict.items():
-    #    count_label += 1
-    #    count_part = 0
-    #    cmd_line += '    {:d} \\\n'.format(label)              # label
-    #    for part, newlabel in swap.items():
-    #        count_part += 1
-    #        cmd_line += '      {:d} {:d} '.format(part,newlabel)        # part number and new label
-    #        if count_label<len(label_repair_dict) or count_part<len(swap):
-    #            cmd_line += '\\\n'
-    #        else:
-    #            cmd_line += '\n'
-            
-    #for label_repair in label_repair_dict:
-    #    print(label_repair)
-    #    print(label_repair_dict.key(label_repair))
-    #print(label_repair_dict)
-    # largest_component_binary_image = sorted_component_image == 1   # gets the component 1 from the image
-
-    
     # # Erode
     # erode = sitk.BinaryErodeImageFilter()
     # erode.SetKernelRadius(4)
@@ -168,38 +196,20 @@ def validate(input_image, report_file, print_parts, overwrite, func):
     ogo.message('Printing report')
     print('\n')
     print(report)
-    print(cmd_line)
-    exit()
-
-
-    # EXAMPLE 1
-    print('EXAMPLE 1')
-    binary_image = sitk.Image([256,256], sitk.sitkUInt8)
-    binary_image[20:50, 25:125] = 1
-    binary_image[70:95, 40:60] = 1
-    binary_image[70:95, 80:140] = 1
-
-    # 1. Convert binary image into a connected component image, each component has an integer label.
-    # 2. Relabel components so that they are sorted according to size (there is an
-    #    optional minimumObjectSize parameter to get rid of small components).
-    # 3. Get largest connected componet, label==1 in sorted component image.
-    component_image = sitk.ConnectedComponent(binary_image)
-    sorted_component_image = sitk.RelabelComponent(component_image, sortByObjectSize=True)
-    largest_component_binary_image = sorted_component_image == 1
-
-    # Report results
-    print(report)                                                                
     if report_file:
-        ogo.message('Saving validate report to file:')
+        ogo.message('Saving report to file:')
         ogo.message('      \"{}\"'.format(report_file))
         txt_file = open(report_file, "w")
         txt_file.write(report)
         txt_file.close()
+
+    if label_repair_list != []:
+        print(cmd_line)
     
     ogo.message('Done.')
 
 # +------------------------------------------------------------------------------+
-def repair(input_image, output_image, relabel_parts, overwrite, func):
+def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite, func):
 
     # Check if output exists and should overwrite
     if os.path.isfile(output_image) and not overwrite:
@@ -219,21 +229,88 @@ def repair(input_image, output_image, relabel_parts, overwrite, func):
     ogo.message('\"{}\"'.format(input_image))
     ct = sitk.ReadImage(input_image)
     
+    # Get all the available labels in the input image
+    labels = get_labels(ct)
+    n_labels = len(labels)
+    ogo.message('Input image contains the following labels:')
+    ogo.message('  [' + ', '.join('{:d}'.format(i) for i in labels) + ']')
+
+    # Prepare to go through labels and parts
+    filt = sitk.LabelShapeStatisticsImageFilter()
+    filt.Execute(ct)
+    n_labels = filt.GetNumberOfLabels()
+    labels = filt.GetLabels()
+    
+    labelmapfilt = sitk.LabelImageToLabelMapFilter()
+    labelimagefilt = sitk.LabelMapToLabelImageFilter()
+    mergefilt = sitk.MergeLabelMapFilter()
+    mergefilt.Aggregate
+    #mergefilt.Strict
+    #mergefilt.Keep
+    #mergefilt.Pack
+    
+    #sitk.ChangeLabelImageFilter() - used in ogoMerge
+    #sitk.ChangeLabelLabelMapFilter() – not used. why?
+    
+    thres_label = sitk.BinaryThresholdImageFilter() # Used to isolate labels and find # of parts
+    thres_label.SetInsideValue(1)
+    thres_label.SetOutsideValue(0)
+    thres_part = sitk.BinaryThresholdImageFilter() # Used to isolate labels and find # of parts
+    conn = sitk.ConnectedComponentImageFilter()
+    conn.SetFullyConnected(True)
+    stats = sitk.LabelIntensityStatisticsImageFilter()    
+    
+    if relabel_parts == [] and remove_by_volume == 0:
+        ogo.message('No operations requested. Suggest setting one of the follwoing:')
+        ogo.message('  --relabel_parts')
+        ogo.message('  --remove_by_volume')
+        
     if (relabel_parts):
+        ct_base = sitk.Image(ct) # Do we need to make a deep copy
+        ct_base = labelmapfilt.Execute(ct_base)
+        
         if np.remainder(len(relabel_parts),3) != 0:
-            os.sys.exit('[ERROR] Incorrect argement for --relabel_parts. Tuples of 3 expected.')
+            os.sys.exit('[ERROR] Incorrect argument for --relabel_parts. Tuples of 3 expected.')
         n_relabel_parts = int(len(relabel_parts) / 3)
         relabel_parts = np.reshape(relabel_parts, (n_relabel_parts,3))
-        ogo.message('Relabelling {:d} parts in image'.format(n_relabel_parts))
+        ogo.message('Relabelling {:d} parts in image:'.format(n_relabel_parts))
         for swap in relabel_parts:
-            label = swap[0]
-            part = swap[1]
-            new_label = swap[2]
-            ogo.message('  label {:d} ({:s}), part {} --> {} ({})'\
-                        .format(label,lb.labels_dict[label]['LABEL'],part,new_label,lb.labels_dict[new_label]['LABEL']))
+            label = int(swap[0])
+            part = int(swap[1])
+            new_label = int(swap[2])
+            
+            thres_label.SetUpperThreshold(label)
+            thres_label.SetLowerThreshold(label)
+            ct_thres = thres_label.Execute(ct)
+            ct_conn = conn.Execute(ct,ct_thres)
+            ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
+            
+            filt.Execute(ct_conn_sorted)
+            size = filt.GetPhysicalSize(part)
+            
+            thres_part.SetUpperThreshold(part)
+            thres_part.SetLowerThreshold(part)
+            thres_part.SetInsideValue(new_label)
+            thres_part.SetOutsideValue(0)
+            ct_part = thres_part.Execute(ct_conn_sorted)
 
-    else:
-        ogo.message('No operations requested. Did you mean to set --relabel_parts ?')
+            ogo.message('  label {:d} ({:s}), part {} ({:.1f} mm3) --> {} ({})'\
+                        .format(label,lb.labels_dict[label]['LABEL'],part,size,new_label,lb.labels_dict[new_label]['LABEL']))
+            
+            ct_part = labelmapfilt.Execute(ct_part)
+            ct_base = mergefilt.Execute(ct_part,ct_base)
+
+        ct_final = labelimagefilt.Execute(ct_base)
+        
+    final_labels = get_labels(ct_final)
+    ogo.message('Final image contains the following labels:')
+    ogo.message('  [' + ', '.join('{:d}'.format(i) for i in final_labels) + ']')
+    
+    ogo.message('')
+    ogo.message('Writing merged output image to file:')
+    ogo.message('  {}'.format(output_image))
+    sitk.WriteImage(ct_final, output_image)            
+
     ogo.message('Done.')
     
     
@@ -245,16 +322,15 @@ and provides some basic tools for repairing of errors. The 'validate'
 and 'repair' options are separated.
 
 The validation performs the following checks:
-  Number of connected components per bone label (should be 1)
   
-  Each bone labelled with just one label
-  Each bone labelled the correct label
-  Number of bones matches expectation
-  Bones are abnormally small or large
+  Each label expected in the image is found
+  Each label is a single part
+  Each bone size is within expected range (not yet implemented)
+  Each bone position is as expected (not yet implemented)
 
 The repair options include:
-  Relabel all voxels of a specified bone (connected component)
-  Remove fragments (by size or by label)
+  Relabel all voxels of a specified bone and part
+  Remove fragments by size
 
 '''
 
@@ -265,14 +341,22 @@ ogoValidate check image.nii.gz
 ogoValidate repair image.nii.gz --component 13 --label 34
 ogoValidate repair image.nii.gz --component 13 --label 0
 
-ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/perfect/RETRO_TRAIN_CORR.nii.gz
 ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_01638_NNUNET.nii.gz
 ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz
 ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/mixed/RETRO_01964_NNUNET.nii.gz
 
-ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz
+ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/perfect/RETRO_TRAIN_CORR.nii.gz
+ogoValidate repair \
+    /Users/skboyd/Desktop/ML/test/robust/perfect/RETRO_TRAIN_CORR.nii.gz \
+    /Users/skboyd/Desktop/ML/test/robust/perfect/RETRO_TRAIN_CORR_REPAIR.nii.gz \
+    --relabel_parts \
+    3 2 3 \
+    5 2 5 \
+    6 2 6 \
+    9 2 9
 
-  ogoValidate repair \
+ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz
+ogoValidate repair \
     /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz \
     /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET_REPAIR.nii.gz \
     --relabel_parts \
@@ -291,6 +375,12 @@ ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNE
     5 10 5 \
     6 2 6 \
     6 3 6
+ogoValidate repair \
+    /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz \
+    /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET_REPAIR.nii.gz \
+    --relabel_parts \
+    5 2 5 \
+    5 3 5 
 
 '''
 
@@ -308,6 +398,7 @@ ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNE
     parser_validate.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_validate.add_argument('--report_file', metavar='FILE', help='Write validation report to file (*.txt)')
     parser_validate.add_argument('--print_parts', action='store_true', help='Writes N label output images showing component parts')
+    parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
     parser_validate.add_argument('--overwrite', action='store_true', help='Overwrite validation report without asking')
     parser_validate.set_defaults(func=validate)
 
@@ -316,8 +407,7 @@ ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNE
     parser_repair.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_repair.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
     parser_repair.add_argument('--relabel_parts', type=int, nargs='*', default=[], metavar='LABEL PART NEWLABEL', help='List of labels, parts, and new labels; space separated. Example shows relabelling L4 part 2 to  L3: (e.g. 7 2 8)')
-    #parser_repair.add_argument('--component', type=int, default=0, metavar='#',help='Connected component number (default: %(default)s)')
-    #parser_repair.add_argument('--label', type=int, default=0, metavar='#',help='Label of bone (default: %(default)s)')
+    parser_repair.add_argument('--remove_by_volume', type=float, nargs=1, default=0, metavar='VOL', help='Removes all parts by volumens threshold (default: %(default)s)')
     parser_repair.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
     parser_repair.set_defaults(func=repair)
 
