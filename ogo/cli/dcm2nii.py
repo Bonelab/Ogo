@@ -244,13 +244,54 @@ def dcm2nii(dicom_directory, output_folder, report_only, skip_report, overwrite)
         ogo.message('  {}'.format(output_folder))
         settings.disable_validate_slice_increment()
         settings.disable_validate_slicecount()
+        
 
+        #settings.disable_pydicom_read_force()
+        #settings.disable_resampling()
+        #settings.disable_validate_instance_number()
+        #settings.disable_validate_multiframe_implicit()
+        #settings.disable_validate_orientation()
+        #settings.disable_validate_orthogonal()
         #settings.disable_validate_slice_increment()
+        #settings.disable_validate_slicecount()
+        
+        # settings.enable_pydicom_read_force
+        # settings.enable_resampling
+        # settings.enable_validate_instance_number
+        # settings.enable_validate_multiframe_implicit
+        # settings.enable_validate_orientation
+        # settings.enable_validate_orthogonal
+        # settings.enable_validate_slice_increment
+        # settings.enable_validate_slicecount
+        
+        # settings.pydicom_read_force
+        # settings.resample
+        # settings.resample_padding
+        # settings.resample_spline_interpolation_order
+        # settings.set_resample_padding
+        # settings.set_resample_spline_interpolation_order
+        
+        # settings.validate_instance_number
+        # settings.validate_multiframe_implicit
+        # settings.validate_orientation
+        # settings.validate_orthogonal
+        # settings.validate_slice_increment
+        # settings.validate_slicecount
+        
+        #  IndexError: list index out of range
+        #  ValueError: could not broadcast input array from shape (414,412,3) into shape (414,412,3,3)
+        #  dicom2nifti.exceptions.ConversionValidationError
+       
         #settings.enable_resampling()
         #settings.set_resample_spline_interpolation_order(1)
         #settings.set_resample_padding(-1000)
 
-        dicom2nifti.convert_directory(dicom_directory, output_folder, compression=True, reorient=True)
+        try:
+            dicom2nifti.convert_directory(dicom_directory, output_folder, compression=True, reorient=True)
+        except: # catch all errors
+            ogo.message('Error in converting DICOM directory.')
+        
+        
     else:
         ogo.message('No NIFTI generated.')
     
@@ -321,6 +362,9 @@ Example call:
 ogodcm2nii /input/Patient0008 /nifti/Patient0008 \\
            --overwrite
 
+ogodcm2nii  /Users/skboyd/Documents/projects/CTDXAICI/data/batch_02/Patient0069 \
+            /Users/skboyd/Documents/projects/CTDXAICI/models/Patient0069 \
+            --overwrite --skip_report
 '''
 
     # Setup argument parsing
