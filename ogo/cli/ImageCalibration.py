@@ -448,28 +448,29 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
         txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
         txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s}\n'.format('Density [HU]:'))
-        txt_file.write('  {:>27s} {:8.3f}'.format('Adipose ', calib.adipose_hu))
+        
+        txt_file.write('  {:>27s} {:>8s} {:>8s} {:>8s}\n'.format('Density [HU]:','Mean','StdDev','#Voxels'))
+        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Adipose ', labels_data['Adipose']['mean'],labels_data['Adipose']['stdev'],labels_data['Adipose']['count']))
         if 91 in labelList:
             txt_file.write(' [used]\n')
         else:
             txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f}'.format('Air ', calib.air_hu))
+        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Air ', labels_data['Air']['mean'],labels_data['Air']['stdev'],labels_data['Air']['count']))
         if 92 in labelList:
             txt_file.write(' [used]\n')
         else:
             txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f}'.format('Blood ', calib.blood_hu))
+        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Blood ', labels_data['Blood']['mean'],labels_data['Blood']['stdev'],labels_data['Blood']['count']))
         if 93 in labelList:
             txt_file.write(' [used]\n')
         else:
             txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f}'.format('Cortical Bone ', calib.bone_hu))
+        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Cortical Bone ', labels_data['Cortical Bone']['mean'],labels_data['Cortical Bone']['stdev'],labels_data['Cortical Bone']['count']))
         if 94 in labelList:
             txt_file.write(' [used]\n')
         else:
             txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f}'.format('Skeletal Muscle ', calib.muscle_hu))
+        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Skeletal Muscle ', labels_data['Skeletal Muscle']['mean'],labels_data['Skeletal Muscle']['stdev'],labels_data['Skeletal Muscle']['count']))
         if 95 in labelList:
             txt_file.write(' [used]\n')
         else:
