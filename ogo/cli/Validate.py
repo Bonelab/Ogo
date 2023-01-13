@@ -26,15 +26,41 @@ def get_labels(ct):
     labels = filt.GetLabels()
     return labels
 
+def is_smaller(filt,percent_threshold,label1,label2):
+    
+    if label1 not in filt.GetLabels():
+        ogo.message('[WARNING] Cannot check if smaller because label {} is not in image.'.format(label1))
+        return False
+    if label2 not in filt.GetLabels():
+        ogo.message('[WARNING] Cannot check if smaller because label {} is not in image.'.format(label2))
+        return False
+    
+    size1 = filt.GetPhysicalSize(label1)
+    size2 = filt.GetPhysicalSize(label2)
+    average_size = (size1+size2)/2
+    thres = average_size * percent_threshold / 100.0
+    
+    #print('size1 = {:10.3f}'.format(size1))
+    #print('size2 = {:10.3f}'.format(size2))
+    #print('thres = {:10.3f}'.format(thres))
+    #print('diff = {:10.3f}'.format((size1 - size2)))
+    
+    if (size2 - size1) > thres:
+        return True
+    else:
+        return False
+        
 # +------------------------------------------------------------------------------+
 def validate(input_image, report_file, print_parts, expected_labels, overwrite, func):
     
-    passed_all_tests = True
-    validate_expected_labels_in_image = True
-    validate_singulary_connected_bone = True
-    #validate_positions_of_bones = True   # implement later?
-    #validate_bone_size_within_range = True             # implement later?
-    
+    # Validation is based on 'innocent until proven guilty' (i.e. default is True)
+    QA_labels = {}
+    QualityAssurance = {
+      "All Pass":  True,
+      "Expected Labels": True,
+      "Labels":   QA_labels
+    }
+
     # Check if output exists and should overwrite
     if not report_file is None:
         if os.path.isfile(report_file) and not overwrite:
@@ -64,7 +90,7 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     
     # Start the report
     report = ''
-    report += '  {:>27s}\n'.format('_________________Validation')
+    report += '  {:>27s}\n'.format('_____________________________________________________________________________Validation')
     report += '  {:>27s} {:s}\n'.format('ID:', os.path.basename(input_image))
     report += '  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0])
     report += '  {:>27s} {:.2f}\n'.format('version:', script_version)
@@ -78,48 +104,59 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     labels = filt.GetLabels()
     label_repair_list = [] # list of (label, part, new_label)
     
-    thres = sitk.BinaryThresholdImageFilter() # Used to isolate labels and find # of parts
-    thres.SetInsideValue(1)
-    thres.SetOutsideValue(0)
     conn = sitk.ConnectedComponentImageFilter()
     conn.SetFullyConnected(True)
     stats = sitk.LabelIntensityStatisticsImageFilter()
     
     # Check if expected labels are in image
     test_labels = []
+    QualityAssurance["Expected Labels"] = True
     for label in expected_labels:
         if label in labels:
             test_labels.append(label)
+            QA_labels[label] = True
         else:
             try:
                 label_name = lb.labels_dict[label]['LABEL']
             except KeyError:
                 label_name = 'unknown label'
             ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,label_name))
-            validate_expected_labels_in_image = False
+            QualityAssurance["Expected Labels"] = False
+            QualityAssurance["All Pass"] = False
     if test_labels == []:
         os.sys.exit('[ERROR] None of the expected labels were found in image.')
     labels = test_labels
     
     ogo.message('Gather each label in the image and determine number of parts.')
     
-    report += '  {:>27s}\n'.format('_____________________Report')
+    report += '  {:>27s}\n'.format('_________________________________________________________________________________Report')
     report += '  {:>27s} {:s}\n'.format('number of labels:',str(n_labels))
-    report += '  {:>27s} {:>8s} {:>6s} {:>10s} {:>22s} {:>6s}\n'.format('LABEL','SIZE','PART','VOL','CENTROID','OFFSET')
-    report += '  {:>27s} {:>8s} {:>6s} {:>10s} {:>22s} {:>6s}\n'.format('#','voxels','#','mm3','(mm,mm,mm)','mm')
-        
+    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>22s} {:>6s}\n'.format('LABEL','PART','VOL','VOX','CENTROID','OFFSET')
+    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>22s} {:>6s}\n'.format('#','#','mm3','#','(mm,mm,mm)','mm')
+
+    # Quality check by examining femur symmetry and pelvis symmetry
+    if is_smaller(filt,3.0,1,2): # Is the right femur 3% smaller than left femur?
+        QA_labels[1] = False
+        QualityAssurance["All Pass"] = False
+    if is_smaller(filt,3.0,2,1):
+        QA_labels[2] = False
+        QualityAssurance["All Pass"] = False
+    if is_smaller(filt,3.0,3,4): # Is the right pelvis 3% smaller than left pelvis?
+        QA_labels[3] = False
+        QualityAssurance["All Pass"] = False
+    if is_smaller(filt,3.0,4,3):
+        QA_labels[4] = False
+        QualityAssurance["All Pass"] = False
+
     for idx,label in enumerate(labels):
         ogo.message('  processing label {} ({})'.format(label,lb.labels_dict[label]['LABEL']))
         desc = lb.labels_dict[label]['LABEL']
         #centroid = filt.GetCentroid(label)
-        size = filt.GetPhysicalSize(label)
+        #size = filt.GetPhysicalSize(label) # volume in mm3
         
-        thres.SetUpperThreshold(label)
-        thres.SetLowerThreshold(label)
-        ct_thres = thres.Execute(ct)
+        ct_thres = ct==label
         
         ct_conn = conn.Execute(ct,ct_thres)
-        
         ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
         
         stats.Execute(ct_conn_sorted,ct)
@@ -129,51 +166,58 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
             label_fname = '{}_lab{:02}{}'.format(name,label,ext)
             sitk.WriteImage(ct_conn_sorted, label_fname) # ERROR: Should write image with original label (replacelabel)
         
-        report += '  {:>22s}{:>5s} {:8.0f} '.format('('+desc+')',str(label),size)        
+        report += '  {:>22s}{:>5s} '.format('('+desc+')',str(label))        
         # Generate report data
         for part in stats.GetLabels(): # for each part of a given label
             c = stats.GetCentroid(part)
+
             if part==1:
                 ref_c = c
-                report += '{:6d} {:10.1f} ({:6.1f},{:6.1f},{:6.1f})\n'.format(part,stats.GetPhysicalSize(part),c[0],c[1],c[2])
+                report += '{:6d} {:10.1f} {:10d} ({:6.1f},{:6.1f},{:6.1f})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),c[0],c[1],c[2])
             else:
-                validate_singulary_connected_bone = False
+                QA_labels[label] = False # any label with more than one part cannot be valid (unless it's a broken bone!)
+                QualityAssurance["All Pass"] = False
                 distance_between_centroids = np.sqrt((ref_c[0] - c[0])**2 + (ref_c[1] - c[1])**2 + (ref_c[2] - c[2])**2)
-                report += '  {:>22s}{:>5s} {:8s} {:6d} {:10.1f} ({:6.1f},{:6.1f},{:6.1f}) {:6.1f}\n'\
-                          .format('','','',part,stats.GetPhysicalSize(part),c[0],c[1],c[2],distance_between_centroids)
+                report += '  {:>22s}{:>5s} {:6d} {:10.1f} {:10d} ({:6.1f},{:6.1f},{:6.1f}) {:6.1f}\n'\
+                          .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),c[0],c[1],c[2],distance_between_centroids)
         
         # Generate suggestion of new label for command line suggestion
         if n_parts>1:
             for part in stats.GetLabels():
                 if part>1:
-                    swap = [label,part,label]
+                    new_label = label
+                    if label == 1:
+                        new_label = 2
+                    if label == 2:
+                        new_label = 1
+                    if label == 3:
+                        new_label = 4
+                    if label == 4:
+                        new_label = 3
+                    swap = [label,part,new_label]
                     label_repair_list.append(swap)
+    
     
     # Final report
     report += '\n'
-    report += '  {:>27s}\n'.format('_______________Final report')
-    if validate_expected_labels_in_image:
-        report += '  {:>27s} {:s}\n'.format('Each expected label found:','PASSED')
-    else:
-        report += '  {:>27s} {:s}\n'.format('Each expected label found:','FAILED')
-    if validate_singulary_connected_bone:
-        report += '  {:>27s} {:s}\n'.format('Each label a single part:','PASSED')
-    else:
-        report += '  {:>27s} {:s}\n'.format('Each label a single part:','FAILED')
+    report += '  {:>27s}\n'.format('______________________________________________________________________Quality assurance')
+
+    report += '  {:>27s}  '.format(' ')+' '.join('{:5d}'.format(label) for label,passed in QualityAssurance["Labels"].items())
     report += '\n'
-    if validate_singulary_connected_bone and validate_expected_labels_in_image:
-        passed_all_tests = True
-    else:
-        passed_all_tests = False
-    if passed_all_tests:
-        report += '  {:>27s} {:s}\n'.format('ALL:','PASSED')
-    else:
-        report += '  {:>27s} {:s}\n'.format('ALL:','FAILED')
+    report += '  {:>27s}: '.format('Test per label')+' '.join('{:>5s}'.format("PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items())
+    report += '\n'
     
+#    report += ''.join('  {:>22s}: {}\n'.format(lb.labels_dict[label]['LABEL'],"PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items())
+
+    report += '\n'
+    report += '  {:>27s}: {:>5s}\n'.format('All expected labels found',"PASS" if QualityAssurance["Expected Labels"] else "FAIL")
+
+    report += '\n'
+    report += '  {:>27s}: {:>5s}\n'.format('Final assessment',"PASS" if QualityAssurance["All Pass"] else "FAIL")
+
     # Command line
     cmd_line = ''
-    cmd_line += '  {:>27s}\n'.format('_______________Command line')
-    cmd_line += '\n'
+    cmd_line += '  {:>27s}\n'.format('___________________________________________________________________________Command line')
     cmd_line += '  {}\n'.format('Edit the command below. Should replaced labels be zero?')
     cmd_line += '\n'
     cmd_line += '  {}\n'.format('ogoValidate repair \\')
@@ -187,12 +231,6 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
         else:
             cmd_line += '\n'
              
-    # # Erode
-    # erode = sitk.BinaryErodeImageFilter()
-    # erode.SetKernelRadius(4)
-    # erode.SetForegroundValue(1)
-    # ct_erode = erode.Execute(ct)
-
     ogo.message('Printing report')
     print('\n')
     print(report)
@@ -323,7 +361,8 @@ and 'repair' options are separated.
 
 The validation performs the following checks:
   
-  Each label expected in the image is found
+  Each label expected in the image is found (a list of expected labels 
+                                             can be defined)
   Each label is a single part
   Each bone size is within expected range (not yet implemented)
   Each bone position is as expected (not yet implemented)
@@ -332,6 +371,20 @@ The repair options include:
   Relabel all voxels of a specified bone and part
   Remove fragments by size
 
+NOTES:
+The validation process cycles through the list of expected labels. For
+each label (e.g. Left Femur) it determined how many connected components
+there are and defines these as 'parts'. If a bone is correctly labelled
+there should only be one part. However, it is possible that only one part
+is defined, but that the rest of the bone is labelled with an incorrect
+label (e.g. a portion of Left Femur is labelled Right Femur). Without 
+visualizing the results of segmentation, this is difficult to detect. 
+
+A bone is likely properly labelled if (a) it has only one 'part', and (b)
+if its volume is similar to opposite bone. This works for femur and pelvis.
+
+In cases of no symmetry (e.g. lumbar spine), it is likely properly labelled
+if (a) it has only one 'part', and (b) the volume is within a reasonable range.
 '''
 
     epilog = '''
