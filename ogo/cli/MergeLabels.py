@@ -112,9 +112,9 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
         if len(input_filenames)>2:
             ogo.message('[WARNING] Only first 2 of {} input images will be added together.'.format(len(input_filenames)))
             ogo.message('          The remaining input images are ignored.')
-            
-        ct1 = sitk.ReadImage(input_filenames[0])
-        ct2 = sitk.ReadImage(input_filenames[1])
+
+        ct1 = sitk.ReadImage(input_filenames[0], sitk.sitkUInt8)
+        ct2 = sitk.ReadImage(input_filenames[1], sitk.sitkUInt8)
         ct1_labels = get_labels(ct1)
         ct2_labels = get_labels(ct2)
         ogo.message('  Image 1:')
@@ -136,7 +136,7 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
         for fn in input_filenames:
             label_name,label_id = resolve_totalsegmentator_label_and_id(fn)
             if label_name in valid_list: # found a valid image
-                ct = sitk.ReadImage(fn)
+                ct = sitk.ReadImage(fn, sitk.sitkUInt8)
                 input_labels = get_labels(ct)
                 if len(input_labels)==1:
                     n_valid_images += 1
