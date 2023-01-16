@@ -78,7 +78,7 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
         
     ogo.message('Reading image: ')
     ogo.message('\"{}\"'.format(input_image))
-    ct = sitk.ReadImage(input_image)
+    ct = sitk.ReadImage(input_image, sitk.sitkUInt8)
     
     # Create base filename (and some extra information)
     basename = os.path.basename(input_image)
@@ -202,13 +202,11 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     report += '\n'
     report += '  {:>27s}\n'.format('______________________________________________________________________Quality assurance')
 
-    report += '  {:>27s}  '.format(' ')+' '.join('{:5d}'.format(label) for label,passed in QualityAssurance["Labels"].items())
+    report += '  {:>27s}  '.format('HEADING')+' '.join('{:5d}'.format(label) for label,passed in QualityAssurance["Labels"].items())
     report += '\n'
     report += '  {:>27s}: '.format('Test per label')+' '.join('{:>5s}'.format("PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items())
     report += '\n'
     
-#    report += ''.join('  {:>22s}: {}\n'.format(lb.labels_dict[label]['LABEL'],"PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items())
-
     report += '\n'
     report += '  {:>27s}: {:>5s}\n'.format('All expected labels found',"PASS" if QualityAssurance["Expected Labels"] else "FAIL")
 
@@ -265,7 +263,7 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
     
     ogo.message('Reading image: ')
     ogo.message('\"{}\"'.format(input_image))
-    ct = sitk.ReadImage(input_image)
+    ct = sitk.ReadImage(input_image, sitk.sitkUInt8)
     
     # Get all the available labels in the input image
     labels = get_labels(ct)
@@ -279,24 +277,8 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
     n_labels = filt.GetNumberOfLabels()
     labels = filt.GetLabels()
     
-    labelmapfilt = sitk.LabelImageToLabelMapFilter()
-    labelimagefilt = sitk.LabelMapToLabelImageFilter()
-    mergefilt = sitk.MergeLabelMapFilter()
-    mergefilt.Aggregate
-    #mergefilt.Strict
-    #mergefilt.Keep
-    #mergefilt.Pack
-    
-    #sitk.ChangeLabelImageFilter() - used in ogoMerge
-    #sitk.ChangeLabelLabelMapFilter() – not used. why?
-    
-    thres_label = sitk.BinaryThresholdImageFilter() # Used to isolate labels and find # of parts
-    thres_label.SetInsideValue(1)
-    thres_label.SetOutsideValue(0)
-    thres_part = sitk.BinaryThresholdImageFilter() # Used to isolate labels and find # of parts
     conn = sitk.ConnectedComponentImageFilter()
     conn.SetFullyConnected(True)
-    stats = sitk.LabelIntensityStatisticsImageFilter()    
     
     if relabel_parts == [] and remove_by_volume == 0:
         ogo.message('No operations requested. Suggest setting one of the follwoing:')
@@ -305,40 +287,37 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
         
     if (relabel_parts):
         ct_base = sitk.Image(ct) # Do we need to make a deep copy
-        ct_base = labelmapfilt.Execute(ct_base)
         
         if np.remainder(len(relabel_parts),3) != 0:
-            os.sys.exit('[ERROR] Incorrect argument for --relabel_parts. Tuples of 3 expected.')
+            os.sys.exit('[ERROR] Incorrect definition for --relabel_parts. Tuples of 3 are expected.')
+
         n_relabel_parts = int(len(relabel_parts) / 3)
         relabel_parts = np.reshape(relabel_parts, (n_relabel_parts,3))
+        
         ogo.message('Relabelling {:d} parts in image:'.format(n_relabel_parts))
         for swap in relabel_parts:
             label = int(swap[0])
             part = int(swap[1])
             new_label = int(swap[2])
-            
-            thres_label.SetUpperThreshold(label)
-            thres_label.SetLowerThreshold(label)
-            ct_thres = thres_label.Execute(ct)
+                        
+            ct_thres = ct==label
             ct_conn = conn.Execute(ct,ct_thres)
             ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
             
             filt.Execute(ct_conn_sorted)
             size = filt.GetPhysicalSize(part)
             
-            thres_part.SetUpperThreshold(part)
-            thres_part.SetLowerThreshold(part)
-            thres_part.SetInsideValue(new_label)
-            thres_part.SetOutsideValue(0)
-            ct_part = thres_part.Execute(ct_conn_sorted)
-
+            ct_part = new_label*(ct_conn_sorted==part)
+            
             ogo.message('  label {:d} ({:s}), part {} ({:.1f} mm3) --> {} ({})'\
                         .format(label,lb.labels_dict[label]['LABEL'],part,size,new_label,lb.labels_dict[new_label]['LABEL']))
             
-            ct_part = labelmapfilt.Execute(ct_part)
-            ct_base = mergefilt.Execute(ct_part,ct_base)
-
-        ct_final = labelimagefilt.Execute(ct_base)
+            bin_part = ct_part>0
+            mask = 1 - bin_part
+            ct_base = sitk.Mask(ct_base, mask)
+            ct_base = ct_base + new_label*bin_part
+        
+        ct_final = ct_base
         
     final_labels = get_labels(ct_final)
     ogo.message('Final image contains the following labels:')
@@ -355,85 +334,73 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
 def main():
     # Setup description
     description = '''
-Validates segmented output of machine learning tools of the skeleton
-and provides some basic tools for repairing of errors. The 'validate'
-and 'repair' options are separated.
+Validates segmented output of machine learning tools of the skeleton and 
+provides tools for repairing errors. The 'validate' and 'repair' options are 
+separated.
 
-The validation performs the following checks:
+Labels are used to define bones or other tissues. If a label defines a bone it 
+is expected that it would be one connected component. The rationale is that all 
+bones are a single connected component (unless it is a broken bone). If a label
+is not single connected then it will have \'parts\'.
+
+Validation performs the following checks:
   
-  Each label expected in the image is found (a list of expected labels 
-                                             can be defined)
-  Each label is a single part
-  Each bone size is within expected range (not yet implemented)
+  Each label is found in the image (list may be defined by user)
+  Each label is a single connected part
+  Each label femurs or pelvis are the same volume within a tolerance
+  Each label for a bone are within an expected range (not yet implemented)
   Each bone position is as expected (not yet implemented)
 
 The repair options include:
-  Relabel all voxels of a specified bone and part
-  Remove fragments by size
-
+  Relabel voxels defined by its \'label\' and \'part\'.
+  Remove any \'parts\' of a given size (not implemented)
+  
 NOTES:
-The validation process cycles through the list of expected labels. For
-each label (e.g. Left Femur) it determined how many connected components
-there are and defines these as 'parts'. If a bone is correctly labelled
-there should only be one part. However, it is possible that only one part
-is defined, but that the rest of the bone is labelled with an incorrect
-label (e.g. a portion of Left Femur is labelled Right Femur). Without 
-visualizing the results of segmentation, this is difficult to detect. 
+The validation process cycles through the list of expected labels. For each 
+label (e.g. Left Femur) it determined how many connected components there are 
+and defines these as \'parts\'. If a bone is correctly labelled there should 
+only be one part. However, it is possible that only one part is defined, but 
+that the rest of the bone is labelled with an incorrect label (e.g. a portion 
+of Left Femur is labelled Right Femur). Without visualizing the results of 
+segmentation, this is difficult to detect. 
 
-A bone is likely properly labelled if (a) it has only one 'part', and (b)
-if its volume is similar to opposite bone. This works for femur and pelvis.
+A bone is likely properly labelled if (a) it has only one \'part\', and (b) if 
+its volume is similar to opposite bone. This works for femur and pelvis.
 
-In cases of no symmetry (e.g. lumbar spine), it is likely properly labelled
-if (a) it has only one 'part', and (b) the volume is within a reasonable range.
+In cases of no symmetry (e.g. lumbar spine), it is likely properly labelled if 
+(a) it has only one \'part\', and (b) the volume is within a reasonable range.
 '''
 
     epilog = '''
 Example calls: 
-ogoValidate check image.nii.gz
+ogoValidate validate image.nii.gz
 
-ogoValidate repair image.nii.gz --component 13 --label 34
+# This relabels label 3, part 2 to label 5
+ogoValidate repair image.nii.gz image_repaired.nii.gz --relabel_parts 3 2 5
+
+# This relabels label 3, part 2 to label 5 as well as label 3, part 3 to label 5
+ogoValidate repair image.nii.gz image_repaired.nii.gz \
+    --relabel_parts \
+    3 2 5 \
+    3 3 5
+
+
 ogoValidate repair image.nii.gz --component 13 --label 0
 
 ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_01638_NNUNET.nii.gz
 ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz
 ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/mixed/RETRO_01964_NNUNET.nii.gz
 
-ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/perfect/RETRO_TRAIN_CORR.nii.gz
-ogoValidate repair \
-    /Users/skboyd/Desktop/ML/test/robust/perfect/RETRO_TRAIN_CORR.nii.gz \
-    /Users/skboyd/Desktop/ML/test/robust/perfect/RETRO_TRAIN_CORR_REPAIR.nii.gz \
+  ogoValidate validate /Users/skboyd/Desktop/ML/data/ARTININ/seg/nnUNet/ARTININ_0002.nii.gz
+  
+  ogoValidate repair \
+    /Users/skboyd/Desktop/ML/data/ARTININ/seg/nnUNet/ARTININ_0002.nii.gz \
+    /Users/skboyd/Desktop/ML/data/ARTININ/seg/nnUNet/ARTININ_0002_REPAIR.nii.gz \
+    --overwrite \
     --relabel_parts \
-    3 2 3 \
-    5 2 5 \
-    6 2 6 \
-    9 2 9
-
-ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz
-ogoValidate repair \
-    /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz \
-    /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET_REPAIR.nii.gz \
-    --relabel_parts \
-    3 2 3 \
-    3 3 3 \
-    3 4 3 \
-    4 2 4 \
-    5 2 5 \
-    5 3 5 \
-    5 4 5 \
-    5 5 5 \
-    5 6 5 \
-    5 7 5 \
-    5 8 5 \
-    5 9 5 \
-    5 10 5 \
-    6 2 6 \
-    6 3 6
-ogoValidate repair \
-    /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz \
-    /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET_REPAIR.nii.gz \
-    --relabel_parts \
-    5 2 5 \
-    5 3 5 
+    1 2 3 \
+    2 2 1 \
+    4 2 3
 
 '''
 
