@@ -341,7 +341,16 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
     ogo.message('Writing merged output image to file:')
     ogo.message('  {}'.format(output_image))
     sitk.WriteImage(ct_final, output_image)            
-
+    
+    # Command line
+    cmd_line = ''
+    cmd_line += '  {:>27s}\n'.format('___________________________________________________________________________Command line')
+    cmd_line += '\n'
+    cmd_line += '  {}\n'.format('ogoValidate validate \\')
+    cmd_line += '    {} \n'.format(output_image)    
+    
+    print(cmd_line)
+    
     ogo.message('Done.')
     
     
