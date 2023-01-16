@@ -12,6 +12,7 @@ import argparse
 import os
 import sys
 import vtk
+import math
 import numpy as np
 import SimpleITK as sitk
 from datetime import date
@@ -131,22 +132,28 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     
     report += '  {:>27s}\n'.format('_________________________________________________________________________________Report')
     report += '  {:>27s} {:s}\n'.format('number of labels:',str(n_labels))
-    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>22s} {:>6s}\n'.format('LABEL','PART','VOL','VOX','CENTROID','OFFSET')
-    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>22s} {:>6s}\n'.format('#','#','mm3','#','(mm,mm,mm)','mm')
+    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('LABEL','PART','VOL','VOX','CENTROID','OFFSET')
+    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('#','#','mm3','#','(X,Y,Z)','mm')
 
     # Quality check by examining femur symmetry and pelvis symmetry
-    if is_smaller(filt,3.0,1,2): # Is the right femur 3% smaller than left femur?
+    percent_femur = 3.0
+    if is_smaller(filt,percent_femur,1,2): # Is the right femur smaller than left femur?
         QA_labels[1] = False
         QualityAssurance["All Pass"] = False
+        ogo.message('[WARNING] Right femur is {}% smaller than left femur: FAIL'.format(percent_femur))
     if is_smaller(filt,3.0,2,1):
         QA_labels[2] = False
         QualityAssurance["All Pass"] = False
-    if is_smaller(filt,3.0,3,4): # Is the right pelvis 3% smaller than left pelvis?
+        ogo.message('[WARNING] Left femur is {}% smaller than right femur: FAIL'.format(percent_femur))
+    percent_pelvis = 3.0
+    if is_smaller(filt,percent_pelvis,3,4): # Is the right pelvis smaller than left pelvis?
         QA_labels[3] = False
         QualityAssurance["All Pass"] = False
-    if is_smaller(filt,3.0,4,3):
+        ogo.message('[WARNING] Right pelvis is {}% smaller than left pelvis: FAIL'.format(percent_pelvis))
+    if is_smaller(filt,percent_pelvis,4,3):
         QA_labels[4] = False
         QualityAssurance["All Pass"] = False
+        ogo.message('[WARNING] Left pelvis is {}% smaller than right pelvis: FAIL'.format(percent_pelvis))
 
     for idx,label in enumerate(labels):
         ogo.message('  processing label {} ({})'.format(label,lb.labels_dict[label]['LABEL']))
@@ -169,17 +176,22 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
         report += '  {:>22s}{:>5s} '.format('('+desc+')',str(label))        
         # Generate report data
         for part in stats.GetLabels(): # for each part of a given label
-            c = stats.GetCentroid(part)
+            centroid = stats.GetCentroid(part)
+            bounding_box = stats.GetBoundingBox(part)
+            bb=[0]*3
+            bb[0] = bounding_box[0] + int(math.ceil(bounding_box[3]/2))
+            bb[1] = bounding_box[1] + int(math.ceil(bounding_box[4]/2))
+            bb[2] = bounding_box[2] + int(math.ceil(bounding_box[5]/2))
 
             if part==1:
-                ref_c = c
-                report += '{:6d} {:10.1f} {:10d} ({:6.1f},{:6.1f},{:6.1f})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),c[0],c[1],c[2])
+                ref_centroid = centroid
+                report += '{:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2])
             else:
                 QA_labels[label] = False # any label with more than one part cannot be valid (unless it's a broken bone!)
                 QualityAssurance["All Pass"] = False
-                distance_between_centroids = np.sqrt((ref_c[0] - c[0])**2 + (ref_c[1] - c[1])**2 + (ref_c[2] - c[2])**2)
-                report += '  {:>22s}{:>5s} {:6d} {:10.1f} {:10d} ({:6.1f},{:6.1f},{:6.1f}) {:6.1f}\n'\
-                          .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),c[0],c[1],c[2],distance_between_centroids)
+                distance_between_centroids = np.sqrt((ref_centroid[0] - centroid[0])**2 + (ref_centroid[1] - centroid[1])**2 + (ref_centroid[2] - centroid[2])**2)
+                report += '  {:>22s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
+                          .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2],distance_between_centroids)
         
         # Generate suggestion of new label for command line suggestion
         if n_parts>1:
@@ -202,9 +214,9 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     report += '\n'
     report += '  {:>27s}\n'.format('______________________________________________________________________Quality assurance')
 
-    report += '  {:>27s}  '.format('HEADING')+' '.join('{:5d}'.format(label) for label,passed in QualityAssurance["Labels"].items())
+    report += '  {:>27s}: '.format('Label')+' '.join('{:5d}'.format(label) for label,passed in QualityAssurance["Labels"].items())
     report += '\n'
-    report += '  {:>27s}: '.format('Test per label')+' '.join('{:>5s}'.format("PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items())
+    report += '  {:>27s}: '.format('Test result')+' '.join('{:>5s}'.format("PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items())
     report += '\n'
     
     report += '\n'
@@ -232,6 +244,8 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     ogo.message('Printing report')
     print('\n')
     print(report)
+    report += cmd_line
+    
     if report_file:
         ogo.message('Saving report to file:')
         ogo.message('      \"{}\"'.format(report_file))
