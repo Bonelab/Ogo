@@ -27,7 +27,7 @@ Developer Install
 
     # I would recommend you create a virtual environment
     #  using conda
-    conda create -n ogo -c numerics88 -c simpleitk -c conda-forge python=3 n88tools matplotlib pbr nose six simpleitk pydicom gdcm pandas
+    conda create -n ogo -c numerics88 -c simpleitk -c conda-forge python=3 n88tools matplotlib pbr nose six simpleitk pydicom gdcm pandas dicom2nifti
 
     # Activate your conda environment, make sure you have conda installed on your system.
     # Best way to install conda is through anaconda
