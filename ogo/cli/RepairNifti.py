@@ -90,15 +90,15 @@ This utility will correct the issue.
 '''
     epilog = '''
 Example calls: 
-  ogoRepairNifty ./MODELS/RETRO_00037.nii --output_filename \
+  ogoRepairNifti ./MODELS/RETRO_00037.nii --output_filename \
                  ./MODELS/RETRO_00037_FIXED.nii
-  ogoRepairNifty ./MODELS/RETRO_00037.nii.gz
+  ogoRepairNifti ./MODELS/RETRO_00037.nii.gz
 '''
 
     # Setup argument parsing
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
-        prog="RepairNifty",
+        prog="RepairNifti",
         description=description,
         epilog=epilog
     )
@@ -108,7 +108,7 @@ Example calls:
 
     # Parse and display
     args = parser.parse_args()
-    print(echo_arguments('RepairNifty', vars(args)))
+    print(echo_arguments('RepairNifti', vars(args)))
         
     # Run program
     repair_nifti(**vars(args))

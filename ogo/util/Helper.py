@@ -67,7 +67,7 @@ def get_phantom(phantom_type):
         calibration_dict['number_rods'] = 3
         calibration_dict['rod_labels'] = [141, 142, 143]
         calibration_dict['rod_names'] = ['A', 'B', 'C']
-        calibration_dict['densities'] = [0, 400, 800]
+        calibration_dict['densities'] = [100, 400, 800]
         calibration_dict['h2o_densities'] = [None]
 
     elif phantom_type in 'QRM-BDC 6-rod':
@@ -269,7 +269,7 @@ def aix(infile, image):
     print(guard)
 
 
-def infoNIFTII(reader):
+def infoNIFTI(reader):
     guard = '!-------------------------------------------------------------------------------'
     print('!> HEADER')
     print('!> {:30s} = {}'.format('TimeDimension', reader.GetTimeDimension()))
