@@ -4,7 +4,7 @@ work flow.
 
 Citation: Boykov Y, Funka-Lea G, 2006. Graph cuts and efficient N-D image
           segmentation. Int J Comput Vision 70, 109-131. 
-		  doi = 10.1007/s11263-006-7934-5 
+          doi = 10.1007/s11263-006-7934-5 
 
 Installation instructions:
 
@@ -18,9 +18,8 @@ $ ccmake --version
   ccmake version 3.25.1
 
 The installation will occur in the GIT repository under ogo/util/graphcuts. The
-full path might be:
+full path might be (fix accordingly):
 
-$ export GRAPHCUTS=/Users/skboyd/Desktop/ML/code/Ogo/ogo/util/graphcuts
 $ export GRAPHCUTS=/Users/username/Ogo/ogo/util/graphcuts
 
 Graph cuts software requires ITK to be installed. This must be downloaded and 
@@ -75,29 +74,29 @@ graphcuts
     │
     ├── CMakeLists.txt
     ├── INSTALLATION.txt
-	│
-    ├── ITK
-    │   └── ...
-    │	
-    ├── bin
-    │   ├── EndostealSegmentation
-    │   ├── HU
-    │   ├── PeriostealSegmentation
-    │   ├── Sheetness
-    │   └── Sheetness2    
     │
-    ├── build
+*   ├── ITK
     │   └── ...
-	│
+    │
+    ├── bin
+*   │   ├── EndostealSegmentation
+*   │   ├── HU
+*   │   ├── PeriostealSegmentation
+*   │   ├── Sheetness
+*   │   └── Sheetness2   
+    │
+*   ├── build
+    │   └── ...
+    │
     ├── include
     │   ├── dev
     │   ├── ...
     │   ├── itkGridCutImageFilter.hxx
     │   └── itkGridCutImageFilter.h
-	│
+    │
     ├── lib
     │   ├── README.txt
-    │   └── gridcut
+*   │   └── gridcut
     │       ├── LICENSE.txt
     │       ├── README.txt
     │       ├── ...
@@ -110,7 +109,7 @@ graphcuts
     │               ├── GridGraph_3D_26C.h
     │               ├── GridGraph_3D_6C.h
     │               └── GridGraph_3D_6C_MT.h
-	│
+    │
     └── src
         ├── CMakeLists.txt
         ├── endosteal_segmentation.cxx
