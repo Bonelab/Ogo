@@ -26,14 +26,20 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
               num_sigma, min_sigma, max_sigma, air_thres, metal_thres, trace_weight, \
               overwrite, func):
 
+    # Check that the binaries are available to run the graphcuts algorithm
+    sheetness_binary_path = ogo.find_executable('Sheetness2',path_binaries)
+    if sheetness_binary_path is None:
+        ogo.message('[ERROR] You must have built the binaries for graph cuts for this to work.')
+        ogo.message('        See instructions for installation in Ogo/ogo/util/graphcuts/.')
+    
     # Check if input image exists
     if not os.path.isfile(input_image):
-        os.message('[ERROR] Cannot find input file.')
-        os.message('  {}'.format(input_image))
+        ogo.message('[ERROR] Cannot find input file.')
+        ogo.message('  {}'.format(input_image))
         os.sys.exit()
     if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
-        os.message('[ERROR] Input must be type NIFTI file.')
-        os.message('  {}'.format(input_image))
+        ogo.message('[ERROR] Input must be type NIFTI file.')
+        ogo.message('  {}'.format(input_image))
         os.sys.exit()
     
     # Define sheet_image if not set explicitly
@@ -61,17 +67,11 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     if not (sheet_image.lower().endswith('.nii') or sheet_image.lower().endswith('.nii.gz')):
         os.sys.exit('[ERROR] Output sheet image must be type NIFTI file: \"{}\"'.format(sheet_image))
     
-    # Check that the binaries are available to run the graphcuts algorithm
-    sheetness_binary_path = ogo.find_executable('Sheetness2',path_binaries)
-    if sheetness_binary_path is None:
-        ogo.message('[ERROR] You must have built the binaries for graph cuts for this to work.')
-        ogo.message('        See instructions for installation in Ogo/ogo/util/graphcuts/.')
-    
-    ogo.message('{:>7s}'.format('-------------- Files'))
+    ogo.message('{}'.format('-------------- Files'))
     ogo.message('{:>7s}: {}'.format('input',input_image))
     ogo.message('{:>7s}: {}'.format('skin',skin_image))
     ogo.message('{:>7s}: {}'.format('sheet',sheet_image))
-    ogo.message('{:>15s}'.format('--------- Parameters'))
+    ogo.message('{}'.format('--------- Parameters'))
     ogo.message('{:>15s}: {:>12s}'.format('enhance_bright',str(enhance_bright)))
     ogo.message('{:>15s}: {:12d}'.format('num_sigma',num_sigma))
     ogo.message('{:>15s}: {:12.2f}'.format('min_sigma',min_sigma))
@@ -79,7 +79,7 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     ogo.message('{:>15s}: {:12.2f}'.format('air_thres',air_thres))
     ogo.message('{:>15s}: {:12.2f}'.format('metal_thres',metal_thres))
     ogo.message('{:>15s}: {:12.2f}'.format('trace_weight',trace_weight))
-    ogo.message('{:>15s}'.format('------------- Binary'))
+    ogo.message('{}'.format('------------- Binary'))
     ogo.message('  {}'.format(sheetness_binary_path))
     ogo.message('Starting analysis...')
     
@@ -91,26 +91,14 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     
     cmd = [str(x) for x in cmd]
     #ogo.message('  CMD: {}'.format(cmd))
-    #exit()
+
     res = subprocess.check_output(cmd)
     
-    print(res)
-    #ogo.message('Reading input image.')
-    #ct = sitk.ReadImage(input_image)
+    #ogo.message('Results: {}'.format(res))
+    ogo.message('{}'.format('------------ Outputs'))
+    ogo.message('{:>15s}: {}'.format('sheet_image',sheet_image))
+    ogo.message('{:>15s}: {}'.format('skin_image',skin_image))
     
-    
-    exit()
-    
-    
-    # Start the report
-    report = ''
-    report += '  {:>27s}\n'.format('_____________________________________________________________________________Validation')
-    report += '  {:>27s} {:s}\n'.format('ID:', os.path.basename(input_image))
-    report += '  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0])
-    report += '  {:>27s} {:.2f}\n'.format('version:', script_version)
-    report += '  {:>27s} {:s}\n'.format('creation date:', str(date.today()))
-    report += '\n'
-            
     ogo.message('Done.')
 
 # +------------------------------------------------------------------------------+
@@ -187,7 +175,6 @@ ogoGraphCuts sheetness /Users/skboyd/Desktop/ML/test/kub.nii.gz
     parser_sheetness.add_argument('input_image', help='Input raw CT image file (*.nii, *.nii.gz)')
     parser_sheetness.add_argument('--sheet_image', metavar='FILE', help='Output sheetness image (*.nii, *.nii.gz) (default: input_image_SHEET.nii.gz)')
     parser_sheetness.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
-    
     parser_sheetness.add_argument('--enhance_bright', action='store_false', help='Enhance bright objects (default: %(default)s)')
     parser_sheetness.add_argument('--num_sigma', metavar='INT', type=int, default=2, help='How many sigmas to use for enhancing (default: %(default)s)')
     parser_sheetness.add_argument('--min_sigma', metavar='FLOAT', type=float, default=0.5, help='How many sigmas to use for enhancing (default: %(default)s)')
@@ -195,8 +182,6 @@ ogoGraphCuts sheetness /Users/skboyd/Desktop/ML/test/kub.nii.gz
     parser_sheetness.add_argument('--air_thres', metavar='FLOAT', type=float, default=-400.0, help='Threshold for determining air (default: %(default)s)')
     parser_sheetness.add_argument('--metal_thres', metavar='FLOAT', type=float, default=1200.0, help='Threshold for determining metal (default: %(default)s)')
     parser_sheetness.add_argument('--trace_weight', metavar='FLOAT', type=float, default=0.05, help='Weight for reducing noise (default: %(default)s)')
-    
-    
     parser_sheetness.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
     parser_sheetness.set_defaults(func=sheetness)
 
