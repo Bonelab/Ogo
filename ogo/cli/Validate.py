@@ -38,13 +38,15 @@ def is_smaller(filt,percent_threshold,label1,label2):
     
     size1 = filt.GetPhysicalSize(label1)
     size2 = filt.GetPhysicalSize(label2)
-    average_size = (size1+size2)/2
+    average_size = (size1+size2)/2.0
     thres = average_size * percent_threshold / 100.0
     
     #print('size1 = {:10.3f}'.format(size1))
     #print('size2 = {:10.3f}'.format(size2))
+    #print('average_size = {:10.3f}'.format(average_size))
+    #print('percent_threshold = {:10.3f}'.format(percent_threshold))
     #print('thres = {:10.3f}'.format(thres))
-    #print('diff = {:10.3f}'.format((size1 - size2)))
+    #print('diff = {:10.3f}'.format((size2 - size1)))
     
     if (size2 - size1) > thres:
         return True
@@ -136,25 +138,26 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('#','#','mm3','#','(X,Y,Z)','mm')
 
     # Quality check by examining femur symmetry and pelvis symmetry
-    percent_femur = 3.0
+    percent_femur = 10.0
     if is_smaller(filt,percent_femur,1,2): # Is the right femur smaller than left femur?
         QA_labels[1] = False
         QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Right femur is {}% smaller than left femur: FAIL'.format(percent_femur))
-    if is_smaller(filt,3.0,2,1):
+        ogo.message('[WARNING] Right femur is more than {}% smaller than left femur: FAIL'.format(percent_femur))
+    if is_smaller(filt,percent_femur,2,1):
         QA_labels[2] = False
         QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Left femur is {}% smaller than right femur: FAIL'.format(percent_femur))
-    percent_pelvis = 3.0
+        ogo.message('[WARNING] Left femur is more than {}% smaller than right femur: FAIL'.format(percent_femur))
+    percent_pelvis = 10.0
     if is_smaller(filt,percent_pelvis,3,4): # Is the right pelvis smaller than left pelvis?
         QA_labels[3] = False
         QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Right pelvis is {}% smaller than left pelvis: FAIL'.format(percent_pelvis))
+        ogo.message('[WARNING] Right pelvis is more than {}% smaller than left pelvis: FAIL'.format(percent_pelvis))
     if is_smaller(filt,percent_pelvis,4,3):
         QA_labels[4] = False
         QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Left pelvis is {}% smaller than right pelvis: FAIL'.format(percent_pelvis))
+        ogo.message('[WARNING] Left pelvis is more than {}% smaller than right pelvis: FAIL'.format(percent_pelvis))
 
+    # Process the identification of labels and their parts
     for idx,label in enumerate(labels):
         ogo.message('  processing label {} ({})'.format(label,lb.labels_dict[label]['LABEL']))
         desc = lb.labels_dict[label]['LABEL']
@@ -295,7 +298,7 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
     conn.SetFullyConnected(True)
     
     if relabel_parts == [] and remove_by_volume == 0:
-        ogo.message('No operations requested. Suggest setting one of the follwoing:')
+        ogo.message('No operations requested. Suggest setting one of the following:')
         ogo.message('  --relabel_parts')
         ogo.message('  --remove_by_volume')
         
@@ -321,7 +324,7 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
             filt.Execute(ct_conn_sorted)
             size = filt.GetPhysicalSize(part)
             
-            ct_part = new_label*(ct_conn_sorted==part)
+            ct_part = (ct_conn_sorted==part)
             
             ogo.message('  label {:d} ({:s}), part {} ({:.1f} mm3) --> {} ({})'\
                         .format(label,lb.labels_dict[label]['LABEL'],part,size,new_label,lb.labels_dict[new_label]['LABEL']))
