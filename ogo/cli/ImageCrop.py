@@ -27,7 +27,7 @@ def ImageCrop(input_filename, output_filename, overwrite, voi):
     if not os.path.isfile(input_filename):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_filename))
 
-    ogo.message('Reading input CT image to be calibrated:')
+    ogo.message('Reading input CT image to be cropped:')
     ogo.message('      \"{}\"'.format(input_filename))
     ct = sitk.ReadImage(input_filename)
     
@@ -56,6 +56,22 @@ def ImageCrop(input_filename, output_filename, overwrite, voi):
     ogo.message('Writing output to file {}'.format(output_filename))
     sitk.WriteImage(ct_out, output_filename)
     
+    # Report information about input image
+    dim = ct_out.GetSize()
+    spacing = ct_out.GetSpacing()
+    origin = ct_out.GetOrigin()
+    phys_dim = [x * y for x, y in zip(dim, spacing)]
+    position = [math.floor(x / y) for x, y in zip(origin, spacing)]
+    
+    guard = '!-------------------------------------------------------------------------------'
+    print(guard)
+    print('!> dim                            {:>8}  {:>8}  {:>8}'.format(*dim))
+    print('!> off                            {:>8}  {:>8}  {:>8}'.format('-', '-', '-'))
+    print('!> pos                            {:>8}  {:>8}  {:>8}'.format(*position))
+    print('!> element size in mm             {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*spacing))
+    print('!> phys dim in mm                 {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*phys_dim))
+    print(guard)
+    
     ogo.message('Done ogoImageCrop!')
 
 
@@ -67,11 +83,6 @@ Utility to crop a NIFTI file to a subvolume.
     epilog = '''
 Example calls: 
 ogoImageCrop --voi 0 511 0 511 137 448 input.nii.gz output.nii.gz
-
-python ImageCrop.py \
-/Users/skboyd/Documents/projects/CTDXAICI/models/CTDXAICI_0053_V01.nii.gz \
-/Users/skboyd/Documents/projects/CTDXAICI/models/CTDXAICI_0053_V01_sub.nii.gz \
---voi 0 511 0 511 137 448 
 '''
 
     # Setup argument parsing
