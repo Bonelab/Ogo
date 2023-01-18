@@ -11,83 +11,96 @@ script_version = 1.0
 import argparse
 import os
 import sys
+import subprocess
 import vtk
-import math
+import glob
 import numpy as np
 import SimpleITK as sitk
 from datetime import date
-from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
-
-def get_labels(ct):
-    filt = sitk.LabelShapeStatisticsImageFilter()
-    filt.Execute(ct)
-    labels = filt.GetLabels()
-    return labels
-
-def is_smaller(filt,percent_threshold,label1,label2):
-    
-    if label1 not in filt.GetLabels():
-        ogo.message('[WARNING] Cannot check if smaller because label {} is not in image.'.format(label1))
-        return False
-    if label2 not in filt.GetLabels():
-        ogo.message('[WARNING] Cannot check if smaller because label {} is not in image.'.format(label2))
-        return False
-    
-    size1 = filt.GetPhysicalSize(label1)
-    size2 = filt.GetPhysicalSize(label2)
-    average_size = (size1+size2)/2
-    thres = average_size * percent_threshold / 100.0
-    
-    #print('size1 = {:10.3f}'.format(size1))
-    #print('size2 = {:10.3f}'.format(size2))
-    #print('thres = {:10.3f}'.format(thres))
-    #print('diff = {:10.3f}'.format((size1 - size2)))
-    
-    if (size2 - size1) > thres:
-        return True
-    else:
-        return False
         
 # +------------------------------------------------------------------------------+
-def validate(input_image, report_file, print_parts, expected_labels, overwrite, func):
-    
-    # Validation is based on 'innocent until proven guilty' (i.e. default is True)
-    QA_labels = {}
-    QualityAssurance = {
-      "All Pass":  True,
-      "Expected Labels": True,
-      "Labels":   QA_labels
-    }
+def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
+              num_sigma, min_sigma, max_sigma, air_thres, metal_thres, trace_weight, \
+              overwrite, func):
 
-    # Check if output exists and should overwrite
-    if not report_file is None:
-        if os.path.isfile(report_file) and not overwrite:
-            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(outfile))
-            if result.lower() not in ['y', 'yes']:
-                ogo.message('Not overwriting. Exiting...')
-                os.sys.exit()
-
-    # Read input
+    # Check if input image exists
     if not os.path.isfile(input_image):
-        os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_image))
-
+        os.message('[ERROR] Cannot find input file.')
+        os.message('  {}'.format(input_image))
+        os.sys.exit()
     if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
-        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_image))
-        
-    ogo.message('Reading image: ')
-    ogo.message('\"{}\"'.format(input_image))
-    ct = sitk.ReadImage(input_image, sitk.sitkUInt8)
+        os.message('[ERROR] Input must be type NIFTI file.')
+        os.message('  {}'.format(input_image))
+        os.sys.exit()
     
-    # Create base filename (and some extra information)
-    basename = os.path.basename(input_image)
-    name, ext = os.path.splitext(input_image)
+    # Define sheet_image if not set explicitly
+    if sheet_image is None:
+        basename = os.path.basename(input_image)
+        name, ext = os.path.splitext(input_image)
+        if 'gz' in ext:
+            name = os.path.splitext(name)[0]  # Manages files with double extension
+            ext = '.nii' + ext
+        sheet_image = name + '_SHEET.nii.gz'
+    
+    # Define skin_image
+    name, ext = os.path.splitext(sheet_image)
     if 'gz' in ext:
         name = os.path.splitext(name)[0]  # Manages files with double extension
         ext = '.nii' + ext
-    dirname = os.path.dirname(input_image)
+    skin_image = name.replace('_SHEET','') + '_SKIN.nii.gz'
+    
+    # Check if output sheet_image exists and should overwrite
+    if os.path.isfile(sheet_image) and not overwrite:
+        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(sheet_image))
+        if result.lower() not in ['y', 'yes']:
+            ogo.message('Not overwriting. Exiting...')
+            os.sys.exit()
+    if not (sheet_image.lower().endswith('.nii') or sheet_image.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Output sheet image must be type NIFTI file: \"{}\"'.format(sheet_image))
+    
+    # Check that the binaries are available to run the graphcuts algorithm
+    sheetness_binary_path = ogo.find_executable('Sheetness2',path_binaries)
+    if sheetness_binary_path is None:
+        ogo.message('[ERROR] You must have built the binaries for graph cuts for this to work.')
+        ogo.message('        See instructions for installation in Ogo/ogo/util/graphcuts/.')
+    
+    ogo.message('{:>7s}'.format('-------------- Files'))
+    ogo.message('{:>7s}: {}'.format('input',input_image))
+    ogo.message('{:>7s}: {}'.format('skin',skin_image))
+    ogo.message('{:>7s}: {}'.format('sheet',sheet_image))
+    ogo.message('{:>15s}'.format('--------- Parameters'))
+    ogo.message('{:>15s}: {:>12s}'.format('enhance_bright',str(enhance_bright)))
+    ogo.message('{:>15s}: {:12d}'.format('num_sigma',num_sigma))
+    ogo.message('{:>15s}: {:12.2f}'.format('min_sigma',min_sigma))
+    ogo.message('{:>15s}: {:12.2f}'.format('max_sigma',max_sigma))
+    ogo.message('{:>15s}: {:12.2f}'.format('air_thres',air_thres))
+    ogo.message('{:>15s}: {:12.2f}'.format('metal_thres',metal_thres))
+    ogo.message('{:>15s}: {:12.2f}'.format('trace_weight',trace_weight))
+    ogo.message('{:>15s}'.format('------------- Binary'))
+    ogo.message('  {}'.format(sheetness_binary_path))
+    ogo.message('Starting analysis...')
+    
+    # Assemble the command for executing the Sheetness2 function
+    cmd = [
+      sheetness_binary_path, input_image, skin_image, sheet_image, enhance_bright,
+      num_sigma, min_sigma, max_sigma, air_thres, metal_thres, trace_weight
+    ]
+    
+    cmd = [str(x) for x in cmd]
+    #ogo.message('  CMD: {}'.format(cmd))
+    #exit()
+    res = subprocess.check_output(cmd)
+    
+    print(res)
+    #ogo.message('Reading input image.')
+    #ct = sitk.ReadImage(input_image)
+    
+    
+    exit()
+    
     
     # Start the report
     report = ''
@@ -98,168 +111,10 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     report += '  {:>27s} {:s}\n'.format('creation date:', str(date.today()))
     report += '\n'
             
-    # Gather all labels in image and determine number of parts each label is broken into
-    filt = sitk.LabelShapeStatisticsImageFilter() # Used to get labels in image
-    filt.Execute(ct)
-    n_labels = filt.GetNumberOfLabels()
-    labels = filt.GetLabels()
-    label_repair_list = [] # list of (label, part, new_label)
-    
-    conn = sitk.ConnectedComponentImageFilter()
-    conn.SetFullyConnected(True)
-    stats = sitk.LabelIntensityStatisticsImageFilter()
-    
-    # Check if expected labels are in image
-    test_labels = []
-    QualityAssurance["Expected Labels"] = True
-    for label in expected_labels:
-        if label in labels:
-            test_labels.append(label)
-            QA_labels[label] = True
-        else:
-            try:
-                label_name = lb.labels_dict[label]['LABEL']
-            except KeyError:
-                label_name = 'unknown label'
-            ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,label_name))
-            QualityAssurance["Expected Labels"] = False
-            QualityAssurance["All Pass"] = False
-    if test_labels == []:
-        os.sys.exit('[ERROR] None of the expected labels were found in image.')
-    labels = test_labels
-    
-    ogo.message('Gather each label in the image and determine number of parts.')
-    
-    report += '  {:>27s}\n'.format('_________________________________________________________________________________Report')
-    report += '  {:>27s} {:s}\n'.format('number of labels:',str(n_labels))
-    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('LABEL','PART','VOL','VOX','CENTROID','OFFSET')
-    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('#','#','mm3','#','(X,Y,Z)','mm')
-
-    # Quality check by examining femur symmetry and pelvis symmetry
-    percent_femur = 3.0
-    if is_smaller(filt,percent_femur,1,2): # Is the right femur smaller than left femur?
-        QA_labels[1] = False
-        QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Right femur is {}% smaller than left femur: FAIL'.format(percent_femur))
-    if is_smaller(filt,3.0,2,1):
-        QA_labels[2] = False
-        QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Left femur is {}% smaller than right femur: FAIL'.format(percent_femur))
-    percent_pelvis = 3.0
-    if is_smaller(filt,percent_pelvis,3,4): # Is the right pelvis smaller than left pelvis?
-        QA_labels[3] = False
-        QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Right pelvis is {}% smaller than left pelvis: FAIL'.format(percent_pelvis))
-    if is_smaller(filt,percent_pelvis,4,3):
-        QA_labels[4] = False
-        QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Left pelvis is {}% smaller than right pelvis: FAIL'.format(percent_pelvis))
-
-    for idx,label in enumerate(labels):
-        ogo.message('  processing label {} ({})'.format(label,lb.labels_dict[label]['LABEL']))
-        desc = lb.labels_dict[label]['LABEL']
-        #centroid = filt.GetCentroid(label)
-        #size = filt.GetPhysicalSize(label) # volume in mm3
-        
-        ct_thres = ct==label
-        
-        ct_conn = conn.Execute(ct,ct_thres)
-        ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
-        
-        stats.Execute(ct_conn_sorted,ct)
-        n_parts = stats.GetNumberOfLabels()
-        
-        if (print_parts):
-            label_fname = '{}_lab{:02}{}'.format(name,label,ext)
-            sitk.WriteImage(ct_conn_sorted, label_fname) # ERROR: Should write image with original label (replacelabel)
-        
-        report += '  {:>22s}{:>5s} '.format('('+desc+')',str(label))        
-        # Generate report data
-        for part in stats.GetLabels(): # for each part of a given label
-            centroid = stats.GetCentroid(part)
-            bounding_box = stats.GetBoundingBox(part)
-            bb=[0]*3
-            bb[0] = bounding_box[0] + int(math.ceil(bounding_box[3]/2))
-            bb[1] = bounding_box[1] + int(math.ceil(bounding_box[4]/2))
-            bb[2] = bounding_box[2] + int(math.ceil(bounding_box[5]/2))
-
-            if part==1:
-                ref_centroid = centroid
-                report += '{:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2])
-            else:
-                QA_labels[label] = False # any label with more than one part cannot be valid (unless it's a broken bone!)
-                QualityAssurance["All Pass"] = False
-                distance_between_centroids = np.sqrt((ref_centroid[0] - centroid[0])**2 + (ref_centroid[1] - centroid[1])**2 + (ref_centroid[2] - centroid[2])**2)
-                report += '  {:>22s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
-                          .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2],distance_between_centroids)
-        
-        # Generate suggestion of new label for command line suggestion
-        if n_parts>1:
-            for part in stats.GetLabels():
-                if part>1:
-                    new_label = label
-                    if label == 1:
-                        new_label = 2
-                    if label == 2:
-                        new_label = 1
-                    if label == 3:
-                        new_label = 4
-                    if label == 4:
-                        new_label = 3
-                    swap = [label,part,new_label]
-                    label_repair_list.append(swap)
-    
-    
-    # Final report
-    report += '\n'
-    report += '  {:>27s}\n'.format('______________________________________________________________________Quality assurance')
-
-    report += '  {:>27s}: '.format('Label')+' '.join('{:5d}'.format(label) for label,passed in QualityAssurance["Labels"].items())
-    report += '\n'
-    report += '  {:>27s}: '.format('Test result')+' '.join('{:>5s}'.format("PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items())
-    report += '\n'
-    
-    report += '\n'
-    report += '  {:>27s}: {:>5s}\n'.format('All expected labels found',"PASS" if QualityAssurance["Expected Labels"] else "FAIL")
-
-    report += '\n'
-    report += '  {:>27s}: {:>5s}\n'.format('Final assessment',"PASS" if QualityAssurance["All Pass"] else "FAIL")
-
-    # Command line
-    cmd_line = ''
-    cmd_line += '  {:>27s}\n'.format('___________________________________________________________________________Command line')
-    cmd_line += '  {}\n'.format('Edit the command below. Should replaced labels be zero?')
-    cmd_line += '\n'
-    cmd_line += '  {}\n'.format('ogoGraphCuts repair \\')
-    cmd_line += '    {} \\\n'.format(input_image)    
-    cmd_line += '    {}_REPAIR{} \\\n'.format(name,ext)
-    cmd_line += '    {}\n'.format('--relabel_parts \\')
-    for idx,swap in enumerate(label_repair_list):
-        cmd_line += '    '+' '.join('{:d}'.format(i) for i in swap)
-        if idx<len(label_repair_list)-1:
-            cmd_line += ' \\\n'
-        else:
-            cmd_line += '\n'
-             
-    ogo.message('Printing report')
-    print('\n')
-    print(report)
-    report += cmd_line
-    
-    if report_file:
-        ogo.message('Saving report to file:')
-        ogo.message('      \"{}\"'.format(report_file))
-        txt_file = open(report_file, "w")
-        txt_file.write(report)
-        txt_file.close()
-
-    if label_repair_list != []:
-        print(cmd_line)
-    
     ogo.message('Done.')
 
 # +------------------------------------------------------------------------------+
-def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite, func):
+def periosteal(mark_image, sheet_image, output_image, overwrite, func):
 
     # Check if output exists and should overwrite
     if os.path.isfile(output_image) and not overwrite:
@@ -268,88 +123,23 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
             ogo.message('Not overwriting. Exiting...')
             os.sys.exit()
     
-    # Read input
-    if not os.path.isfile(input_image):
-        os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_image))
+    # Read input mark image
+    if not os.path.isfile(mark_image):
+        os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(mark_image))
 
-    if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
-        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_image))
+    if not (mark_image.lower().endswith('.nii') or mark_image.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input mark image must be type NIFTI file: \"{}\"'.format(mark_image))
     
     ogo.message('Reading image: ')
-    ogo.message('\"{}\"'.format(input_image))
-    ct = sitk.ReadImage(input_image, sitk.sitkUInt8)
+    ogo.message('\"{}\"'.format(mark_image))
+    ct_mark = sitk.ReadImage(mark_image, sitk.sitkUInt8)
     
-    # Get all the available labels in the input image
-    labels = get_labels(ct)
-    n_labels = len(labels)
-    ogo.message('Input image contains the following labels:')
-    ogo.message('  [' + ', '.join('{:d}'.format(i) for i in labels) + ']')
-
-    # Prepare to go through labels and parts
-    filt = sitk.LabelShapeStatisticsImageFilter()
-    filt.Execute(ct)
-    n_labels = filt.GetNumberOfLabels()
-    labels = filt.GetLabels()
-    
-    conn = sitk.ConnectedComponentImageFilter()
-    conn.SetFullyConnected(True)
-    
-    if relabel_parts == [] and remove_by_volume == 0:
-        ogo.message('No operations requested. Suggest setting one of the follwoing:')
-        ogo.message('  --relabel_parts')
-        ogo.message('  --remove_by_volume')
+    # Check if sheetness image exists
+    if os.path.isfile(sheet_image):
+        ogo.message('Found image: ')
+        ogo.message('\"{}\"'.format(sheet_image))
         
-    if (relabel_parts):
-        ct_base = sitk.Image(ct) # Do we need to make a deep copy
-        
-        if np.remainder(len(relabel_parts),3) != 0:
-            os.sys.exit('[ERROR] Incorrect definition for --relabel_parts. Tuples of 3 are expected.')
-
-        n_relabel_parts = int(len(relabel_parts) / 3)
-        relabel_parts = np.reshape(relabel_parts, (n_relabel_parts,3))
-        
-        ogo.message('Relabelling {:d} parts in image:'.format(n_relabel_parts))
-        for swap in relabel_parts:
-            label = int(swap[0])
-            part = int(swap[1])
-            new_label = int(swap[2])
-                        
-            ct_thres = ct==label
-            ct_conn = conn.Execute(ct,ct_thres)
-            ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
-            
-            filt.Execute(ct_conn_sorted)
-            size = filt.GetPhysicalSize(part)
-            
-            ct_part = new_label*(ct_conn_sorted==part)
-            
-            ogo.message('  label {:d} ({:s}), part {} ({:.1f} mm3) --> {} ({})'\
-                        .format(label,lb.labels_dict[label]['LABEL'],part,size,new_label,lb.labels_dict[new_label]['LABEL']))
-            
-            bin_part = ct_part>0
-            mask = 1 - bin_part
-            ct_base = sitk.Mask(ct_base, mask)
-            ct_base = ct_base + new_label*bin_part
-        
-        ct_final = ct_base
-        
-    final_labels = get_labels(ct_final)
-    ogo.message('Final image contains the following labels:')
-    ogo.message('  [' + ', '.join('{:d}'.format(i) for i in final_labels) + ']')
-    
-    ogo.message('')
-    ogo.message('Writing merged output image to file:')
-    ogo.message('  {}'.format(output_image))
-    sitk.WriteImage(ct_final, output_image)            
-    
-    # Command line
-    cmd_line = ''
-    cmd_line += '  {:>27s}\n'.format('___________________________________________________________________________Command line')
-    cmd_line += '\n'
-    cmd_line += '  {}\n'.format('ogoGraphCuts validate \\')
-    cmd_line += '    {} \n'.format(output_image)    
-    
-    print(cmd_line)
+    exit()
     
     ogo.message('Done.')
     
@@ -359,10 +149,11 @@ def main():
     description = '''
 The graph cuts algorithm is used to segment objects in CT scans and it
 involves two steps. First, a \'sheetness\' algorithm pre-processes the CT 
-image. Second, a roughly labelled image is fed into the algorithm to complete
-the segmentation.
+image. Second, a roughly labelled image is fed into the algorithm and is the 
+basis to complete the segmentation.
 
-The underlying software for graph cuts is available here:
+This python program is only a convenience tool for accessing the graph cuts
+software available here:
 https://gridcut.com/downloads.php
 
 It is necessary to install this software before executing graph cuts. To
@@ -371,6 +162,7 @@ learn more run with --installation_notes.
 
     epilog = '''
 Cite:
+
 Boykov Y, Funka-Lea G, 2006. Graph cuts and efficient N-D image segmentation. 
 Int J Comput Vision 70, 109-131. doi = 10.1007/s11263-006-7934-5 
 
@@ -378,6 +170,7 @@ Example calls:
 ogoGraphCuts sheetness image.nii.gz
 ogoGraphCuts periosteal image.nii.gz image_sheet.nii.gz
 
+ogoGraphCuts sheetness /Users/skboyd/Desktop/ML/test/kub.nii.gz
 '''
 
     # Setup argument parsing
@@ -390,26 +183,34 @@ ogoGraphCuts periosteal image.nii.gz image_sheet.nii.gz
     subparsers = parser.add_subparsers()
 
     # Sheetness
-    parser_validate = subparsers.add_parser('validate')
-    parser_validate.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
-    parser_validate.add_argument('--report_file', metavar='FILE', help='Write validation report to file (*.txt)')
-    parser_validate.add_argument('--print_parts', action='store_true', help='Writes N label output images showing component parts')
-    parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
-    parser_validate.add_argument('--overwrite', action='store_true', help='Overwrite validation report without asking')
-    parser_validate.set_defaults(func=validate)
+    parser_sheetness = subparsers.add_parser('sheetness')
+    parser_sheetness.add_argument('input_image', help='Input raw CT image file (*.nii, *.nii.gz)')
+    parser_sheetness.add_argument('--sheet_image', metavar='FILE', help='Output sheetness image (*.nii, *.nii.gz) (default: input_image_SHEET.nii.gz)')
+    parser_sheetness.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
+    
+    parser_sheetness.add_argument('--enhance_bright', action='store_false', help='Enhance bright objects (default: %(default)s)')
+    parser_sheetness.add_argument('--num_sigma', metavar='INT', type=int, default=2, help='How many sigmas to use for enhancing (default: %(default)s)')
+    parser_sheetness.add_argument('--min_sigma', metavar='FLOAT', type=float, default=0.5, help='How many sigmas to use for enhancing (default: %(default)s)')
+    parser_sheetness.add_argument('--max_sigma', metavar='FLOAT', type=float, default=1.0, help='How many sigmas to use for enhancing (default: %(default)s)')
+    parser_sheetness.add_argument('--air_thres', metavar='FLOAT', type=float, default=-400.0, help='Threshold for determining air (default: %(default)s)')
+    parser_sheetness.add_argument('--metal_thres', metavar='FLOAT', type=float, default=1200.0, help='Threshold for determining metal (default: %(default)s)')
+    parser_sheetness.add_argument('--trace_weight', metavar='FLOAT', type=float, default=0.05, help='Weight for reducing noise (default: %(default)s)')
+    
+    
+    parser_sheetness.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
+    parser_sheetness.set_defaults(func=sheetness)
 
-    # Repair
-    parser_repair = subparsers.add_parser('repair')
-    parser_repair.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
-    parser_repair.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
-    parser_repair.add_argument('--relabel_parts', type=int, nargs='*', default=[], metavar='LABEL PART NEWLABEL', help='List of labels, parts, and new labels; space separated. Example shows relabelling L4 part 2 to  L3: (e.g. 7 2 8)')
-    parser_repair.add_argument('--remove_by_volume', type=float, nargs=1, default=0, metavar='VOL', help='Removes all parts by volumens threshold (default: %(default)s)')
-    parser_repair.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
-    parser_repair.set_defaults(func=repair)
+    # Periosteal
+    parser_periosteal = subparsers.add_parser('periosteal')
+    parser_periosteal.add_argument('mark_image', help='Input marked image mask file (*.nii, *.nii.gz) (typically _MARK.nii.gz)')
+    parser_periosteal.add_argument('sheet_image', help='Input sheetness CT image file (*.nii, *.nii.gz)')
+    parser_periosteal.add_argument('output_image', help='Output segmented image file (*.nii, *.nii.gz)')
+    parser_periosteal.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
+    parser_periosteal.set_defaults(func=periosteal)
 
     # Parse and display
     args = parser.parse_args()
-    print(echo_arguments('GraphCuts', vars(args)))
+    #print(echo_arguments('GraphCuts', vars(args)))
 
     # Run program
     args.func(**vars(args))
