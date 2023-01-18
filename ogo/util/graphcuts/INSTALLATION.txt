@@ -1,0 +1,120 @@
+The graph cuts method was developed by others and here we only provide an 
+implementation for our own use in a convenient manner that integrates with our 
+work flow.
+
+Citation: Boykov Y, Funka-Lea G, 2006. Graph cuts and efficient N-D image
+          segmentation. Int J Comput Vision 70, 109-131. 
+          doi = 10.1007/s11263-006-7934-5 
+
+Installation instructions:
+
+In preparation, you will need CMAKE (https://cmake.org) at least version 3.xx. 
+Download it and install it on your computer. Alternatively, you can install it 
+using anaconda.
+
+$ conda create -n cmake -c conda-forge cmake=3
+$ conda activate cmake
+$ ccmake --version
+  ccmake version 3.25.1
+
+The installation will occur in the GIT repository under ogo/util/graphcuts. The
+full path might be (fix accordingly):
+
+$ export GRAPHCUTS=/Users/username/Ogo/ogo/util/graphcuts
+
+Graph cuts software requires ITK to be installed. This must be downloaded and 
+built from source.
+
+$ cd $GRAPHCUTS
+$ git clone https://github.com/InsightSoftwareConsortium/ITK.git
+$ cd ITK
+$ git checkout v5.2.0
+$ mkdir build && cd build
+$ cmake ..
+$ make
+
+Download the graph cuts code here: https://gridcut.com/downloads.php. Unpack the 
+GridCut-1.3.zip file and move its contents into a sub directory 
+$GRAPHCUTS/lib/gridcut
+
+$ mkdir -p $GRAPHCUTS/lib/gridcut 
+$ cd $GRAPHCUTS/lib/gridcut
+$ cp ~/Downloads/GridCut-1.3.zip .
+$ unzip GridCut-1.3.zip
+$ rm GridCut-1.3.zip
+  
+You are now ready to build the applications necessary for graph cuts. Create a 
+build directory and perform the build.
+
+$ mkdir -p $GRAPHCUTS/build
+$ cd $GRAPHCUTS/build
+$ ccmake ..
+
+CMake will not find the ITK library and needs the installation directory to be
+defined:
+
+ITK_DIR=$GRAPHCUTS/ITK/build
+CMAKE_INSTALL_PREFIX=$GRAPHCUTS
+
+Once CMake has accepted the changes and you select 'c'for 'configure' followed 
+by 'g' for 'generate', at the command line type:
+
+$ make
+$ make install
+
+The project should be built successfully now. The binaries will be located in
+$GRAPHCUTS/bin and can be left in that directory or moved to a directory of your
+choice.
+
+--------------------------------------------------------------------------------
+Directory structure at $GRAPHCUTS
+A '*' indicates files are not part of the GIT repository
+
+graphcuts
+    │
+    ├── CMakeLists.txt
+    ├── INSTALLATION.txt
+    │
+*   ├── ITK
+    │   └── ...
+    │
+    ├── bin
+*   │   ├── EndostealSegmentation
+*   │   ├── HU
+*   │   ├── PeriostealSegmentation
+*   │   ├── Sheetness
+*   │   └── Sheetness2   
+    │
+*   ├── build
+    │   └── ...
+    │
+    ├── include
+    │   ├── dev
+    │   ├── ...
+    │   ├── itkGridCutImageFilter.hxx
+    │   └── itkGridCutImageFilter.h
+    │
+    ├── lib
+    │   ├── README.txt
+*   │   └── gridcut
+    │       ├── LICENSE.txt
+    │       ├── README.txt
+    │       ├── ...
+    │       ├── examples
+    │       └── include
+    │           └── GridCut
+    │               ├── GridGraph_2D_4C.h
+    │               ├── GridGraph_2D_4C_MT.h
+    │               ├── GridGraph_2D_8C.h
+    │               ├── GridGraph_3D_26C.h
+    │               ├── GridGraph_3D_6C.h
+    │               └── GridGraph_3D_6C_MT.h
+    │
+    └── src
+        ├── CMakeLists.txt
+        ├── endosteal_segmentation.cxx
+        ├── hu_periosteal_segmentation.cxx
+        ├── periosteal_segmentation.cxx
+        ├── sheetness.cxx
+        └── sheetness2.cxx
+

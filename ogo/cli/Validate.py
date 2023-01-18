@@ -159,7 +159,7 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
 
     # Process the identification of labels and their parts
     for idx,label in enumerate(labels):
-        ogo.message('  processing label {} ({})'.format(label,lb.labels_dict[label]['LABEL']))
+        ogo.message('  processing label {:>2d} ({})'.format(label,lb.labels_dict[label]['LABEL']))
         desc = lb.labels_dict[label]['LABEL']
         #centroid = filt.GetCentroid(label)
         #size = filt.GetPhysicalSize(label) # volume in mm3
