@@ -27,6 +27,7 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
               overwrite, func):
 
     # Check that the binaries are available to run the graphcuts algorithm
+    sheetness_binary_path = None
     sheetness_binary_path = ogo.find_executable('Sheetness2',path_binaries)
     if sheetness_binary_path is None:
         ogo.message('[ERROR] You must have built the binaries for graph cuts for this to work.')
@@ -102,32 +103,181 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     ogo.message('Done.')
 
 # +------------------------------------------------------------------------------+
-def periosteal(mark_image, sheet_image, output_image, overwrite, func):
+def periosteal(mark_image, sheet_image, peri_image, path_binaries, \
+               gc_lambda, sigma, conn_filter, labels, cleanup, overwrite, func):
 
-    # Check if output exists and should overwrite
-    if os.path.isfile(output_image) and not overwrite:
-        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
+    # Check that the binaries are available to run the graphcuts algorithm
+    periosteal_binary_path = None
+    periosteal_binary_path = ogo.find_executable('PeriostealSegmentation',path_binaries)
+    if periosteal_binary_path is None:
+        ogo.message('[ERROR] You must have built the binaries for graph cuts for this to work.')
+        ogo.message('        See instructions for installation in Ogo/ogo/util/graphcuts/.')
+
+    # Check if input mark image exists
+    if not os.path.isfile(mark_image):
+        ogo.message('[ERROR] Cannot find input file.')
+        ogo.message('  {}'.format(mark_image))
+        os.sys.exit()
+    if not (mark_image.lower().endswith('.nii') or mark_image.lower().endswith('.nii.gz')):
+        ogo.message('[ERROR] Input must be type NIFTI file.')
+        ogo.message('  {}'.format(mark_image))
+        os.sys.exit()
+    
+    # Define sheet_image if not set explicitly
+    if sheet_image is None:
+        basename = os.path.basename(mark_image)
+        name, ext = os.path.splitext(mark_image)
+        if 'gz' in ext:
+            name = os.path.splitext(name)[0]  # Manages files with double extension
+            ext = '.nii' + ext
+        sheet_image = name.replace('_MARK','') + '_SHEET.nii.gz'
+
+    # Check if input sheet image exists
+    if not os.path.isfile(sheet_image):
+        ogo.message('[ERROR] Cannot find input sheet file.')
+        ogo.message('  {}'.format(sheet_image))
+        os.sys.exit()
+    if not (sheet_image.lower().endswith('.nii') or sheet_image.lower().endswith('.nii.gz')):
+        ogo.message('[ERROR] Input sheet image must be type NIFTI file.')
+        ogo.message('  {}'.format(sheet_image))
+        os.sys.exit()
+
+    # Define peri_image if not set explicitly
+    if peri_image is None:
+        basename = os.path.basename(mark_image)
+        name, ext = os.path.splitext(mark_image)
+        if 'gz' in ext:
+            name = os.path.splitext(name)[0]  # Manages files with double extension
+            ext = '.nii' + ext
+        peri_image = name.replace('_MARK','') + '_PERI.nii.gz'
+
+    # Check if output peri exists and should overwrite
+    if os.path.isfile(peri_image) and not overwrite:
+        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(peri_image))
         if result.lower() not in ['y', 'yes']:
             ogo.message('Not overwriting. Exiting...')
             os.sys.exit()
     
-    # Read input mark image
-    if not os.path.isfile(mark_image):
-        os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(mark_image))
+    # Read the input mark image so that we can check it is the correct type of image
+    # (We expect either 8bit or 16bit unsigned images for the labels)
+    ct_mark = sitk.ReadImage(mark_image)
+    pixel_id = ct_mark.GetPixelID()
+    #if ((pixel_id is sitk.sitkUInt8) or \
+    #    (pixel_id is sitk.sitkInt8) or \
+    #    (pixel_id is sitk.sitkUInt16) or \
+    #    (pixel_id is sitk.sitkInt16) or \
+    #    (pixel_id is sitk.sitkUInt32) or \
+    #    (pixel_id is sitk.sitkInt32) or \
+    #    (pixel_id is sitk.sitkUInt64) or \
+    #    (pixel_id is sitk.sitkInt64)):
+    if ((pixel_id is sitk.sitkUInt8) or \
+        (pixel_id is sitk.sitkUInt16)):
+        ogo.message('Input mark image type is {}'.format(ct_mark.GetPixelIDTypeAsString()))
+    else:
+        ogo.message('[ERROR] Input mark image with labels is usually unsigned 8 or 16 bit.')
+        ogo.message('        Input mark image type is {}'.format(ct_mark.GetPixelIDTypeAsString()))
+        ogo.message('  {}'.format(mark_image))
+        os.sys.exit()
+    
+    # Establish the parameters
+    ogo.message('{}'.format('-------------- Files'))
+    ogo.message('{:>7s}: {}'.format('mark',mark_image))
+    ogo.message('{:>7s}: {}'.format('sheet',sheet_image))
+    ogo.message('{:>7s}: {}'.format('peri',peri_image))
+    ogo.message('{}'.format('--------- Parameters'))
+    ogo.message('{:>15s}: {:12.2f}'.format('gc_lambda',gc_lambda))
+    ogo.message('{:>15s}: {:12.2f}'.format('sigma',sigma))
+    ogo.message('{:>15s}: {:12d}'.format('conn_filter',conn_filter))
+    ogo.message('{:>15s}: '.format('labels')+' '.join('{:2d}'.format(c_label) for c_label in labels))
+    ogo.message('{}'.format('------------- Binary'))
+    ogo.message('  {}'.format(periosteal_binary_path))
+    
+    ogo.message('Starting analysis...')
+    ogo.message('  writing to working directory {}'.format(os.path.dirname(peri_image)))
+    ogo.message('')
 
-    if not (mark_image.lower().endswith('.nii') or mark_image.lower().endswith('.nii.gz')):
-        os.sys.exit('[ERROR] Input mark image must be type NIFTI file: \"{}\"'.format(mark_image))
+    # Gather all labels in image
+    filt = sitk.LabelShapeStatisticsImageFilter()
+    filt.Execute(ct_mark)
+    n_labels = filt.GetNumberOfLabels()
+    img_labels = filt.GetLabels()
+
+    # Establish base name for temporary files
+    temp_base_name, ext = os.path.splitext(peri_image)
+    if 'gz' in ext:
+        temp_base_name = os.path.splitext(temp_base_name)[0]  # Manages files with double extension
+        ext = '.nii' + ext
+
+    for label in labels:
+
+        try:
+            label_name = lb.labels_dict[label]['LABEL']
+        except KeyError:
+            label_name = 'no name'
+
+        if label not in img_labels:
+            ogo.message('[WARNING] Label {:d} ({}) not in marked image. No analysis possible.'.format(label,label_name))
+            labels.remove(label)
     
-    ogo.message('Reading image: ')
-    ogo.message('\"{}\"'.format(mark_image))
-    ct_mark = sitk.ReadImage(mark_image, sitk.sitkUInt8)
+        else:
+            ogo.message('  processing label {:>2d} ({})'.format(label,label_name))
+
+            temp_name = temp_base_name + '_TEMP_' + label_name.replace(' ','') + '.nii.gz'
+            ogo.message('    {}'.format(os.path.basename(temp_name)))
+            
+            # Assemble the command for executing the Sheetness2 function
+            cmd = [
+              periosteal_binary_path, sheet_image, mark_image, temp_name,
+              gc_lambda, sigma, label, conn_filter
+            ]
+            
+            cmd = [str(x) for x in cmd]
+            #ogo.message('  CMD: {}'.format(cmd))
+            
+            res = subprocess.check_output(cmd)
     
-    # Check if sheetness image exists
-    if os.path.isfile(sheet_image):
-        ogo.message('Found image: ')
-        ogo.message('\"{}\"'.format(sheet_image))
+            #ogo.message('Results: {}'.format(res))
+        ogo.message('')
+
+    # Combine the images
+    ogo.message('Combine the images...')
+    ogo.message('  reading from working directory {}'.format(os.path.dirname(peri_image)))
+
+    first_label = labels[0]
+    label_name = lb.labels_dict[first_label]['LABEL']
+    temp_name = temp_base_name + '_TEMP_' + label_name.replace(' ','') + '.nii.gz'
+    ogo.message('    {}'.format(os.path.basename(temp_name)))
+    
+    seg = sitk.ReadImage(str(temp_name), sitk.sitkUInt8)
+    seg = first_label*(seg>0)
+    if cleanup:
+        os.remove(temp_name)
+
+    for label in labels:
+        if label == first_label:
+            continue
         
-    exit()
+        label_name = lb.labels_dict[label]['LABEL']
+        temp_name = temp_base_name + '_TEMP_' + label_name.replace(' ','') + '.nii.gz'
+        ogo.message('    {}'.format(os.path.basename(temp_name)))
+        
+        this_label = sitk.ReadImage(str(temp_name), sitk.sitkUInt8)
+        
+        bin_seg = seg>0
+        bin_this = this_label>0
+        overlap = (bin_seg + bin_this)==2
+        mask = 1 - overlap
+        this_label = sitk.Mask(this_label, mask)
+        
+        seg = seg + label*(this_label>0)
+        
+        if cleanup:
+            os.remove(temp_name)
+    
+    ogo.message('')
+    ogo.message('Writing output file.')
+    ogo.message('    {}'.format(peri_image))
+    sitk.WriteImage(seg, peri_image)
     
     ogo.message('Done.')
     
@@ -172,7 +322,7 @@ ogoGraphCuts sheetness /Users/skboyd/Desktop/ML/test/kub.nii.gz
 
     # Sheetness
     parser_sheetness = subparsers.add_parser('sheetness')
-    parser_sheetness.add_argument('input_image', help='Input raw CT image file (*.nii, *.nii.gz)')
+    parser_sheetness.add_argument('input_image', metavar='FILE', help='Input raw CT image file (*.nii, *.nii.gz)')
     parser_sheetness.add_argument('--sheet_image', metavar='FILE', help='Output sheetness image (*.nii, *.nii.gz) (default: input_image_SHEET.nii.gz)')
     parser_sheetness.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
     parser_sheetness.add_argument('--enhance_bright', action='store_false', help='Enhance bright objects (default: %(default)s)')
@@ -182,15 +332,21 @@ ogoGraphCuts sheetness /Users/skboyd/Desktop/ML/test/kub.nii.gz
     parser_sheetness.add_argument('--air_thres', metavar='FLOAT', type=float, default=-400.0, help='Threshold for determining air (default: %(default)s)')
     parser_sheetness.add_argument('--metal_thres', metavar='FLOAT', type=float, default=1200.0, help='Threshold for determining metal (default: %(default)s)')
     parser_sheetness.add_argument('--trace_weight', metavar='FLOAT', type=float, default=0.05, help='Weight for reducing noise (default: %(default)s)')
-    parser_sheetness.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
+    parser_sheetness.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking (default: %(default)s)')
     parser_sheetness.set_defaults(func=sheetness)
 
     # Periosteal
     parser_periosteal = subparsers.add_parser('periosteal')
-    parser_periosteal.add_argument('mark_image', help='Input marked image mask file (*.nii, *.nii.gz) (typically _MARK.nii.gz)')
-    parser_periosteal.add_argument('sheet_image', help='Input sheetness CT image file (*.nii, *.nii.gz)')
-    parser_periosteal.add_argument('output_image', help='Output segmented image file (*.nii, *.nii.gz)')
-    parser_periosteal.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
+    parser_periosteal.add_argument('mark_image', metavar='FILE', help='Input marked image mask file (*.nii, *.nii.gz) (typically input_image_MARK.nii.gz)')
+    parser_periosteal.add_argument('--sheet_image', metavar='FILE', help='Input sheetness CT image file (*.nii, *.nii.gz)  (default: input_image_SHEET.nii.gz)')
+    parser_periosteal.add_argument('--peri_image', metavar='FILE', help='Output segmented image file (*.nii, *.nii.gz)  (default: input_image_PERI.nii.gz)')
+    parser_periosteal.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
+    parser_periosteal.add_argument('--gc_lambda', metavar='FLOAT', type=float, default=50.0, help='Smoothness term (default: %(default)s)')
+    parser_periosteal.add_argument('--sigma', metavar='FLOAT', type=float, default=0.25, help='Boundry term noise (default: %(default)s)')
+    parser_periosteal.add_argument('--conn_filter', metavar='INT', type=int, default=1, help='Number of connected bones to detect (default: %(default)s)')
+    parser_periosteal.add_argument('--labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10], metavar='LABEL', help='List of labels for analysis (default: %(default)s)')
+    parser_periosteal.add_argument('--cleanup', action='store_true', help='Deletes individual segmentations (default: %(default)s)')
+    parser_periosteal.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking (default: %(default)s)')
     parser_periosteal.set_defaults(func=periosteal)
 
     # Parse and display
