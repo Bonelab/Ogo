@@ -75,7 +75,7 @@ A '*' indicates files are not part of the GIT repository
 graphcuts
     │
     ├── CMakeLists.txt
-    ├── INSTALLATION.txt
+    ├── OGO_GRAPHCUTS_INSTALL.txt
     │
 *   ├── ITK
     │   └── ...

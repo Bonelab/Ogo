@@ -303,9 +303,7 @@ Int J Comput Vision 70, 109-131. doi = 10.1007/s11263-006-7934-5
 
 Example calls: 
 ogoGraphCuts sheetness image.nii.gz
-ogoGraphCuts periosteal image.nii.gz image_sheet.nii.gz
-
-ogoGraphCuts sheetness /Users/skboyd/Desktop/ML/test/kub.nii.gz
+ogoGraphCuts periosteal image_MARK.nii.gz
 '''
 
     # Setup argument parsing
