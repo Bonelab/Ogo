@@ -1,5 +1,5 @@
 # /------------------------------------------------------------------------------+
-# | 16-JAN-2023                                                                  |
+# | 18-JAN-2023                                                                  |
 # | Copyright (c) Bone Imaging Laboratory                                        |
 # | All rights reserved                                                          |
 # | bonelab@ucalgary.ca                                                          |
@@ -27,12 +27,13 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
               overwrite, func):
 
     # Check that the binaries are available to run the graphcuts algorithm
-    sheetness_binary_path = None
     sheetness_binary_path = ogo.find_executable('Sheetness2',path_binaries)
     if sheetness_binary_path is None:
-        ogo.message('[ERROR] You must have built the binaries for graph cuts for this to work.')
-        ogo.message('        See instructions for installation in Ogo/ogo/util/graphcuts/.')
-    
+        ogo.message('[ERROR] You must build the binaries for graph cuts for this to work.')
+        ogo.message('        See instructions for installation here:')
+        ogo.message('{}'.format(ogo.find_executable('OGO_GRAPHCUTS_INSTALL.txt',path_binaries)))
+        os.sys.exit()
+
     # Check if input image exists
     if not os.path.isfile(input_image):
         ogo.message('[ERROR] Cannot find input file.')
@@ -83,7 +84,7 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     ogo.message('{}'.format('------------- Binary'))
     ogo.message('  {}'.format(sheetness_binary_path))
     ogo.message('Starting analysis...')
-    
+
     # Assemble the command for executing the Sheetness2 function
     cmd = [
       sheetness_binary_path, input_image, skin_image, sheet_image, enhance_bright,
@@ -107,12 +108,13 @@ def periosteal(mark_image, sheet_image, peri_image, path_binaries, \
                gc_lambda, sigma, conn_filter, labels, cleanup, overwrite, func):
 
     # Check that the binaries are available to run the graphcuts algorithm
-    periosteal_binary_path = None
     periosteal_binary_path = ogo.find_executable('PeriostealSegmentation',path_binaries)
     if periosteal_binary_path is None:
-        ogo.message('[ERROR] You must have built the binaries for graph cuts for this to work.')
-        ogo.message('        See instructions for installation in Ogo/ogo/util/graphcuts/.')
-
+        ogo.message('[ERROR] You must build the binaries for graph cuts for this to work.')
+        ogo.message('        See instructions for installation here:')
+        ogo.message('{}'.format(ogo.find_executable('OGO_GRAPHCUTS_INSTALL.txt',path_binaries)))
+        os.sys.exit()
+        
     # Check if input mark image exists
     if not os.path.isfile(mark_image):
         ogo.message('[ERROR] Cannot find input file.')
@@ -162,14 +164,6 @@ def periosteal(mark_image, sheet_image, peri_image, path_binaries, \
     # (We expect either 8bit or 16bit unsigned images for the labels)
     ct_mark = sitk.ReadImage(mark_image)
     pixel_id = ct_mark.GetPixelID()
-    #if ((pixel_id is sitk.sitkUInt8) or \
-    #    (pixel_id is sitk.sitkInt8) or \
-    #    (pixel_id is sitk.sitkUInt16) or \
-    #    (pixel_id is sitk.sitkInt16) or \
-    #    (pixel_id is sitk.sitkUInt32) or \
-    #    (pixel_id is sitk.sitkInt32) or \
-    #    (pixel_id is sitk.sitkUInt64) or \
-    #    (pixel_id is sitk.sitkInt64)):
     if ((pixel_id is sitk.sitkUInt8) or \
         (pixel_id is sitk.sitkUInt16)):
         ogo.message('Input mark image type is {}'.format(ct_mark.GetPixelIDTypeAsString()))
@@ -178,7 +172,7 @@ def periosteal(mark_image, sheet_image, peri_image, path_binaries, \
         ogo.message('        Input mark image type is {}'.format(ct_mark.GetPixelIDTypeAsString()))
         ogo.message('  {}'.format(mark_image))
         os.sys.exit()
-    
+
     # Establish the parameters
     ogo.message('{}'.format('-------------- Files'))
     ogo.message('{:>7s}: {}'.format('mark',mark_image))
@@ -287,15 +281,18 @@ def main():
     description = '''
 The graph cuts algorithm is used to segment objects in CT scans and it
 involves two steps. First, a \'sheetness\' algorithm pre-processes the CT 
-image. Second, a roughly labelled image is fed into the algorithm and is the 
-basis to complete the segmentation.
+image. Second, a labelled image is fed into the algorithm to define the
+periosteal surfaces for each labelled bone. You must create the sheetness
+image before you can generate the periosteal surfaces.
 
 This python program is only a convenience tool for accessing the graph cuts
 software available here:
 https://gridcut.com/downloads.php
 
-It is necessary to install this software before executing graph cuts. To
-learn more run with --installation_notes.
+It is necessary to install and compile the binaries for graph cuts before 
+this script will work. To learn more, read OGO_GRAPHCUTS_INSTALL.txt located
+in Ogo/ogo/util/graphcuts . If you try and execute ogoGraphCuts without 
+installing the binaries first you will be redirected OGO_GRAPHCUTS_INSTALL.txt
 '''
 
     epilog = '''
