@@ -219,7 +219,8 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
 
     report += '  {:>27s}: '.format('Label')+' '.join('{:5d}'.format(label) for label,passed in QualityAssurance["Labels"].items())
     report += '\n'
-    report += '  {:>27s}: '.format('Test result')+' '.join('{:>5s}'.format("PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items())
+    report += '  {:>27s}: '.format('Test result')+' '.join('{:>5s}'.format("PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items()) \
+                + ' (' + basename + ')'
     report += '\n'
     
     report += '\n'
@@ -231,7 +232,8 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     # Command line
     cmd_line = ''
     cmd_line += '  {:>27s}\n'.format('___________________________________________________________________________Command line')
-    cmd_line += '  {}\n'.format('Edit the command below. Should replaced labels be zero?')
+    cmd_line += '  {}\n'.format('Edit the command below by selecting replaced labels carefully.')
+    cmd_line += '  {}\n'.format('Should some labels be set to zero?')
     cmd_line += '\n'
     cmd_line += '  {}\n'.format('ogoValidate repair \\')
     cmd_line += '    {} \\\n'.format(input_image)    
