@@ -317,7 +317,7 @@ ogoGraphCuts periosteal image_MARK.nii.gz
 
     # Sheetness
     parser_sheetness = subparsers.add_parser('sheetness')
-    parser_sheetness.add_argument('input_image', metavar='FILE', help='Input raw CT image file (*.nii, *.nii.gz)')
+    parser_sheetness.add_argument('input_image', metavar='FILE IN', help='Input raw CT image file (*.nii, *.nii.gz)')
     parser_sheetness.add_argument('--sheet_image', metavar='FILE', help='Output sheetness image (*.nii, *.nii.gz) (default: input_image_SHEET.nii.gz)')
     parser_sheetness.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
     parser_sheetness.add_argument('--enhance_bright', action='store_false', help='Enhance bright objects (default: %(default)s)')
@@ -332,7 +332,7 @@ ogoGraphCuts periosteal image_MARK.nii.gz
 
     # Periosteal
     parser_periosteal = subparsers.add_parser('periosteal')
-    parser_periosteal.add_argument('mark_image', metavar='FILE', help='Input marked image mask file (*.nii, *.nii.gz) (typically input_image_MARK.nii.gz)')
+    parser_periosteal.add_argument('mark_image', metavar='FILE IN', help='Input marked image mask file (*.nii, *.nii.gz) (typically input_image_MARK.nii.gz)')
     parser_periosteal.add_argument('--sheet_image', metavar='FILE', help='Input sheetness CT image file (*.nii, *.nii.gz)  (default: input_image_SHEET.nii.gz)')
     parser_periosteal.add_argument('--peri_image', metavar='FILE', help='Output segmented image file (*.nii, *.nii.gz)  (default: input_image_PERI.nii.gz)')
     parser_periosteal.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
