@@ -67,7 +67,7 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     # Check if output exists and should overwrite
     if not report_file is None:
         if os.path.isfile(report_file) and not overwrite:
-            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(outfile))
+            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(report_file))
             if result.lower() not in ['y', 'yes']:
                 ogo.message('Not overwriting. Exiting...')
                 os.sys.exit()
