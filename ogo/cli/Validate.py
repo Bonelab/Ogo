@@ -426,74 +426,72 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
 def main():
     # Setup description
     description = '''
-Validates segmented output of machine learning tools of the skeleton and 
-provides tools for repairing errors. The 'validate' and 'repair' options are 
-separated.
+This tools validates the segmented output of machine learning tools to ensure 
+high quality and appropriate labelling of skeletal parts. As opposed to methods 
+such as DICE scores and Hausdorff distance, it validates the segmentation by 
+ensuring certain anatomical constraints are met. To learn more:
 
-Labels are used to define bones or other tissues. If a label defines a bone it 
-is expected that it would be one connected component. The rationale is that all 
-bones are a single connected component (unless it is a broken bone). If a label
-is not single connected then it will have \'parts\'.
+ogoValidate validate -h
 
-Validation performs the following checks:
+The segmentation can be repaired using this tool if there is an existing label 
+that is incorrectly assigned. The user can define the new label by defining 
+which label and part is to be assigned a new label. To learn more:
+
+ogoValidate repair -h
+
+If some of the segmented output is not labelled (i.e. it didn't apply a label
+to part of the bone, either manual labelling will be required, or the user is
+directed to use Graph Cuts. See ogoGraphCuts to learn more.
+
+Definitions:
+
+Label – a value between 1 and 255 that identifies the type of tissue.
+Part – component labelling identifies each unconnected part for a label
+
+Validation is based on the anatomical constraints and checks that are tested:
   
-  Each label is found in the image (list may be defined by user)
-  Each label is a single connected part
-  Each label femurs or pelvis are the same volume within a tolerance
-  Each label for a bone are within an expected range (not yet implemented)
-  Each bone position is as expected (not yet implemented)
+- The input image contains all expected labels (the list may be user defined)
+- A label has only one part (exceptions for Sacrum and L5, which may contain 2)
+- The left and right femur are the same volume (within a given tolerance)
+- The left and right pelvis are the same volume (within a given tolerance)
+- Each bone is within the expected min/max volume range that is pre-defined
+- The position of each bone relative to other bones is appropriate (this is 
+  not yet implemented, but can be checked independently by ogoProcrustes)
 
-The repair options include:
-  Relabel voxels defined by its \'label\' and \'part\'.
-  Remove any \'parts\' of a given size (not implemented)
+Repairs can be performed the following ways:
+
+- Label and part is defined and assigned a new label
+- Remove any \'parts\' of a given size (not implemented)
   
-NOTES:
-The validation process cycles through the list of expected labels. For each 
-label (e.g. Left Femur) it determined how many connected components there are 
-and defines these as \'parts\'. If a bone is correctly labelled there should 
-only be one part. However, it is possible that only one part is defined, but 
-that the rest of the bone is labelled with an incorrect label (e.g. a portion 
-of Left Femur is labelled Right Femur). Without visualizing the results of 
-segmentation, this is difficult to detect. 
+Notes on how this works:
 
-A bone is likely properly labelled if (a) it has only one \'part\', and (b) if 
-its volume is similar to opposite bone. This works for femur and pelvis.
+The validation cycles through the list of expected labels. For each label (e.g. 
+Left Femur) it determines how many connected components there are (parts). If
+a bone is correctly labelled there should only be one part. However, it is 
+possible that only one part is defined, but that the label does not cover the
+entire bone (e.g. a portion of Left Femur is labelled something else, like Right
+Femur). Without visualizing the results of segmentation, this is difficult to 
+detect. However, typically the volume of that bone label will be smaller than
+normal, which is then used to identify that something is wrong. Furthermore, if
+you are looking at a bone that has a symmetric pair (femur, pelvis), then an 
+error is detected if their volumes are different more than a given threshold.
+Interestingly, the sacrum and L5 sometimes seem to be separated into two parts,
+which is unusual but not impossible.
 
-In cases of no symmetry (e.g. lumbar spine), it is likely properly labelled if 
-(a) it has only one \'part\', and (b) the volume is within a reasonable range.
 '''
 
     epilog = '''
 Example calls: 
 ogoValidate validate image.nii.gz
 
-# This relabels label 3, part 2 to label 5
-ogoValidate repair image.nii.gz image_repaired.nii.gz --relabel_parts 3 2 5
+# Relabels label 3, part 2 to label 5
+ogoValidate repair image.nii.gz image_repair.nii.gz --relabel_parts 3 2 5
 
-# This relabels label 3, part 2 to label 5 as well as label 3, part 3 to label 5
-ogoValidate repair image.nii.gz image_repaired.nii.gz \
-    --relabel_parts \
-    3 2 5 \
+# Relabels label 3, part 2 to label 5 and label 3, part 3 to label 5
+ogoValidate repair image.nii.gz image_repaired.nii.gz \\
+    --relabel_parts \\
+    3 2 5 \\
     3 3 5
-
-
-ogoValidate repair image.nii.gz --component 13 --label 0
-
-ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_01638_NNUNET.nii.gz
-ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/frag/RETRO_02317_NNUNET.nii.gz
-ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/mixed/RETRO_01964_NNUNET.nii.gz
-
-  ogoValidate validate /Users/skboyd/Desktop/ML/data/ARTININ/seg/nnUNet/ARTININ_0002.nii.gz
-  
-  ogoValidate repair \
-    /Users/skboyd/Desktop/ML/data/ARTININ/seg/nnUNet/ARTININ_0002.nii.gz \
-    /Users/skboyd/Desktop/ML/data/ARTININ/seg/nnUNet/ARTININ_0002_REPAIR.nii.gz \
-    --overwrite \
-    --relabel_parts \
-    1 2 3 \
-    2 2 1 \
-    4 2 3
-
 '''
 
     # Setup argument parsing
