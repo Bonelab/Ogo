@@ -21,6 +21,26 @@ from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
 
+def expected_bone_volumes():
+    # These values were measured from the original OSSAI training dataset (N=48 scans)
+    # Units are mm3 (volume)
+    # The key is the label
+    bone_volumes = {
+        1:{"Min":66365.1,"Max":233612.1,"Average":130199.1,"Median":126812.6,"Stdev":35547.6,"Short femur":153110.5},  # Femur Right
+        2:{"Min":60625.7,"Max":229086.2,"Average":129570.3,"Median":129159.9,"Stdev":35733.7,"Short femur":153110.5},  # Femur Left
+        3:{"Min":192723.4,"Max":438480.3,"Average":299810.6,"Median":286991.3,"Stdev":57451.5},                        # Pelvis Right
+        4:{"Min":191483.6,"Max":444088.7,"Average":299357.7,"Median":286474.2,"Stdev":57216.2},                        # Pelvis Left
+        5:{"Min":119317.2,"Max":292401.6,"Average":201960.4,"Median":196278.1,"Stdev":37622.3},                        # Sacrum
+        6:{"Min":34200.8,"Max":80734.0,"Average":57426.2,"Median":56607.2,"Stdev":10746.2},                            # L5
+        7:{"Min":33162.0,"Max":78126.7,"Average":56711.1,"Median":54537.4,"Stdev":10553.1},                            # L4
+        8:{"Min":33404.4,"Max":78253.1,"Average":56511.7,"Median":53262.7,"Stdev":10773.7},                            # L3
+        9:{"Min":29922.4,"Max":71553.4,"Average":51534.4,"Median":49481.8,"Stdev":9992.9},                             # L2
+        10:{"Min":27843.2,"Max":66553.1,"Average":46894.7,"Median":44403.6,"Stdev":9400.7}                             # L1
+    }
+    #    "Short Femur": {"Label":11,"Min":60625.7,"Max":153110.5,"Average":100896.7,"Median":93375.5,"Stdev":26361.9}
+    
+    return bone_volumes
+    
 def get_labels(ct):
     filt = sitk.LabelShapeStatisticsImageFilter()
     filt.Execute(ct)
@@ -55,7 +75,7 @@ def is_smaller(filt,percent_threshold,label1,label2):
         
 # +------------------------------------------------------------------------------+
 def validate(input_image, report_file, print_parts, expected_labels, overwrite, func):
-    
+        
     # Validation is based on 'innocent until proven guilty' (i.e. default is True)
     QA_labels = {}
     QualityAssurance = {
@@ -137,25 +157,70 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
     report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('LABEL','PART','VOL','VOX','CENTROID','OFFSET')
     report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('#','#','mm3','#','(X,Y,Z)','mm')
 
-    # Quality check by examining femur symmetry and pelvis symmetry
+    # Quality checks
+    warnings = ''
+    # 1. Examining femur symmetry
     percent_femur = 10.0
     if is_smaller(filt,percent_femur,1,2): # Is the right femur smaller than left femur?
         QA_labels[1] = False
         QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Right femur is more than {}% smaller than left femur: FAIL'.format(percent_femur))
+        msg = '[WARNING] Right femur is more than {}% smaller than left femur: FAIL'.format(percent_femur)
+        ogo.message(msg)
+        warnings += '  ' + msg + '\n'
     if is_smaller(filt,percent_femur,2,1):
         QA_labels[2] = False
         QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Left femur is more than {}% smaller than right femur: FAIL'.format(percent_femur))
+        msg = '[WARNING] Left femur is more than {}% smaller than right femur: FAIL'.format(percent_femur)
+        ogo.message(msg)
+        warnings += '  ' + msg + '\n'
+        
+    # 2. Examining pelvis symmetry
     percent_pelvis = 10.0
     if is_smaller(filt,percent_pelvis,3,4): # Is the right pelvis smaller than left pelvis?
         QA_labels[3] = False
         QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Right pelvis is more than {}% smaller than left pelvis: FAIL'.format(percent_pelvis))
+        msg = '[WARNING] Right pelvis is more than {}% smaller than left pelvis: FAIL'.format(percent_pelvis)
+        ogo.message(msg)
+        warnings += '  ' + msg + '\n'
     if is_smaller(filt,percent_pelvis,4,3):
         QA_labels[4] = False
         QualityAssurance["All Pass"] = False
-        ogo.message('[WARNING] Left pelvis is more than {}% smaller than right pelvis: FAIL'.format(percent_pelvis))
+        msg = '[WARNING] Left pelvis is more than {}% smaller than right pelvis: FAIL'.format(percent_pelvis)
+        ogo.message(msg)
+        warnings += '  ' + msg + '\n'
+    
+    # 3. Check bone sizes are in normal range
+    bone_sizes_dict = expected_bone_volumes()
+    for label in labels:
+        if bone_sizes_dict.get(label) is not None:
+            volume = filt.GetPhysicalSize(label)
+            min_volume = bone_sizes_dict[label]["Min"]
+            max_volume = bone_sizes_dict[label]["Max"]
+            try:
+                label_name = lb.labels_dict[label]['LABEL']
+            except KeyError:
+                label_name = 'unknown label'
+
+            if volume < min_volume:
+                QA_labels[label] = False
+                QualityAssurance["All Pass"] = False
+                msg = '[WARNING] Label {:2d} ({}) volume below minimum ({} mm3): FAIL'.format(label,label_name,min_volume)
+                ogo.message(msg)
+                warnings += '  ' + msg + '\n'
+            
+            if volume > max_volume:
+                QA_labels[label] = False
+                QualityAssurance["All Pass"] = False
+                msg = '[WARNING] Label {:2d} ({}) volume above maximum ({} mm3): FAIL'.format(label,label_name,max_volume)
+                ogo.message(msg)
+                warnings += '  ' + msg + '\n'
+                
+            if label == 1 or label == 2:
+                short_femur_volume = bone_sizes_dict[label]["Short femur"]
+                if volume < short_femur_volume:
+                    msg = '[CAUTION] Label {:2d} ({}) volume likely too small for FEA ({} mm3)'.format(label,label_name,short_femur_volume)
+                    ogo.message(msg)
+                    warnings += '  ' + msg + '\n'
 
     # Process the identification of labels and their parts
     for idx,label in enumerate(labels):
@@ -228,7 +293,10 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
 
     report += '\n'
     report += '  {:>27s}: {:>5s}\n'.format('Final assessment',"PASS" if QualityAssurance["All Pass"] else "FAIL")
-
+    
+    report += '\n'
+    report += warnings
+    
     # Command line
     cmd_line = ''
     cmd_line += '  {:>27s}\n'.format('___________________________________________________________________________Command line')
