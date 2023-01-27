@@ -74,7 +74,7 @@ def is_smaller(filt,percent_threshold,label1,label2):
         return False
         
 # +------------------------------------------------------------------------------+
-def validate(input_image, report_file, print_parts, expected_labels, overwrite, func):
+def validate(input_image, report_file, expected_labels, overwrite, func):
         
     # Validation is based on 'innocent until proven guilty' (i.e. default is True)
     QA_labels = {}
@@ -237,12 +237,8 @@ def validate(input_image, report_file, print_parts, expected_labels, overwrite, 
         stats.Execute(ct_conn_sorted,ct)
         n_parts = stats.GetNumberOfLabels()
         
-        if (print_parts):
-            label_fname = '{}_lab{:02}{}'.format(name,label,ext)
-            sitk.WriteImage(ct_conn_sorted, label_fname) # ERROR: Should write image with original label (replacelabel)
-        
-        report += '  {:>22s}{:>5s} '.format('('+desc+')',str(label))        
         # Generate report data
+        report += '  {:>22s}{:>5s} '.format('('+desc+')',str(label))        
         for part in stats.GetLabels(): # for each part of a given label
             centroid = stats.GetCentroid(part)
             bounding_box = stats.GetBoundingBox(part)
@@ -513,7 +509,6 @@ ogoValidate validate /Users/skboyd/Desktop/ML/test/robust/mixed/RETRO_01964_NNUN
     parser_validate = subparsers.add_parser('validate')
     parser_validate.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_validate.add_argument('--report_file', metavar='FILE', help='Write validation report to file (*.txt)')
-    parser_validate.add_argument('--print_parts', action='store_true', help='Writes N label output images showing component parts')
     parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
     parser_validate.add_argument('--overwrite', action='store_true', help='Overwrite validation report without asking')
     parser_validate.set_defaults(func=validate)
