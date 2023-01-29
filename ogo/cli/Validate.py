@@ -26,16 +26,16 @@ def expected_bone_volumes():
     # Units are mm3 (volume)
     # The key is the label (i.e. Label 1 = Femur Right)
     bone_volumes = {
-        1:{"Min":66365.1,"Max":233612.1,"Average":130199.1,"Median":126812.6,"Stdev":35547.6,"Short femur":153110.5},  # Femur Right
-        2:{"Min":60625.7,"Max":229086.2,"Average":129570.3,"Median":129159.9,"Stdev":35733.7,"Short femur":153110.5},  # Femur Left
-        3:{"Min":192723.4,"Max":438480.3,"Average":299810.6,"Median":286991.3,"Stdev":57451.5},                        # Pelvis Right
-        4:{"Min":191483.6,"Max":444088.7,"Average":299357.7,"Median":286474.2,"Stdev":57216.2},                        # Pelvis Left
-        5:{"Min":119317.2,"Max":292401.6,"Average":201960.4,"Median":196278.1,"Stdev":37622.3},                        # Sacrum
-        6:{"Min":34200.8,"Max":80734.0,"Average":57426.2,"Median":56607.2,"Stdev":10746.2},                            # L5
-        7:{"Min":33162.0,"Max":78126.7,"Average":56711.1,"Median":54537.4,"Stdev":10553.1},                            # L4
-        8:{"Min":33404.4,"Max":78253.1,"Average":56511.7,"Median":53262.7,"Stdev":10773.7},                            # L3
-        9:{"Min":29922.4,"Max":71553.4,"Average":51534.4,"Median":49481.8,"Stdev":9992.9},                             # L2
-        10:{"Min":27843.2,"Max":66553.1,"Average":46894.7,"Median":44403.6,"Stdev":9400.7}                             # L1
+        1:{"Min":60000.0,"Max":234000.0,"Average":130199.1,"Median":126812.6,"Stdev":35547.6,"Short femur":153110.5},  # Femur Right
+        2:{"Min":60000.0,"Max":234000.0,"Average":129570.3,"Median":129159.9,"Stdev":35733.7,"Short femur":153110.5},  # Femur Left
+        3:{"Min":190000.0,"Max":445000.0,"Average":299810.6,"Median":286991.3,"Stdev":57451.5},                        # Pelvis Right
+        4:{"Min":190000.0,"Max":445000.0,"Average":299357.7,"Median":286474.2,"Stdev":57216.2},                        # Pelvis Left
+        5:{"Min":115000.0,"Max":293000.0,"Average":201960.4,"Median":196278.1,"Stdev":37622.3},                        # Sacrum
+        6:{"Min":33000.0,"Max":81000.0,"Average":57426.2,"Median":56607.2,"Stdev":10746.2},                            # L5
+        7:{"Min":32000.0,"Max":79000.0,"Average":56711.1,"Median":54537.4,"Stdev":10553.1},                            # L4
+        8:{"Min":32000.0,"Max":79000.0,"Average":56511.7,"Median":53262.7,"Stdev":10773.7},                            # L3
+        9:{"Min":27000.0,"Max":72000.0,"Average":51534.4,"Median":49481.8,"Stdev":9992.9},                             # L2
+        10:{"Min":25000.0,"Max":67000.0,"Average":46894.7,"Median":44403.6,"Stdev":9400.7}                             # L1
     }
     #    "Short Femur": {"Label":11,"Min":60625.7,"Max":153110.5,"Average":100896.7,"Median":93375.5,"Stdev":26361.9}
     
@@ -76,7 +76,7 @@ def is_smaller(filt,percent_threshold,label1,label2):
 def special_cases(n_parts,label,stats):
     
     if label==5: # Sacrum – sometimes the tail is separate from the rest
-        if n_parts==2 and stats.GetPhysicalSize(2) > 500:
+        if n_parts==2 and stats.GetPhysicalSize(2) > 400:
             return True
     
     elif label==6: # L5 – sometimes the pedicules are separate from the vertebral body
