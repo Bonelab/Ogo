@@ -24,7 +24,7 @@ import ogo.dat.OgoMasterLabels as lb
 def expected_bone_volumes():
     # These values were measured from the original OSSAI training dataset (N=48 scans)
     # Units are mm3 (volume)
-    # The key is the label
+    # The key is the label (i.e. Label 1 = Femur Right)
     bone_volumes = {
         1:{"Min":66365.1,"Max":233612.1,"Average":130199.1,"Median":126812.6,"Stdev":35547.6,"Short femur":153110.5},  # Femur Right
         2:{"Min":60625.7,"Max":229086.2,"Average":129570.3,"Median":129159.9,"Stdev":35733.7,"Short femur":153110.5},  # Femur Left
@@ -72,7 +72,20 @@ def is_smaller(filt,percent_threshold,label1,label2):
         return True
     else:
         return False
-        
+
+def special_cases(n_parts,label,stats):
+    
+    if label==5: # Sacrum – sometimes the tail is separate from the rest
+        if n_parts==2 and stats.GetPhysicalSize(2) > 500:
+            return True
+    
+    elif label==6: # L5 – sometimes the pedicules are separate from the vertebral body
+        if n_parts==2 and stats.GetPhysicalSize(2) > 2000:
+            return True
+
+    else:
+        return False
+
 # +------------------------------------------------------------------------------+
 def validate(input_image, report_file, expected_labels, overwrite, func):
         
@@ -83,7 +96,7 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
       "Expected Labels": True,
       "Labels":   QA_labels
     }
-
+    
     # Check if output exists and should overwrite
     if not report_file is None:
         if os.path.isfile(report_file) and not overwrite:
@@ -225,7 +238,10 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     # Process the identification of labels and their parts
     for idx,label in enumerate(labels):
         ogo.message('  processing label {:>2d} ({})'.format(label,lb.labels_dict[label]['LABEL']))
-        desc = lb.labels_dict[label]['LABEL']
+        try:
+            desc = lb.labels_dict[label]['LABEL']
+        except KeyError:
+            desc = 'unknown label'
         #centroid = filt.GetCentroid(label)
         #size = filt.GetPhysicalSize(label) # volume in mm3
         
@@ -246,13 +262,20 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
             bb[0] = bounding_box[0] + int(math.ceil(bounding_box[3]/2))
             bb[1] = bounding_box[1] + int(math.ceil(bounding_box[4]/2))
             bb[2] = bounding_box[2] + int(math.ceil(bounding_box[5]/2))
-
+            
             if part==1:
                 ref_centroid = centroid
                 report += '{:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2])
             else:
-                QA_labels[label] = False # any label with more than one part cannot be valid (unless it's a broken bone!)
-                QualityAssurance["All Pass"] = False
+                
+                if not special_cases(n_parts,label,stats):
+                    QA_labels[label] = False # any label with more than one part cannot be valid (unless it's a broken bone!)
+                    QualityAssurance["All Pass"] = False
+                else:
+                    msg = '[CAUTION] Label {:2d} ({}) exception with {} parts (part {} = {:.1f} mm3)'.format(label,desc,n_parts,n_parts,stats.GetPhysicalSize(2))
+                    ogo.message(msg)
+                    warnings += '  ' + msg + '\n'
+                    
                 distance_between_centroids = np.sqrt((ref_centroid[0] - centroid[0])**2 + (ref_centroid[1] - centroid[1])**2 + (ref_centroid[2] - centroid[2])**2)
                 report += '  {:>22s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
                           .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2],distance_between_centroids)
