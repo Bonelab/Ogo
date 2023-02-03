@@ -37,6 +37,8 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
                 print('Not overwriting. Exiting...')
                 os.sys.exit()
 
+    
+
     # Set up to read image and mask inputs
     if not os.path.isfile(image_filename):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(image_filename))
@@ -108,7 +110,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
     # Loop through each of the valid labels and calculate BMD
     for idx, lab in enumerate(labels):
 
-        bone_mask = ogo.maskThreshold(reader_mask.GetOutput(), lab)
+        bone_mask = ogo.maskThreshold(reader_mask.GetOutput(), lab) #Applies the threshold value to the input image.
         bone_VOI = ogo.applyMask(reader_image.GetOutput(), bone_mask)
         bmd_outcomes = ogo.bmd_metrics(bone_VOI)
 

@@ -429,6 +429,32 @@ def bmd_metrics(vtk_image):
         'Bone Volume [cm^3]': VOLUME_cm
     }
 
+def sitk_bmd_metrics(sitk_image):
+    """Computes the BMD metrics for the input Simple ITK image. Simple ITK image should be the isolated
+    bone VOI. This can be achieved through sitk.Mask. First, converts to numpy. Analysis performed in Numpy. The
+    first argument is the vtk Image Data.
+    Returns dictionary of results.
+
+    This does the same thing as bmd_metrics but takes in an sitk image instead of a VTK image. 
+    """
+
+    spacing = sitk_image.GetSpacing()
+    numpy_image = sitk.GetArrayFromImage(sitk_image)
+    voxel_count = np.count_nonzero(numpy_image)
+    voxel_volume = spacing[0] * spacing[1] * spacing[2]  # [mm^3]
+    voxel_volume2 = voxel_volume / 1000  # [cm^3]
+    # BMD measures
+    BMD_total = numpy_image.sum()  # [mg/cc K2HPO4]
+    if voxel_count > 0:
+        BMD_AVG = BMD_total / voxel_count  # [mg/cc K2HPO4]
+    else:
+        BMD_AVG = 0.0  # Set to zero when there are no voxels (avoid divide by 0)
+    VOLUME_mm = voxel_count * voxel_volume
+    VOLUME_cm = voxel_count * voxel_volume2  # [cm^3]
+    BMC = BMD_AVG * VOLUME_cm  # [mg HA]
+
+    return [BMD_AVG, BMC, VOLUME_mm, VOLUME_cm]
+    
 
 def bmd_preprocess(vtk_image, thresh_value):
     """Preprocess the calibrated image to remove densities less than 0 mg/cc
@@ -1101,6 +1127,17 @@ def maskThreshold(imageData, threshold_value):
     thres.SetOutputScalarTypeToUnsignedChar()
     thres.Update()
     return thres.GetOutput()
+
+def sitkmaskThreshold(input_image, threshold_value):
+    """Applies the threshold value to the input image. Done using Simple ITK instead of VTK. 
+    The first argument is the image. The second argument is the threshold value to be applied.
+    Returns the thresholded image region as image Data.
+    "input image" needs to have been loaded through Simple ITK, not vtk.  
+    """
+    output_image = sitk.BinaryThreshold(input_image, threshold_value, threshold_value, 1,0)
+
+    return output_image
+
 
 
 def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):

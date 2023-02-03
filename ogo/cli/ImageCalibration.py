@@ -27,6 +27,7 @@ from scipy import stats
 from datetime import date
 from collections import OrderedDict
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+from vtk import vtkImageData, vtkNIFTIImageReader
 
 import ogo.dat.MassAttenuationTables as mat
 import ogo.dat.OgoMasterLabels as lb
@@ -288,6 +289,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     ogo.message('      \"{}\"'.format(input_image))
     ct = sitk.ReadImage(input_image)
 
+
     # Read input mask
     if not os.path.isfile(input_mask):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_mask))
@@ -303,6 +305,11 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     labels = OrderedDict()
     for k in (91, 92, 93, 94, 95):  # if adding a new label, append the ID to the list here
         labels[lb.labels_dict[k].get('LABEL')] = k
+    
+    #Dictionary of tissues of interest for KUB scan 
+    roilabels = OrderedDict()
+    for k in (0,1,2,3,4,5,6,7,8,9,10):  # if adding a new label, append the ID to the list here
+        roilabels[lb.labels_dict[k].get('LABEL')] = k
 
     # Search for labels in mask image
     ogo.message('Computing calibration data from image.')
@@ -316,6 +323,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     # print('\n'.join('{:8d} ({})'.format(k,lb.labels_dict[k]['LABEL']) for k in np.sort(label_list)))
     for k in np.sort(label_list):
         ogo.message(' {:>22s}'.format(lb.labels_dict[k]['LABEL'] + ' (' + str(k) + ')'))
+    
 
     # Calculate the values for each of the five possible valid labels (returns 0 if label unavailable)
     labels_data = OrderedDict()
@@ -420,7 +428,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     hu_to_density_slopes = []
     hu_to_density_intercepts = []
 
-    for i in range(5):
+
+    for i in range(2):
         air_hu = random.uniform(lowerbound_air_hu, upperbound_air_hu)
         adipose_hu = random.uniform(lowerbound_adipose_hu, upperbound_adipose_hu)
         blood_hu = random.uniform(lowerbound_blood_hu, upperbound_blood_hu)
@@ -456,18 +465,17 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
 
         ogo.message('Calibrating input file.')
         voxel_volume = np.prod(ct.GetSpacing())
-        den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-        den = sitk.Cast(den, ct.GetPixelID())
+        den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume) 
+    
+        den = sitk.Cast(den, ct.GetPixelID()) #A hybrid cast image filter to convert images to other types of images.
 
-        imfilt = sitk.StatisticsImageFilter()
-        imfilt.Execute(ct)
+        imfilt = sitk.StatisticsImageFilter() #Compute min, max, variance and mean of an Image .
+        imfilt.Execute(ct) #ct is input image
 
         ogo.message('Writing result to ' + output_image)
         sitk.WriteImage(den, output_image)
 
         if calib_file_name:
-            ogo.message('Saving calibration parameters to file:')
-            ogo.message('      \"{}\"'.format(calib_file_name))
 
             txt_file = open(calib_file_name, "w")
 
@@ -533,21 +541,29 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
             txt_file.write(f'HU-Material Density Y-Intercept {calib.hu_to_density_intercept}\n')
             txt_file.write('INPUT Image Information:\n')
             txt_file.write('-----------------------------------\n')
-
             txt_file.close()
 
-    ogo.message('Done internal calibration.')
+    
+        ogo.message(f'Done internal calibration {i}')
+        
+    
+        for j in range(1,10):
+            bone_mask = ogo.sitkmaskThreshold(mask, j) #Applies the threshold value to the input image
+            bone_VOI = sitk.Mask(den, bone_mask, 0, 1) #masking an image with a mask, setting L4 label as a mask 
+            bmd_outcomes = ogo.sitk_bmd_metrics(bone_VOI)
+            print(bmd_outcomes)
+            
 
+    
     dict = {'hu_to_mass_attenuation_slopes': hu_to_mass_attenuation_slopes, 'hu_to_mass_attenuation_intercepts': hu_to_mass_attenuation_intercepts, 
             'hu_to_density_slopes': hu_to_density_slopes, 'hu_to_density_intercepts': hu_to_density_intercepts}
     df = pd.DataFrame(dict)
-    df.to_excel("MoneCarloResults.xlsx", index=True)
-    
-    #print(hu_to_mass_attenuation_slopes)
-    #print(hu_to_mass_attenuation_intercepts)
-    #print(hu_to_density_slopes)
-    #print(hu_to_density_intercepts)
+    df.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/MoneCarloResults.xlsx", index=True)
 
+    
+
+        
+   
 
 def main():
     # Setup description
