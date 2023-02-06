@@ -296,6 +296,7 @@ def applyMask(imageData, maskData):
     return mask.GetOutput()
 
 
+
 def applyTestBase(mesh, material_table):
     """Constructs to the FEM object.
     The first argument is the Image Mesh.
@@ -453,7 +454,7 @@ def sitk_bmd_metrics(sitk_image):
     VOLUME_cm = voxel_count * voxel_volume2  # [cm^3]
     BMC = BMD_AVG * VOLUME_cm  # [mg HA]
 
-    return [BMD_AVG, BMC, VOLUME_mm, VOLUME_cm]
+    return BMD_AVG
     
 
 def bmd_preprocess(vtk_image, thresh_value):
