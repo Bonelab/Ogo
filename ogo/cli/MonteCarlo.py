@@ -1,5 +1,5 @@
 # /------------------------------------------------------------------------------+
-# | 19-JUL-2022                                                                  |
+# | Jan. 2023                                                                  |
 # | Copyright (c) Bone Imaging Laboratory                                        |
 # | All rights reserved                                                          |
 # | bonelab@ucalgary.ca                                                          |
@@ -268,7 +268,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
 
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image, input_mask, output_image, calib_file_name, useLabels, useL4, overwrite, func):
+def internal(input_image, input_mask, output_image, iteration_num, calib_file_name, useLabels, useL4, overwrite, func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -432,7 +432,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     BMD_iterations = []
     
 
-    for i in range(10):
+    for i in range(iteration_num):
         air_hu = random.uniform(lowerbound_air_hu, upperbound_air_hu)
         adipose_hu = random.uniform(lowerbound_adipose_hu, upperbound_adipose_hu)
         blood_hu = random.uniform(lowerbound_blood_hu, upperbound_blood_hu)
@@ -608,8 +608,9 @@ two labels must be defined, and current valid labels are:
    94 Cortical Bone
    95 Skeletal Muscle
  
-Outputs include the calibrated density image and a text file that includes
-the calibration parameters and results.
+Outputs include calibrated image, an excel file containing the 
+calibration parameters for each iteration (slopes, intercepts, effective energies) 
+and an excel file for each BMD outcome per label per iteration. 
 
 Please cite:
 Michalski AS, Besler BA, Michalak GJ, Boyd SK, 2020. CT-based internal density 
@@ -620,16 +621,12 @@ Med Eng Phys 78, 55-63.
 
     epilog = '''
 Example calls: 
-ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
-                            image_qct.nii.gz  
-ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
-                            image_qct.nii.gz --phantom 'QRM-BDC 3-rod' 
-ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
-                            image_qct.nii.gz --async_image asynch_image.nii.gz 
-ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
-                            image_qct.nii.gz --useL4
-ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
-                            image_qct.nii.gz --useLabels 91 92 93 95
+ogoMonteCarlo internal image.nii.gz rod_mask.nii.gz \\
+                            image_qct.nii.gz iteration_num 
+ogoMonteCarlo internal image.nii.gz samples_mask.nii.gz \\
+                            image_qct.nii.gz iteration_num --useL4
+ogoMonteCarlo internal image.nii.gz samples_mask.nii.gz \\
+                            image_qct.nii.gz interation_num --useLabels 91 92 93 95
 
 '''
 
@@ -663,6 +660,7 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
+    parser_internal.add_argument('iteration_num', type=int, help = "Number of iterations for Monte Carlo simulation")
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
