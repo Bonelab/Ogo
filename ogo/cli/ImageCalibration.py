@@ -25,6 +25,7 @@ from scipy import stats
 from datetime import date
 from collections import OrderedDict
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+import pandas as pd
 
 import ogo.dat.MassAttenuationTables as mat
 import ogo.dat.OgoMasterLabels as lb
@@ -265,7 +266,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
 
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image, input_mask, output_image, calib_file_name, useLabels, useL4, overwrite, func):
+def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name, useLabels, useL4, overwrite, func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -371,56 +372,145 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                                                                                                                   value))
     ogo.message('')
 
-    # Perform the internal calibration fit
-    ogo.message('Computing calibration parameters.')
-    calib = InternalCalibration(
-        adipose_hu=labels_data['Adipose']['mean'],
-        air_hu=labels_data['Air']['mean'],
-        blood_hu=labels_data['Blood']['mean'],
-        bone_hu=labels_data['Cortical Bone']['mean'],
-        muscle_hu=labels_data['Skeletal Muscle']['mean'],
-        label_list=labelList
-    )
-    calib.fit()
+    if MonteCarlo:
+        #setting mean and standard deviation to variables 
+        air_mean_hu = labels_data['Air']['mean']
+        air_std_hu = labels_data['Air']['stdev']
+        
+        adipose_mean_hu = labels_data['Adipose']['mean']
+        adipose_std_hu = labels_data['Adipose']['stdev']
+        
+        blood_mean_hu = labels_data['Blood']['mean']
+        blood_std_hu = labels_data['Blood']['stdev']
+        
+        bone_mean_hu = labels_data['Cortical Bone']['mean']
+        bone_std_hu = labels_data['Cortical Bone']['stdev']
+        
+        muscle_mean_hu = labels_data['Skeletal Muscle']['mean']
+        muscle_std_hu = labels_data['Skeletal Muscle']['stdev']
 
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
-    ogo.message('  {:>27s} {:8.3f}'.format('Energy [keV]:', calib.effective_energy))
-    ogo.message('  {:>27s} {:8.3f}'.format('Max R^2:', calib.max_r2))
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
-    ogo.message('  {:>27s}'.format('Mass Attenuation [cm2/g]:'))
-    ogo.message('  {:>27s} {:8.3f}'.format('Adipose ', calib.adipose_mass_attenuation))
-    ogo.message('  {:>27s} {:8.3f}'.format('Air ', calib.air_mass_attenuation))
-    ogo.message('  {:>27s} {:8.3f}'.format('Blood ', calib.blood_mass_attenuation))
-    ogo.message('  {:>27s} {:8.3f}'.format('Cortical Bone ', calib.bone_mass_attenuation))
-    ogo.message('  {:>27s} {:8.3f}'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        #create arrays to save generated value for each loop
+        effective_engergy_vales = []
+        adipose_vals_hu = []
+        air_vals_hu = []
+        blood_vals_hu = []
+        bone_vals_hu = []
+        muscle_vals_hu = []
 
-    ogo.message('Calibrating input file.')
-    voxel_volume = np.prod(ct.GetSpacing())
-    #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
-    den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-    den = sitk.Cast(den, ct.GetPixelID())
+        hu_to_mass_attenuation_slopes = []
+        hu_to_mass_attenuation_intercepts = []
+        hu_to_density_slopes = []
+        hu_to_density_intercepts = []
+        
+        for i in range(5):
 
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
-    imfilt = sitk.StatisticsImageFilter()
-    imfilt.Execute(ct)
-    ogo.message('  {:>27s} {:s}'.format('INPUT Image Information:', ''))
-    ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
-    ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
-    imfilt.Execute(den)
-    ogo.message('  {:>27s} {:s}'.format('OUTPUT Image Information:', ''))
-    ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
-    ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+            air_hu = np.random.normal(air_mean_hu, air_std_hu)
+            adipose_hu = np.random.normal(adipose_mean_hu, adipose_std_hu)
+            blood_hu = np.random.normal(blood_mean_hu, blood_std_hu)
+            bone_hu = np.random.normal(bone_mean_hu, bone_std_hu)
+            muscle_hu = np.random.normal(muscle_mean_hu, muscle_std_hu)
 
-    ogo.message('Writing result to ' + output_image)
-    sitk.WriteImage(den, output_image)
+
+            # Perform the internal calibration fit
+            ogo.message('Computing calibration parameters.')
+            calib = InternalCalibration(
+                adipose_hu,
+                air_hu,
+                blood_hu,
+                bone_hu,
+                muscle_hu,
+                label_list=labelList
+            )
+            print()
+            calib.fit()
+            
+            #save generated values into an array
+            effective_engergy_vales.append(calib.effective_energy)
+            adipose_vals_hu.append(calib.adipose_hu)
+            air_vals_hu.append(calib.air_hu)
+            blood_vals_hu.append(calib.blood_hu)
+            bone_vals_hu.append(calib.bone_hu)
+            muscle_vals_hu.append(calib.muscle_hu)
+
+            hu_to_mass_attenuation_slopes.append(calib.hu_to_mass_attenuation_slope)
+            hu_to_mass_attenuation_intercepts.append(calib.hu_to_mass_attenuation_intercept)
+            hu_to_density_slopes.append(calib.hu_to_density_slope)
+            hu_to_density_intercepts.append(calib.hu_to_density_intercept)
+            
+
+            #creating calibrated image 
+            ogo.message('Calibrating input file.')
+            voxel_volume = np.prod(ct.GetSpacing())
+            den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume) 
+        
+            den = sitk.Cast(den, ct.GetPixelID()) #A hybrid cast image filter to convert images to other types of images.
+
+            imfilt = sitk.StatisticsImageFilter() #Compute min, max, variance and mean of an Image .
+            imfilt.Execute(ct) #ct is input image
+
+            #writing out calibrated image 
+            ogo.message('Writing result to ' + output_image)
+            sitk.WriteImage(den, output_image)
+
+        #exporting calibration parameters to excel file to store 
+        dict = {'hu_to_mass_attenuation_slopes': hu_to_mass_attenuation_slopes, 'hu_to_mass_attenuation_intercepts': hu_to_mass_attenuation_intercepts, 
+            'hu_to_density_slopes': hu_to_density_slopes, 'hu_to_density_intercepts': hu_to_density_intercepts, 'Effective Energy':effective_engergy_vales}
+        df = pd.DataFrame(dict)
+        df.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/MoneCarloResults.xlsx", index=True)
+    else: 
+        # Perform the internal calibration fit
+        ogo.message('Computing calibration parameters.')
+        calib = InternalCalibration(
+            adipose_hu=labels_data['Adipose']['mean'],
+            air_hu=labels_data['Air']['mean'],
+            blood_hu=labels_data['Blood']['mean'],
+            bone_hu=labels_data['Cortical Bone']['mean'],
+            muscle_hu=labels_data['Skeletal Muscle']['mean'],
+            label_list=labelList
+        )
+        calib.fit()
+
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        ogo.message('  {:>27s} {:8.3f}'.format('Energy [keV]:', calib.effective_energy))
+        ogo.message('  {:>27s} {:8.3f}'.format('Max R^2:', calib.max_r2))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        ogo.message('  {:>27s}'.format('Mass Attenuation [cm2/g]:'))
+        ogo.message('  {:>27s} {:8.3f}'.format('Adipose ', calib.adipose_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Air ', calib.air_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Blood ', calib.blood_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Cortical Bone ', calib.bone_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+
+        ogo.message('Calibrating input file.')
+        voxel_volume = np.prod(ct.GetSpacing())
+        #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
+        den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
+        den = sitk.Cast(den, ct.GetPixelID())
+
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        imfilt = sitk.StatisticsImageFilter()
+        imfilt.Execute(ct)
+        ogo.message('  {:>27s} {:s}'.format('INPUT Image Information:', ''))
+        ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
+        ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
+        imfilt.Execute(den)
+        ogo.message('  {:>27s} {:s}'.format('OUTPUT Image Information:', ''))
+        ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
+        ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+
+        ogo.message('Writing result to ' + output_image)
+        sitk.WriteImage(den, output_image)
+    
+ 
+
 
     if calib_file_name:
         ogo.message('Saving calibration parameters to file:')
@@ -586,6 +676,7 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
+    parser_internal.add_argument('--MonteCarlo', default=False, action='store_true', help='Use when user wants to run a Monte Carlo simulation on calibration')
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
@@ -596,6 +687,7 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
 
     # Parse and display
     args = parser.parse_args()
+    MonteCarlo = args.MonteCarlo
     print(echo_arguments('ImageCalibration', vars(args)))
 
     # Run program
