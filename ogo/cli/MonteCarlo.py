@@ -397,23 +397,6 @@ def internal(input_image, input_mask, output_image, iteration_num, calib_file_na
     
     muscle_mean_hu = labels_data['Skeletal Muscle']['mean']
     muscle_std_hu = labels_data['Skeletal Muscle']['stdev']
-    
-
-    #setting the range bounds 
-    lowerbound_air_hu = air_mean_hu - air_std_hu
-    upperbound_air_hu = air_mean_hu + air_std_hu
-
-    lowerbound_adipose_hu = adipose_mean_hu - adipose_std_hu
-    upperbound_adipose_hu = adipose_mean_hu + adipose_std_hu
-
-    lowerbound_blood_hu = blood_mean_hu - blood_std_hu
-    upperbound_blood_hu = blood_mean_hu + blood_std_hu
-
-    lowerbound_bone_hu = bone_mean_hu - bone_std_hu 
-    upperbound_bone_hu = bone_mean_hu + bone_std_hu 
-
-    lowerbound_muscle_hu = muscle_mean_hu - muscle_std_hu
-    upperbound_muscle_hu = muscle_mean_hu + muscle_std_hu
 
     #create arrays to save generated value for each loop
     effective_engergy_vales = []
@@ -428,16 +411,21 @@ def internal(input_image, input_mask, output_image, iteration_num, calib_file_na
     hu_to_density_slopes = []
     hu_to_density_intercepts = []
 
-    
+    #to store the BMD averages generated each iteration 
     BMD_iterations = []
+    means = []
+    mins = []
+    maxes = []
+    std_devs = []
     
-
+    #still unsure how many iterations is the best number of iterations 
     for i in range(iteration_num):
-        air_hu = random.uniform(lowerbound_air_hu, upperbound_air_hu)
-        adipose_hu = random.uniform(lowerbound_adipose_hu, upperbound_adipose_hu)
-        blood_hu = random.uniform(lowerbound_blood_hu, upperbound_blood_hu)
-        bone_hu = random.uniform(lowerbound_bone_hu, upperbound_bone_hu)
-        muscle_hu = random.uniform(lowerbound_muscle_hu, upperbound_muscle_hu)
+        
+        air_hu = np.random.normal(air_mean_hu, air_std_hu)
+        adipose_hu = np.random.normal(adipose_mean_hu, adipose_std_hu)
+        blood_hu = np.random.normal(blood_mean_hu, blood_std_hu)
+        bone_hu = np.random.normal(bone_mean_hu, bone_std_hu)
+        muscle_hu = np.random.normal(muscle_mean_hu, muscle_std_hu)
 
 
         # Perform the internal calibration fit
@@ -465,7 +453,9 @@ def internal(input_image, input_mask, output_image, iteration_num, calib_file_na
         hu_to_mass_attenuation_intercepts.append(calib.hu_to_mass_attenuation_intercept)
         hu_to_density_slopes.append(calib.hu_to_density_slope)
         hu_to_density_intercepts.append(calib.hu_to_density_intercept)
+        
 
+        #creating calibrated image 
         ogo.message('Calibrating input file.')
         voxel_volume = np.prod(ct.GetSpacing())
         den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume) 
@@ -475,6 +465,7 @@ def internal(input_image, input_mask, output_image, iteration_num, calib_file_na
         imfilt = sitk.StatisticsImageFilter() #Compute min, max, variance and mean of an Image .
         imfilt.Execute(ct) #ct is input image
 
+        #writing out calibrated image 
         ogo.message('Writing result to ' + output_image)
         sitk.WriteImage(den, output_image)
 
@@ -560,7 +551,6 @@ def internal(input_image, input_mask, output_image, iteration_num, calib_file_na
             BMD_avg.append(BMD_outcome)
         BMD_iterations.append(BMD_avg)
 
-
     #exporting average BMD from each iteration to excel file to store, sorted by iteration (row 1 = iteration 2, row 2 = iteration 2, ... )
     df2 = pd.DataFrame(BMD_iterations)
     df2.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/BMDResults.xlsx", index=True)
@@ -570,12 +560,23 @@ def internal(input_image, input_mask, output_image, iteration_num, calib_file_na
             'hu_to_density_slopes': hu_to_density_slopes, 'hu_to_density_intercepts': hu_to_density_intercepts, 'Effective Energy':effective_engergy_vales}
     df = pd.DataFrame(dict)
     df.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/MoneCarloResults.xlsx", index=True)
-
     
+    #calculating mean, min, max of each label after all iterations are done
+    npBMD_iterations = np.array(BMD_iterations)
+    for s in range(npBMD_iterations.shape[1]):
+        mean = (np.sum(npBMD_iterations[:,s]))/iteration_num
+        means.append(mean)
+        std_dev = np.std(npBMD_iterations[:,s])
+        std_devs.append(std_dev)
+        min = np.min(npBMD_iterations[:,s])
+        mins.append(min)
+        max = np.max(npBMD_iterations[:,s])
+        maxes.append(max)
 
-
-
-
+    statsdict = {'means': means, 'standard deviation': std_devs, 'minimum':mins, 'maximum':maxes}
+    df3 = pd.DataFrame(statsdict)
+    df3.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/meansminsmaxes.xlsx", index=True)
+    
 
 def main():
     # Setup description
