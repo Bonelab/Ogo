@@ -410,17 +410,10 @@ def internal(input_image, input_mask, output_image, iteration_num, calib_file_na
     hu_to_mass_attenuation_intercepts = []
     hu_to_density_slopes = []
     hu_to_density_intercepts = []
-
-    #to store the BMD averages generated each iteration 
-    BMD_iterations = []
-    means = []
-    mins = []
-    maxes = []
-    std_devs = []
     
     #still unsure how many iterations is the best number of iterations 
     for i in range(iteration_num):
-        
+
         air_hu = np.random.normal(air_mean_hu, air_std_hu)
         adipose_hu = np.random.normal(adipose_mean_hu, adipose_std_hu)
         blood_hu = np.random.normal(blood_mean_hu, blood_std_hu)
@@ -540,42 +533,12 @@ def internal(input_image, input_mask, output_image, iteration_num, calib_file_na
     
         ogo.message(f'Done internal calibration {i}')
         
-
-        #Calculating BMD estimate for each ROI, hard coded right now for OSSAI labels, with 0 being background so BMD isn't calculated 
-        #Same steps as in AnalyzeBMD but instead in Simple ITK so that it can all be done in the same file
-        BMD_avg = []
-        for j in range(1,11):  
-            bone_mask = ogo.sitkmaskThreshold(mask, j) #Applies the threshold value to the input image
-            bone_VOI = sitk.Mask(den, bone_mask) #masking an image with a mask, setting jth label as a mask 
-            BMD_outcome = ogo.sitk_bmd_metrics(bone_VOI)
-            BMD_avg.append(BMD_outcome)
-        BMD_iterations.append(BMD_avg)
-
-    #exporting average BMD from each iteration to excel file to store, sorted by iteration (row 1 = iteration 2, row 2 = iteration 2, ... )
-    df2 = pd.DataFrame(BMD_iterations)
-    df2.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/BMDResults.xlsx", index=True)
-
     #exporting calibration parameters to excel file to store 
     dict = {'hu_to_mass_attenuation_slopes': hu_to_mass_attenuation_slopes, 'hu_to_mass_attenuation_intercepts': hu_to_mass_attenuation_intercepts, 
             'hu_to_density_slopes': hu_to_density_slopes, 'hu_to_density_intercepts': hu_to_density_intercepts, 'Effective Energy':effective_engergy_vales}
     df = pd.DataFrame(dict)
     df.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/MoneCarloResults.xlsx", index=True)
-    
-    #calculating mean, min, max of each label after all iterations are done
-    npBMD_iterations = np.array(BMD_iterations)
-    for s in range(npBMD_iterations.shape[1]):
-        mean = (np.sum(npBMD_iterations[:,s]))/iteration_num
-        means.append(mean)
-        std_dev = np.std(npBMD_iterations[:,s])
-        std_devs.append(std_dev)
-        min = np.min(npBMD_iterations[:,s])
-        mins.append(min)
-        max = np.max(npBMD_iterations[:,s])
-        maxes.append(max)
 
-    statsdict = {'means': means, 'standard deviation': std_devs, 'minimum':mins, 'maximum':maxes}
-    df3 = pd.DataFrame(statsdict)
-    df3.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/meansminsmaxes.xlsx", index=True)
     
 
 def main():
