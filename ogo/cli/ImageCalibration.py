@@ -391,18 +391,12 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
 
         #create arrays to save generated value for each loop
         effective_engergy_vales = []
-        adipose_vals_hu = []
-        air_vals_hu = []
-        blood_vals_hu = []
-        bone_vals_hu = []
-        muscle_vals_hu = []
-
         hu_to_mass_attenuation_slopes = []
         hu_to_mass_attenuation_intercepts = []
         hu_to_density_slopes = []
         hu_to_density_intercepts = []
         
-        for i in range(5):
+        for i in range(MonteCarlo):
 
             air_hu = np.random.normal(air_mean_hu, air_std_hu)
             adipose_hu = np.random.normal(adipose_mean_hu, adipose_std_hu)
@@ -426,12 +420,6 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             
             #save generated values into an array
             effective_engergy_vales.append(calib.effective_energy)
-            adipose_vals_hu.append(calib.adipose_hu)
-            air_vals_hu.append(calib.air_hu)
-            blood_vals_hu.append(calib.blood_hu)
-            bone_vals_hu.append(calib.bone_hu)
-            muscle_vals_hu.append(calib.muscle_hu)
-
             hu_to_mass_attenuation_slopes.append(calib.hu_to_mass_attenuation_slope)
             hu_to_mass_attenuation_intercepts.append(calib.hu_to_mass_attenuation_intercept)
             hu_to_density_slopes.append(calib.hu_to_density_slope)
@@ -452,11 +440,14 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             ogo.message('Writing result to ' + output_image)
             sitk.WriteImage(den, output_image)
 
+
+        #np.savetxt('MonteCarloResults.txt', (hu_to_mass_attenuation_slopes, hu_to_mass_attenuation_intercepts, hu_to_density_slopes, hu_to_density_intercepts, effective_engergy_vales))
         #exporting calibration parameters to excel file to store 
         dict = {'hu_to_mass_attenuation_slopes': hu_to_mass_attenuation_slopes, 'hu_to_mass_attenuation_intercepts': hu_to_mass_attenuation_intercepts, 
             'hu_to_density_slopes': hu_to_density_slopes, 'hu_to_density_intercepts': hu_to_density_intercepts, 'Effective Energy':effective_engergy_vales}
-        df = pd.DataFrame(dict)
-        df.to_excel("/Users/brynmatheson/Desktop/CTDXA0053/MoneCarloResults.xlsx", index=True)
+        f = open("/Users/brynmatheson/Desktop/CTDXA0053/MonteCarloResults.txt","w")
+        f.write(str(dict))
+        f.close()
     else: 
         # Perform the internal calibration fit
         ogo.message('Computing calibration parameters.')
@@ -676,7 +667,8 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
-    parser_internal.add_argument('--MonteCarlo', default=False, action='store_true', help='Use when user wants to run a Monte Carlo simulation on calibration')
+    #parser_internal.add_argument('--MonteCarlo', default=False, action='store_true', help='Use when user wants to run a Monte Carlo simulation on calibration')
+    parser_internal.add_argument('--MonteCarlo', type =int, help='Use when user wants to run a Monte Carlo simulation on calibration. Value is how many iterations that Monte Carlo should do')
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
@@ -687,7 +679,6 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
 
     # Parse and display
     args = parser.parse_args()
-    MonteCarlo = args.MonteCarlo
     print(echo_arguments('ImageCalibration', vars(args)))
 
     # Run program
