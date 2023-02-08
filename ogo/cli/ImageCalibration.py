@@ -470,14 +470,6 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             ogo.message('WARNING: HU to density intercept is not normally distributed. ')
             ogo.message('Range may not be completely accurate.')
 
-
-        dict = {'hu_to_mass_attenuation_slopes': hu_to_mass_attenuation_slopes, 'hu_to_mass_attenuation_intercepts': hu_to_mass_attenuation_intercepts, 
-            'hu_to_density_slopes': hu_to_density_slopes, 'hu_to_density_intercepts': hu_to_density_intercepts, 'Effective Energy':effective_engergy_vales}
-        f = open("/Users/brynmatheson/Desktop/CTDXA0053/MonteCarloResults.txt","w")
-        f.write(str(dict))
-        f.close()
-
-
         ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
         #calculating statistics 
         
