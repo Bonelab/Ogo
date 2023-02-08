@@ -25,7 +25,8 @@ from scipy import stats
 from datetime import date
 from collections import OrderedDict
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
-import pandas as pd
+from scipy import stats
+
 
 import ogo.dat.MassAttenuationTables as mat
 import ogo.dat.OgoMasterLabels as lb
@@ -406,7 +407,7 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
 
 
             # Perform the internal calibration fit
-            ogo.message('Computing calibration parameters.')
+            ogo.message('  {:>27s} {:8.3f}'.format('Computing calibration parameters for iteration:', i))
             calib = InternalCalibration(
                 adipose_hu,
                 air_hu,
@@ -427,7 +428,6 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             
 
             #creating calibrated image 
-            ogo.message('Calibrating input file.')
             voxel_volume = np.prod(ct.GetSpacing())
             den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume) 
         
@@ -437,17 +437,63 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             imfilt.Execute(ct) #ct is input image
 
             #writing out calibrated image 
-            ogo.message('Writing result to ' + output_image)
             sitk.WriteImage(den, output_image)
 
+            ogo.message('  {:>27s} {:8.3f}'.format('Done calibration parameters for iteration:', i))
 
-        #np.savetxt('MonteCarloResults.txt', (hu_to_mass_attenuation_slopes, hu_to_mass_attenuation_intercepts, hu_to_density_slopes, hu_to_density_intercepts, effective_engergy_vales))
-        #exporting calibration parameters to excel file to store 
+        #determinging if calibration parameters are normally distributed
+        normality_mass_attenuation_slopes = ogo.determine_normality(hu_to_mass_attenuation_slopes)
+        if normality_mass_attenuation_slopes == True:
+            pass
+        elif normality_mass_attenuation_slopes == False:
+            ogo.message('WARNING: Mass attenuation slope is not normally distributed. ')
+            ogo.message('Range may not be completely accurate.')
+        
+        normality_mass_attenuation_intercepts = ogo.determine_normality(hu_to_mass_attenuation_intercepts)
+        if normality_mass_attenuation_intercepts == True:
+            pass
+        elif normality_mass_attenuation_intercepts == False:
+            ogo.message('WARNING: Mass attenuation intercept is not normally distributed. ')
+            ogo.message('Range may not be completely accurate.')
+
+        normality_hu_to_density_slopes = ogo.determine_normality(hu_to_density_slopes)
+        if normality_hu_to_density_slopes == True:
+            pass
+        elif normality_hu_to_density_slopes == False:
+            ogo.message('WARNING: HU to density slope is not normally distributed. ')
+            ogo.message('Range may not be completely accurate.')
+
+        normality_hu_to_density_intercepts = ogo.determine_normality(hu_to_density_intercepts)
+        if normality_hu_to_density_intercepts == True:
+            pass
+        elif normality_hu_to_density_intercepts == False:
+            ogo.message('WARNING: HU to density intercept is not normally distributed. ')
+            ogo.message('Range may not be completely accurate.')
+
+
         dict = {'hu_to_mass_attenuation_slopes': hu_to_mass_attenuation_slopes, 'hu_to_mass_attenuation_intercepts': hu_to_mass_attenuation_intercepts, 
             'hu_to_density_slopes': hu_to_density_slopes, 'hu_to_density_intercepts': hu_to_density_intercepts, 'Effective Energy':effective_engergy_vales}
         f = open("/Users/brynmatheson/Desktop/CTDXA0053/MonteCarloResults.txt","w")
         f.write(str(dict))
         f.close()
+
+
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        #calculating statistics 
+        
+        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-u/p Slope mean', np.mean(hu_to_mass_attenuation_slopes)))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-u/p Slope standard deviation', np.std(hu_to_mass_attenuation_slopes)))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-u/p Y-Intercept mean', np.mean(hu_to_mass_attenuation_intercepts)))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-u/p Y-Intercept standard deviation', np.std(hu_to_mass_attenuation_slopes)))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-Material Density Slope mean', np.mean(hu_to_density_slopes)))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-Material Density Slope Y-Intercept', np.std(hu_to_density_slopes)))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-Material Density Y-Intercept mean', np.mean(hu_to_density_intercepts)))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-Material Density Y-Intercept standard deviation', np.std(hu_to_density_intercepts)))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('Mean Energy [keV]:', np.mean(effective_engergy_vales)))
+        ogo.message('  {:>27s} {:8.3f}\n'.format('Energy Standard Dev. [keV]:', np.std(effective_engergy_vales)))
+
+
     else: 
         # Perform the internal calibration fit
         ogo.message('Computing calibration parameters.')
@@ -504,86 +550,167 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
 
 
     if calib_file_name:
-        ogo.message('Saving calibration parameters to file:')
-        ogo.message('      \"{}\"'.format(calib_file_name))
+        if MonteCarlo:
+            ogo.message('Saving calibration parameters to file:')
+            ogo.message('      \"{}\"'.format(calib_file_name))
 
-        txt_file = open(calib_file_name, "w")
+            txt_file = open(calib_file_name, "w")
 
-        txt_file.write('Internal calibration:\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s} {:s}\n'.format('ID:', os.path.basename(output_image)))
-        txt_file.write('  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0]))
-        txt_file.write('  {:>27s} {:.2f}\n'.format('version:', script_version))
-        txt_file.write('  {:>27s} {:s}\n'.format('creation date:', str(date.today())))
-        txt_file.write('\n')
-        txt_file.write('Files:\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s} {:s}\n'.format('input image:', input_image))
-        txt_file.write('  {:>27s} {:s}\n'.format('input mask:', input_mask))
-        txt_file.write('  {:>27s} {:s}\n'.format('output image:', output_image))
-        txt_file.write('  {:>27s} {:s}\n'.format('calibration file name:', calib_file_name))
-        txt_file.write('\n')
-        txt_file.write('Calibration parameters:\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s} {}\n'.format('Fit:', calib._is_fit))
-        txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
-        txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        
-        txt_file.write('  {:>27s} {:>8s} {:>8s} {:>8s}\n'.format('Density [HU]:','Mean','StdDev','#Voxels'))
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Adipose ', labels_data['Adipose']['mean'],labels_data['Adipose']['stdev'],labels_data['Adipose']['count']))
-        if 91 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Air ', labels_data['Air']['mean'],labels_data['Air']['stdev'],labels_data['Air']['count']))
-        if 92 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Blood ', labels_data['Blood']['mean'],labels_data['Blood']['stdev'],labels_data['Blood']['count']))
-        if 93 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Cortical Bone ', labels_data['Cortical Bone']['mean'],labels_data['Cortical Bone']['stdev'],labels_data['Cortical Bone']['count']))
-        if 94 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Skeletal Muscle ', labels_data['Skeletal Muscle']['mean'],labels_data['Skeletal Muscle']['stdev'],labels_data['Skeletal Muscle']['count']))
-        if 95 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s}\n'.format('Mass Attenuation [cm2/g]:'))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ', calib.adipose_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Air ', calib.air_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Blood ', calib.blood_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Cortical Bone ', calib.bone_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
-        txt_file.write('\n')
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('K2HPO4 ', calib.K2HPO4_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('CHA ', calib.CHA_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Triglyceride ', calib.triglyceride_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
-        txt_file.write('\n')
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Slope', calib.hu_to_mass_attenuation_slope))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Y-Intercept', calib.hu_to_mass_attenuation_intercept))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Slope', calib.hu_to_density_slope))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept', calib.hu_to_density_intercept))
+            txt_file.write('Internal calibration:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:s}\n'.format('ID:', os.path.basename(output_image)))
+            txt_file.write('  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0]))
+            txt_file.write('  {:>27s} {:.2f}\n'.format('version:', script_version))
+            txt_file.write('  {:>27s} {:s}\n'.format('creation date:', str(date.today())))
+            txt_file.write('\n')
+            txt_file.write('Files:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:s}\n'.format('input image:', input_image))
+            txt_file.write('  {:>27s} {:s}\n'.format('input mask:', input_mask))
+            txt_file.write('  {:>27s} {:s}\n'.format('output image:', output_image))
+            txt_file.write('  {:>27s} {:s}\n'.format('calibration file name:', calib_file_name))
+            txt_file.write('\n')
+            txt_file.write('Calibration parameters:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {}\n'.format('Fit:', calib._is_fit))
+            txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
+            txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            
+            txt_file.write('  {:>27s} {:>8s} {:>8s} {:>8s}\n'.format('Density [HU]:','Mean','StdDev','#Voxels'))
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Adipose ', labels_data['Adipose']['mean'],labels_data['Adipose']['stdev'],labels_data['Adipose']['count']))
+            if 91 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Air ', labels_data['Air']['mean'],labels_data['Air']['stdev'],labels_data['Air']['count']))
+            if 92 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Blood ', labels_data['Blood']['mean'],labels_data['Blood']['stdev'],labels_data['Blood']['count']))
+            if 93 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Cortical Bone ', labels_data['Cortical Bone']['mean'],labels_data['Cortical Bone']['stdev'],labels_data['Cortical Bone']['count']))
+            if 94 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Skeletal Muscle ', labels_data['Skeletal Muscle']['mean'],labels_data['Skeletal Muscle']['stdev'],labels_data['Skeletal Muscle']['count']))
+            if 95 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s}\n'.format('Mass Attenuation [cm2/g]:'))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Mean Energy [keV]:', np.mean(effective_engergy_vales)))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Energy Standard Dev. [keV]:', np.std(effective_engergy_vales)))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ', calib.adipose_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Air ', calib.air_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Blood ', calib.blood_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Cortical Bone ', calib.bone_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
+            txt_file.write('\n')
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('K2HPO4 ', calib.K2HPO4_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('CHA ', calib.CHA_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Triglyceride ', calib.triglyceride_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
+            txt_file.write('\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-u/p Slope mean', np.mean(hu_to_mass_attenuation_slopes)))
+            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-u/p Slope standard deviation', np.std(hu_to_mass_attenuation_slopes)))
+            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-u/p Y-Intercept mean', np.mean(hu_to_mass_attenuation_intercepts)))
+            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-u/p Y-Intercept standard deviation', np.std(hu_to_mass_attenuation_slopes)))
+            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-Material Density Slope mean', np.mean(hu_to_density_slopes)))
+            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-Material Density Slope Y-Intercept', np.std(hu_to_density_slopes)))
+            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept mean', np.mean(hu_to_density_intercepts)))
+            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept standard deviation', np.std(hu_to_density_intercepts)))
 
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('\n')
         #txt_file.write('Unformatted calibration parameters:\n')
         #txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
         #for label, value in calib.get_dict().items():
         #    txt_file.write('  {:>27s} {}\n'.format(label, value))
         #txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
 
-        txt_file.close()
+            txt_file.close()
+        else: 
+            ogo.message('Saving calibration parameters to file:')
+            ogo.message('      \"{}\"'.format(calib_file_name))
+
+            txt_file = open(calib_file_name, "w")
+
+            txt_file.write('Internal calibration:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:s}\n'.format('ID:', os.path.basename(output_image)))
+            txt_file.write('  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0]))
+            txt_file.write('  {:>27s} {:.2f}\n'.format('version:', script_version))
+            txt_file.write('  {:>27s} {:s}\n'.format('creation date:', str(date.today())))
+            txt_file.write('\n')
+            txt_file.write('Files:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:s}\n'.format('input image:', input_image))
+            txt_file.write('  {:>27s} {:s}\n'.format('input mask:', input_mask))
+            txt_file.write('  {:>27s} {:s}\n'.format('output image:', output_image))
+            txt_file.write('  {:>27s} {:s}\n'.format('calibration file name:', calib_file_name))
+            txt_file.write('\n')
+            txt_file.write('Calibration parameters:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {}\n'.format('Fit:', calib._is_fit))
+            txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
+            txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            
+            txt_file.write('  {:>27s} {:>8s} {:>8s} {:>8s}\n'.format('Density [HU]:','Mean','StdDev','#Voxels'))
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Adipose ', labels_data['Adipose']['mean'],labels_data['Adipose']['stdev'],labels_data['Adipose']['count']))
+            if 91 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Air ', labels_data['Air']['mean'],labels_data['Air']['stdev'],labels_data['Air']['count']))
+            if 92 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Blood ', labels_data['Blood']['mean'],labels_data['Blood']['stdev'],labels_data['Blood']['count']))
+            if 93 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Cortical Bone ', labels_data['Cortical Bone']['mean'],labels_data['Cortical Bone']['stdev'],labels_data['Cortical Bone']['count']))
+            if 94 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Skeletal Muscle ', labels_data['Skeletal Muscle']['mean'],labels_data['Skeletal Muscle']['stdev'],labels_data['Skeletal Muscle']['count']))
+            if 95 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s}\n'.format('Mass Attenuation [cm2/g]:'))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ', calib.adipose_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Air ', calib.air_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Blood ', calib.blood_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Cortical Bone ', calib.bone_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
+            txt_file.write('\n')
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('K2HPO4 ', calib.K2HPO4_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('CHA ', calib.CHA_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Triglyceride ', calib.triglyceride_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
+            txt_file.write('\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Slope', calib.hu_to_mass_attenuation_slope))
+            txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Y-Intercept', calib.hu_to_mass_attenuation_intercept))
+            txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Slope', calib.hu_to_density_slope))
+            txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept', calib.hu_to_density_intercept))
+
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('\n')
 
     ogo.message('Done internal calibration.')
 

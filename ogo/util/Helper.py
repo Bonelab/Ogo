@@ -1482,6 +1482,17 @@ def writeTXTfile(input_dict, fileName, output_directory):
         txt_file.write(str(key) + '\t' + str(value) + '\n')
     txt_file.close()
 
+
+def determine_normality(input_array):
+    shapiro_test = stats.shapiro(input_array)
+    p_value = shapiro_test.pvalue
+    if p_value > 0.05:
+        normality = True
+    else:
+        normality = False
+
+    return normality 
+
 # def writeN88Model(model, fileName, pathname):
 #     """Writes out a N88Model.
 #     The first argument is the model.
