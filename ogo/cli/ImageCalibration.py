@@ -508,6 +508,8 @@ def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib
             ogo.message(f'HU-u/p intercept for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_intercepts_quartilevalues[j]}')
             ogo.message(f'HU-density slope for {input_quartiles[j]}th quartile: {hu_to_density_slopes_quartilevalues[j]}')
             ogo.message(f'HU-density intercept for {input_quartiles[j]}th quartile: {hu_to_density_intercepts_quartilesvalues[j]}')
+            ogo.message(f'Triglyceride mass attenuation for {input_quartiles[j]}th quartile: {triglyceride_quartiles[j]}')
+            ogo.message(f'K2HPO4 mass attenuation for {input_quartiles[j]}th quartile: {K2HPO4_quartiles[j]}')
             ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
         
     else: 
@@ -779,6 +781,8 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
                             image_qct.nii.gz --useL4
 ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
                             image_qct.nii.gz --useLabels 91 92 93 95
+ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
+                            image_qct.nii.gz --MonteCarlo 10 --quartiles 25,50,75 --useL4 --useLabels 91 92 93 95
 '''
 
     # Setup argument parsing
