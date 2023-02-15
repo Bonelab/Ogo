@@ -1493,6 +1493,48 @@ def determine_normality(input_array):
 
     return normality 
 
+def _quartile_predict(hu, voxel_volume, hu_to_mass_attenuation_slope, hu_to_mass_attenuation_intercept, hu_to_density_slope, hu_to_density_intercept, triglyceride_mass_attenuation, K2HPO4_mass_attenuation):
+       
+        voxel_volume = voxel_volume / 1000.0
+
+        # Convert HU to mass attenuation coefficient
+        u_p = (
+          hu * hu_to_mass_attenuation_slope
+          + hu_to_mass_attenuation_intercept
+        )
+
+        # Convert HU to Archimedian density
+        arch = (
+            hu * hu_to_density_slope
+            + hu_to_density_intercept
+        )
+
+        # Conver Archimedian density to total mass
+        mass = arch * voxel_volume
+
+        # Create two component model
+        k2hpo4 = mass * (
+                (u_p - triglyceride_mass_attenuation) /
+                (K2HPO4_mass_attenuation - triglyceride_mass_attenuation)
+        )
+
+        # Convert g to mg
+        k2hpo4 = k2hpo4 / voxel_volume * 1000.0
+
+        return k2hpo4
+    
+def add_to_filename(filepath, suffix):
+    directory, filename = os.path.split(filepath)
+    if filename.endswith(".nii.gz"):
+        filename = filename[:-7] + suffix
+    elif filename.endswith(".nii"):
+        filename = filename[:-4] + suffix
+
+    new_file_path = os.path.join(directory, filename)
+
+    return new_file_path
+
+
 # def writeN88Model(model, fileName, pathname):
 #     """Writes out a N88Model.
 #     The first argument is the model.

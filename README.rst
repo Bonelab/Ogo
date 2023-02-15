@@ -32,6 +32,12 @@ Developer Install
     # Activate your conda environment, make sure you have conda installed on your system.
     # Best way to install conda is through anaconda
     conda activate ogo
+
+    # Clone the repository onto your computer and change into the directory. 
+    # .... with SSH: 
+    git@github.com:Bonelab/Ogo.git 
+    # ... or with HTTPS:
+    https://github.com/Bonelab/Ogo.git 
     
     # Install in an 'editable' format 
     pip3 install -e .

@@ -267,7 +267,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
 
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name, useLabels, useL4, overwrite, func):
+def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib_file_name, useLabels, useL4, overwrite, func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -372,7 +372,10 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
                     '[ERROR] Invalid HU for {} ({}). Explicitly define labels to use \nor define --useL4.'.format(label,
                                                                                                                   value))
     ogo.message('')
+    
+    new_line = '\n'
 
+    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
     if MonteCarlo:
         #setting mean and standard deviation to variables 
         air_mean_hu = labels_data['Air']['mean']
@@ -396,7 +399,31 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
         hu_to_mass_attenuation_intercepts = []
         hu_to_density_slopes = []
         hu_to_density_intercepts = []
-        
+
+        #arrays to store the attenuation values (mass attenuations change per effective energy - will be different for each quartile)
+        triglyceride_mass_attenuations = []
+        K2HPO4_mass_attenuations = []
+        adipose_mass_attenuations = []
+        air_mass_attenuations = []
+        bone_mass_attenuations = []
+        blood_mass_attenuations = []
+        muscle_mass_attenuations = []
+
+        energy_quartile_values = []
+        hu_to_mass_attenuation_slopes_quartilevalues = []
+        hu_to_mass_attenuation_intercepts_quartilevalues = []
+        hu_to_density_slopes_quartilevalues = []
+        hu_to_density_intercepts_quartilesvalues = []
+        triglyceride_quartiles = []
+        K2HPO4_quartiles = []
+        adipose_quartiles = []
+        air_quartiles = []
+        blood_quartiles = []
+        bone_quartiles = []
+        muscle_quartiles = []
+
+       
+
         for i in range(MonteCarlo):
 
             air_hu = np.random.normal(air_mean_hu, air_std_hu)
@@ -405,9 +432,7 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             bone_hu = np.random.normal(bone_mean_hu, bone_std_hu)
             muscle_hu = np.random.normal(muscle_mean_hu, muscle_std_hu)
 
-
             # Perform the internal calibration fit
-            ogo.message('  {:>27s} {:8.3f}'.format('Computing calibration parameters for iteration:', i))
             calib = InternalCalibration(
                 adipose_hu,
                 air_hu,
@@ -425,67 +450,66 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             hu_to_mass_attenuation_intercepts.append(calib.hu_to_mass_attenuation_intercept)
             hu_to_density_slopes.append(calib.hu_to_density_slope)
             hu_to_density_intercepts.append(calib.hu_to_density_intercept)
+            triglyceride_mass_attenuations.append(calib.triglyceride_mass_attenuation)
+            K2HPO4_mass_attenuations.append(calib.K2HPO4_mass_attenuation)
+            adipose_mass_attenuations.append(calib.adipose_mass_attenuation)
+            air_mass_attenuations.append(calib.air_mass_attenuation)    
+            blood_mass_attenuations.append(calib.blood_mass_attenuation)
+            bone_mass_attenuations.append(calib.bone_mass_attenuation)
+            muscle_mass_attenuations.append(calib.muscle_mass_attenuation)
+            ogo.message(f'Done {i}th MonteCarlo simulation')
+        
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        if quartiles: 
+            input_quartiles = [int(item) for item in quartiles.split(',')] 
+            for k in input_quartiles:
+                energy_quartiles = np.percentile(effective_engergy_vales, k)
+                energy_quartile_values.append(energy_quartiles)
+                hu_mass_slope = np.percentile(hu_to_mass_attenuation_slopes, k)
+                hu_to_mass_attenuation_slopes_quartilevalues.append(hu_mass_slope)
+                hu_mass_intercept = np.percentile(hu_to_mass_attenuation_intercepts, k)
+                hu_to_mass_attenuation_intercepts_quartilevalues.append(hu_mass_intercept)
+                hu_density_slope = np.percentile(hu_to_density_slopes, k)
+                hu_to_density_slopes_quartilevalues.append(hu_density_slope)
+                hu_density_intercept = np.percentile(hu_to_density_intercepts, k)
+                hu_to_density_intercepts_quartilesvalues.append(hu_density_intercept)
+                triglyceride_quartile = np.percentile(triglyceride_mass_attenuations, k)
+                triglyceride_quartiles.append(triglyceride_quartile)
+                K2HPO4_quartile = np.percentile(K2HPO4_mass_attenuations, k)
+                K2HPO4_quartiles.append(K2HPO4_quartile)
+                adipose_quartile = np.percentile(adipose_mass_attenuations, k)
+                adipose_quartiles.append(adipose_quartile)
+                air_quartile = np.percentile(air_mass_attenuations, k)
+                air_quartiles.append(air_quartile)
+                blood_quartile = np.percentile(blood_mass_attenuations, k)
+                blood_quartiles.append(blood_quartile)
+                bone_quartile = np.percentile(bone_mass_attenuations, k)
+                bone_quartiles.append(bone_quartile)
+                muscle_quartile = np.percentile(muscle_mass_attenuations, k)
+                muscle_quartiles.append(muscle_quartile)
             
+            
+            for p in range(len(input_quartiles)):
+                quart = input_quartiles[p]
+                output_image_new = f"_Q{quart}.nii.gz"
+                name = ogo.add_to_filename(output_image, output_image_new)
 
-            #creating calibrated image 
-            voxel_volume = np.prod(ct.GetSpacing())
-            den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume) 
-        
-            den = sitk.Cast(den, ct.GetPixelID()) #A hybrid cast image filter to convert images to other types of images.
-
-            imfilt = sitk.StatisticsImageFilter() #Compute min, max, variance and mean of an Image .
-            imfilt.Execute(ct) #ct is input image
-
-            #writing out calibrated image 
-            sitk.WriteImage(den, output_image)
-
-            ogo.message('  {:>27s} {:8.3f}'.format('Done calibration parameters for iteration:', i))
-
-        #determinging if calibration parameters are normally distributed
-        normality_mass_attenuation_slopes = ogo.determine_normality(hu_to_mass_attenuation_slopes)
-        if normality_mass_attenuation_slopes == True:
-            pass
-        elif normality_mass_attenuation_slopes == False:
-            ogo.message('WARNING: Mass attenuation slope is not normally distributed. ')
-            ogo.message('Range may not be completely accurate.')
-        
-        normality_mass_attenuation_intercepts = ogo.determine_normality(hu_to_mass_attenuation_intercepts)
-        if normality_mass_attenuation_intercepts == True:
-            pass
-        elif normality_mass_attenuation_intercepts == False:
-            ogo.message('WARNING: Mass attenuation intercept is not normally distributed. ')
-            ogo.message('Range may not be completely accurate.')
-
-        normality_hu_to_density_slopes = ogo.determine_normality(hu_to_density_slopes)
-        if normality_hu_to_density_slopes == True:
-            pass
-        elif normality_hu_to_density_slopes == False:
-            ogo.message('WARNING: HU to density slope is not normally distributed. ')
-            ogo.message('Range may not be completely accurate.')
-
-        normality_hu_to_density_intercepts = ogo.determine_normality(hu_to_density_intercepts)
-        if normality_hu_to_density_intercepts == True:
-            pass
-        elif normality_hu_to_density_intercepts == False:
-            ogo.message('WARNING: HU to density intercept is not normally distributed. ')
-            ogo.message('Range may not be completely accurate.')
-
+                ogo.message(f'Calibrating input file for {input_quartiles[p]}th quartile:')
+                voxel_volume = np.prod(ct.GetSpacing())
+                den = ogo._quartile_predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume, hu_to_mass_attenuation_slopes_quartilevalues[p], hu_to_mass_attenuation_intercepts_quartilevalues[p], hu_to_density_slopes_quartilevalues[p], hu_to_density_intercepts_quartilesvalues[p], triglyceride_quartiles[p], K2HPO4_quartiles[p])
+                den = sitk.Cast(den, ct.GetPixelID())
+                sitk.WriteImage(den, name)
+                
         ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
-        #calculating statistics 
+        #outputting each quartile's statistics 
+        for j in range(len(input_quartiles)):
+            ogo.message(f'Effective Energy for {input_quartiles[j]}th quartile: {energy_quartile_values[j]}')
+            ogo.message(f'HU-u/p slope for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_slopes_quartilevalues[j]}')
+            ogo.message(f'HU-u/p intercept for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_intercepts_quartilevalues[j]}')
+            ogo.message(f'HU-density slope for {input_quartiles[j]}th quartile: {hu_to_density_slopes_quartilevalues[j]}')
+            ogo.message(f'HU-density intercept for {input_quartiles[j]}th quartile: {hu_to_density_intercepts_quartilesvalues[j]}')
+            ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
         
-        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-u/p Slope mean', np.mean(hu_to_mass_attenuation_slopes)))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-u/p Slope standard deviation', np.std(hu_to_mass_attenuation_slopes)))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-u/p Y-Intercept mean', np.mean(hu_to_mass_attenuation_intercepts)))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-u/p Y-Intercept standard deviation', np.std(hu_to_mass_attenuation_slopes)))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-Material Density Slope mean', np.mean(hu_to_density_slopes)))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-Material Density Slope Y-Intercept', np.std(hu_to_density_slopes)))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-Material Density Y-Intercept mean', np.mean(hu_to_density_intercepts)))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('HU-Material Density Y-Intercept standard deviation', np.std(hu_to_density_intercepts)))
-        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('Mean Energy [keV]:', np.mean(effective_engergy_vales)))
-        ogo.message('  {:>27s} {:8.3f}\n'.format('Energy Standard Dev. [keV]:', np.std(effective_engergy_vales)))
-
-
     else: 
         # Perform the internal calibration fit
         ogo.message('Computing calibration parameters.')
@@ -538,10 +562,9 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
         ogo.message('Writing result to ' + output_image)
         sitk.WriteImage(den, output_image)
     
- 
-
 
     if calib_file_name:
+        median = input_quartiles.index(50)
         if MonteCarlo:
             ogo.message('Saving calibration parameters to file:')
             ogo.message('      \"{}\"'.format(calib_file_name))
@@ -564,11 +587,6 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             txt_file.write('\n')
             txt_file.write('Calibration parameters:\n')
             txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-            txt_file.write('  {:>27s} {}\n'.format('Fit:', calib._is_fit))
-            txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
-            txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
-            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-            
             txt_file.write('  {:>27s} {:>8s} {:>8s} {:>8s}\n'.format('Density [HU]:','Mean','StdDev','#Voxels'))
             txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Adipose ', labels_data['Adipose']['mean'],labels_data['Adipose']['stdev'],labels_data['Adipose']['count']))
             if 91 in labelList:
@@ -596,31 +614,38 @@ def internal(input_image, input_mask, output_image, MonteCarlo, calib_file_name,
             else:
                 txt_file.write(' [not used]\n')
             txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-            txt_file.write('  {:>27s}\n'.format('Mass Attenuation [cm2/g]:'))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Mean Energy [keV]:', np.mean(effective_engergy_vales)))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Energy Standard Dev. [keV]:', np.std(effective_engergy_vales)))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ', calib.adipose_mass_attenuation))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Air ', calib.air_mass_attenuation))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Blood ', calib.blood_mass_attenuation))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Cortical Bone ', calib.bone_mass_attenuation))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
-            txt_file.write('\n')
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('K2HPO4 ', calib.K2HPO4_mass_attenuation))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('CHA ', calib.CHA_mass_attenuation))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Triglyceride ', calib.triglyceride_mass_attenuation))
-            txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
-            txt_file.write('\n')
+            txt_file.write(f'Mass Attenuation Parameters [cm2/g]:')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median adipose mass attenuation: {adipose_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median air mass attenuation: {air_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median blood mass attenuation: {blood_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median cortical bone mass attenuation: {bone_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median muscle mass attenuation: {muscle_quartiles[median]}')
+            txt_file.write(f'{new_line}')
             txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-u/p Slope mean', np.mean(hu_to_mass_attenuation_slopes)))
-            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-u/p Slope standard deviation', np.std(hu_to_mass_attenuation_slopes)))
-            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-u/p Y-Intercept mean', np.mean(hu_to_mass_attenuation_intercepts)))
-            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-u/p Y-Intercept standard deviation', np.std(hu_to_mass_attenuation_slopes)))
-            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-Material Density Slope mean', np.mean(hu_to_density_slopes)))
-            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-Material Density Slope Y-Intercept', np.std(hu_to_density_slopes)))
-            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept mean', np.mean(hu_to_density_intercepts)))
-            txt_file.write('  {:<27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept standard deviation', np.std(hu_to_density_intercepts)))
+            if quartiles: 
+                for j in range(len(input_quartiles)):
+                    txt_file.write(f'Effective Energy for {input_quartiles[j]}th quartile: {energy_quartile_values[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'HU-u/p slope for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_slopes_quartilevalues[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'HU-u/p intercept for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_intercepts_quartilevalues[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'HU-density slope for {input_quartiles[j]}th quartile: {hu_to_density_slopes_quartilevalues[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'HU-density intercept for {input_quartiles[j]}th quartile: {hu_to_density_intercepts_quartilesvalues[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'Triglyceride mass attenuation for {input_quartiles[j]}th quartile: {triglyceride_quartiles[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'K2HPO4 mass attenuation for {input_quartiles[j]}th quartile: {K2HPO4_quartiles[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+                    txt_file.write(f'{new_line}')
 
-            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
             txt_file.write('\n')
         #txt_file.write('Unformatted calibration parameters:\n')
         #txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
@@ -786,8 +811,8 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
-    #parser_internal.add_argument('--MonteCarlo', default=False, action='store_true', help='Use when user wants to run a Monte Carlo simulation on calibration')
-    parser_internal.add_argument('--MonteCarlo', type =int, help='Use when user wants to run a Monte Carlo simulation on calibration. Value is how many iterations that Monte Carlo should do')
+    parser_internal.add_argument('--MonteCarlo', type =int, default=1000, help='Use when user wants to run a Monte Carlo simulation on calibration. Value is how many iterations that Monte Carlo should do')
+    parser_internal.add_argument('--quartiles', default=50, help="Quartiles desired for MonteCarlo simulation to generate", type=str)
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')

@@ -121,6 +121,7 @@ class InternalCalibration(StandardCalibration):
 
         return k2hpo4
 
+
     def fit(self):
         """Override Calibration fit method.
 
