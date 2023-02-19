@@ -15,6 +15,7 @@ import vtk
 import math
 import numpy as np
 import SimpleITK as sitk
+from scipy.spatial import procrustes
 from datetime import date
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from ogo.util.echo_arguments import echo_arguments
@@ -25,21 +26,47 @@ def expected_bone_volumes():
     # These values were measured from the original OSSAI training dataset (N=48 scans)
     # Units are mm3 (volume)
     # The key is the label (i.e. Label 1 = Femur Right)
+    #bone_volumes = {
+    #    1:{ "Min":60000.0,"Max":234000.0,"Average":130199.1,"Median":126812.6,"Stdev":35547.6,"Short femur":153110.5},  # Femur Right
+    #    2:{ "Min":60000.0,"Max":234000.0,"Average":129570.3,"Median":129159.9,"Stdev":35733.7,"Short femur":153110.5},  # Femur Left
+    #    3:{"Min":190000.0,"Max":445000.0,"Average":299810.6,"Median":286991.3,"Stdev":57451.5},                         # Pelvis Right
+    #    4:{"Min":190000.0,"Max":445000.0,"Average":299357.7,"Median":286474.2,"Stdev":57216.2},                         # Pelvis Left
+    #    5:{"Min":115000.0,"Max":293000.0,"Average":201960.4,"Median":196278.1,"Stdev":37622.3},                         # Sacrum
+    #    6:{ "Min":33000.0, "Max":81000.0, "Average":57426.2, "Median":56607.2,"Stdev":10746.2},                         # L5
+    #    7:{ "Min":32000.0, "Max":79000.0, "Average":56711.1, "Median":54537.4,"Stdev":10553.1},                         # L4
+    #    8:{ "Min":32000.0, "Max":79000.0, "Average":56511.7, "Median":53262.7,"Stdev":10773.7},                         # L3
+    #    9:{ "Min":27000.0, "Max":72000.0, "Average":51534.4, "Median":49481.8, "Stdev":9992.9},                         # L2
+    #    10:{"Min":25000.0, "Max":67000.0, "Average":46894.7, "Median":44403.6, "Stdev":9400.7}                          # L1
+    #}
     bone_volumes = {
-        1:{"Min":60000.0,"Max":234000.0,"Average":130199.1,"Median":126812.6,"Stdev":35547.6,"Short femur":153110.5},  # Femur Right
-        2:{"Min":60000.0,"Max":234000.0,"Average":129570.3,"Median":129159.9,"Stdev":35733.7,"Short femur":153110.5},  # Femur Left
-        3:{"Min":190000.0,"Max":445000.0,"Average":299810.6,"Median":286991.3,"Stdev":57451.5},                        # Pelvis Right
-        4:{"Min":190000.0,"Max":445000.0,"Average":299357.7,"Median":286474.2,"Stdev":57216.2},                        # Pelvis Left
-        5:{"Min":115000.0,"Max":293000.0,"Average":201960.4,"Median":196278.1,"Stdev":37622.3},                        # Sacrum
-        6:{"Min":33000.0,"Max":81000.0,"Average":57426.2,"Median":56607.2,"Stdev":10746.2},                            # L5
-        7:{"Min":32000.0,"Max":79000.0,"Average":56711.1,"Median":54537.4,"Stdev":10553.1},                            # L4
-        8:{"Min":32000.0,"Max":79000.0,"Average":56511.7,"Median":53262.7,"Stdev":10773.7},                            # L3
-        9:{"Min":27000.0,"Max":72000.0,"Average":51534.4,"Median":49481.8,"Stdev":9992.9},                             # L2
-        10:{"Min":25000.0,"Max":67000.0,"Average":46894.7,"Median":44403.6,"Stdev":9400.7}                             # L1
+         1:{ 'Min':72000.0, 'Max':245000.0,  'Stdev':39632.3,  'Short femur':153110.0}, # Femur Right
+         2:{ 'Min':72000.0, 'Max':245000.0,  'Stdev':39494.4,  'Short femur':153110.0}, # Femur Left
+         3:{'Min':180000.0, 'Max':510000.0,  'Stdev':70518.6},                          # Pelvis Right
+         4:{'Min':180000.0, 'Max':510000.0,  'Stdev':70777.9},                          # Pelvis Left
+         5:{'Min':135000.0, 'Max':350000.0,  'Stdev':43914.4},                          # Sacrum
+         6:{ 'Min':40000.0, 'Max':100000.0,  'Stdev':13011.0},                          # L5
+         7:{ 'Min':39000.0, 'Max':104000.0,  'Stdev':13444.9},                          # L4
+         8:{ 'Min':35000.0,  'Max':96000.0,  'Stdev':13610.6},                          # L3
+         9:{ 'Min':35000.0,  'Max':87000.0,  'Stdev':12253.7},                          # L2
+        10:{ 'Min':30000.0,  'Max':94000.0,  'Stdev':11756.1}                           # L1
     }
-    #    "Short Femur": {"Label":11,"Min":60625.7,"Max":153110.5,"Average":100896.7,"Median":93375.5,"Stdev":26361.9}
-    
     return bone_volumes
+
+def expected_Procrustes():
+    # Used RETRO_00071.nii.gz as reference
+    # Labels 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+    positions = \
+    [( -85.02785, -142.38381, 137.95209 ), \
+     ( 134.24816, -147.52873, 138.20155 ), \
+     ( -47.02655, -129.48297, 208.27110 ), \
+     (  97.00727, -133.80435, 211.17284 ), \
+     (  26.25469,  -84.00061, 237.57798 ), \
+     (  23.43566, -121.04673, 287.29457 ), \
+     (  25.05111, -127.58523, 319.54591 ), \
+     (  26.85287, -123.60419, 355.15329 ), \
+     (  25.53003, -116.45560, 390.07599 ), \
+     (  24.17049, -109.25177, 425.37350 )]
+    return positions
     
 def get_labels(ct):
     filt = sitk.LabelShapeStatisticsImageFilter()
@@ -60,13 +87,6 @@ def is_smaller(filt,percent_threshold,label1,label2):
     size2 = filt.GetPhysicalSize(label2)
     average_size = (size1+size2)/2.0
     thres = average_size * percent_threshold / 100.0
-    
-    #print('size1 = {:10.3f}'.format(size1))
-    #print('size2 = {:10.3f}'.format(size2))
-    #print('average_size = {:10.3f}'.format(average_size))
-    #print('percent_threshold = {:10.3f}'.format(percent_threshold))
-    #print('thres = {:10.3f}'.format(thres))
-    #print('diff = {:10.3f}'.format((size2 - size1)))
     
     if (size2 - size1) > thres:
         return True
@@ -170,7 +190,9 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     report += '  {:>20s} {:s}\n'.format('number of labels:',str(n_labels))
     report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('LABEL','PART','VOL','VOX','CENTROID','OFFSET')
     report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('#','#','mm3','#','(X,Y,Z)','mm')
-
+    
+    current_centroids = []
+    
     # Process the identification of labels and their parts
     for idx,label in enumerate(labels):
         try:
@@ -178,8 +200,9 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         except KeyError:
             desc = 'unknown label'
         ogo.message('  processing label {:>2d} ({})'.format(label,desc))
-        #centroid = filt.GetCentroid(label)
-        #size = filt.GetPhysicalSize(label) # volume in mm3
+        
+        centroid = filt.GetCentroid(label)
+        current_centroids.append(centroid)
         
         ct_thres = ct==label
         ct_conn = conn.Execute(ct,ct_thres)
@@ -196,7 +219,7 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         if (n_parts>1):
             if special_cases(n_parts,label,stats):
                 QA_dict[label]['warnings'] += 'wSPEC ' # Sacrum and L5 are sometimes two parts
-                msg = '[WARNING] Label {:2d} ({}) exception with {} parts (part {} = {:.1f} mm3)'.format(label,desc,n_parts,n_parts,stats.GetPhysicalSize(2))
+                msg = '[WARNING] Label {:d} ({}) exception with {} parts ({:.1f} mm3)'.format(label,desc,n_parts,stats.GetPhysicalSize(2))
                 ogo.message(msg)
                 extra_msg += '  ' + msg + '\n'
             else:
@@ -286,32 +309,55 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
                 desc = lb.labels_dict[label]['LABEL']
             except KeyError:
                 desc = 'unknown label'
-
+            
             if volume < min_volume:
                 QA_dict[label]['errors'] += 'eMINVOL '
                 QA_dict[label]['status'] = 'FAIL'
-                msg = '[ERROR] Label {:2d} ({}) volume is below minimum ({} mm3).'.format(label,desc,min_volume)
+                msg = '[ERROR] Label {:d} ({}) volume is below minimum ({} mm3).'.format(label,desc,min_volume)
                 ogo.message(msg)
                 extra_msg += '  ' + msg + '\n'
             
             if volume > max_volume:
                 QA_dict[label]['errors'] += 'eMAXVOL '
                 QA_dict[label]['status'] = 'FAIL'
-                msg = '[ERROR] Label {:2d} ({}) volume is above maximum ({} mm3).'.format(label,desc,max_volume)
+                msg = '[ERROR] Label {:d} ({}) volume is above maximum ({} mm3).'.format(label,desc,max_volume)
                 ogo.message(msg)
                 extra_msg += '  ' + msg + '\n'
-                
+            
+            
             if label == 1 or label == 2:
                 short_femur_volume = bone_sizes_dict[label]['Short femur']
                 if volume < short_femur_volume:
                     QA_dict[label]['warnings'] += 'wNOFEA '
-                    msg = '[WARNING] Label {:2d} ({}) volume is likely too small for FEA ({} mm3)'.format(label,desc,short_femur_volume)
+                    msg = '[WARNING] FEA of label {:d} ({}) not recommended ({} mm3).'.format(label,desc,short_femur_volume)
                     ogo.message(msg)
                     extra_msg += '  ' + msg + '\n'
+    
+    # 4. Check relative positions by Procrustes analysis
+    ogo.message('Examining bone positions by Procrustes analysis.')
+    procrustesAnalysisResult = True
+    sensitivity = 0.008 # adjust with smaller number to make more sensitive
+    expected_centroids = expected_Procrustes()
 
-    line_hdr = '<{}>,'.format('header')
-    line_units = '<{}>,'.format('units')
-    line_data = '<{}>,'.format('data')
+    if len(current_centroids)==len(expected_centroids):
+        mtx1, mtx2, disparity = procrustes(expected_centroids, current_centroids)
+        if disparity > sensitivity:
+            msg = '[ERROR] Procrustes analysis detects position mismatch ({:.3f} > {:.3f}).'.format(disparity,sensitivity)
+            ogo.message(msg)
+            extra_msg += '  ' + msg + '\n'
+            procrustesAnalysisResult = False
+            finalQualityAssessment = False
+    else:
+        disparity = 1.0 # total fail
+        procrustesAnalysisResult = False
+        finalQualityAssessment = False
+        msg = '[WARNING] Procrustes analysis expected {} centroids ({} centroids found).'.format(len(expected_centroids),len(current_centroids))
+        ogo.message(msg)
+        extra_msg += '  ' + msg + '\n'
+
+    line_hdr =   'line_{},{},'.format('hdr','name')
+    line_units = 'line_{},{},'.format('units','[text]')
+    line_data =  'line_{},{},'.format('data',basename)
 
     # Final report
     report += '\n'
@@ -330,27 +376,32 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         
         report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:>10s} {:>23s}\n'.format('('+desc+')',str(label),n_parts,total_volume,status,warnings+errors)        
         
-        line_hdr += '{},{},{},{},{},{},'.format('desc','n_parts','total_vol','warnings','errors','status')
-        line_units += '{},{},{},{},{},{},'.format('[text]','[#]','[mm3]','[msg]','[msg]','[test]')
-        line_data += '{},{},{:.1f},{},{},{},'.format(desc,n_parts,total_volume,warnings,errors,status)
+        line_hdr += '{},{},{},{},{},{},{},'.format('desc','label','n_parts','total_vol','warnings','errors','status')
+        line_units += '{},{},{},{},{},{},{},'.format('[text]','[#]','[#]','[mm3]','[msg]','[msg]','[test]')
+        line_data += '{},{},{},{:.1f},{},{},{},'.format(desc,label,n_parts,total_volume,warnings,errors,status)
         
         if status is 'FAIL':
             finalQualityAssessment = False
             
     report += '\n'
+    pa_string = 'Procrustes analysis ({:.3f} < {:.3f})'.format(disparity,sensitivity)
+    report += '  {:>42s}: {:>5s}\n'.format(pa_string,'PASS' if procrustesAnalysisResult else 'FAIL')
+    report += '\n'
     report += '  {:>42s}: {:>5s}\n'.format('All labels found','PASS' if expectedLabelsFound else 'FAIL')
     report += '\n'
     report += '  {:>42s}: {:>5s}\n'.format('Final assessment','PASS' if finalQualityAssessment else 'FAIL')
     
-    line_hdr += '{},{}\n'.format('labels_found','final')
-    line_units += '{},{}\n'.format('[test]','[test]')
-    line_data += '{},{}\n'.format('PASS' if expectedLabelsFound else 'FAIL','PASS' if finalQualityAssessment else 'FAIL')
+    line_hdr += '{},{},{},{}\n'.format('disparity','procrustes','labels_found','final')
+    line_units += '{},{},{},{}\n'.format('[1.0]','[test]','[test]','[test]')
+    line_data += '{:.3f},{},{},{}\n'.format(disparity,'PASS' if procrustesAnalysisResult else 'FAIL',\
+                                                  'PASS' if expectedLabelsFound else 'FAIL',\
+                                                  'PASS' if finalQualityAssessment else 'FAIL')
     
     #report += '\n'
     #report += '  Additional error or warning information:\n'
     #report += extra_msg
     report += '\n'
-    report += '  Legend:\n'
+    report += '  Legend for errors and warnings:\n'
     report += '    eFRAG   – Error due to multiple connected components resulting in fragments\n'
     report += '    eMAXVOL – Error due to exceeding the expected maximum bone volume\n'
     report += '    eMINVOL – Error due to being lower than the expected minimum bone volume\n'
@@ -500,7 +551,7 @@ def main():
     description = '''
 This tools validates the segmented output of machine learning tools to ensure 
 high quality and appropriate labelling of skeletal parts. As opposed to methods 
-such as DICE scores and Hausdorff distance, it validates the segmentation by 
+such as DICE scores and Hausdorff distance, it does quality assurance tests by
 ensuring certain anatomical constraints are met. To learn more:
 
 ogoValidate validate -h
@@ -527,8 +578,10 @@ Validation is based on the anatomical constraints and checks that are tested:
 - The left and right femur are the same volume (within a given tolerance)
 - The left and right pelvis are the same volume (within a given tolerance)
 - Each bone is within the expected min/max volume range that is pre-defined
-- The position of each bone relative to other bones is appropriate (this is 
-  not yet implemented, but can be checked independently by ogoProcrustes)
+  A future implementation may refine the size limits relative to a reference
+  bone, such as the sacrum. Large skeletons have large bones, small skeletons...
+- The position of each bone relative to other bones is appropriate as 
+  assessed by a Procrustes analysis
 
 Repairs can be performed the following ways:
 
