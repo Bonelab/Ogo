@@ -36,9 +36,6 @@ Developer Install
     # Install in an 'editable' format 
     pip install -e .
 
-    # Install batchgenerators for ogoPrintPickle
-    pip install batchgenerators
-
     # You can also run the full install
     python setup.py install
 

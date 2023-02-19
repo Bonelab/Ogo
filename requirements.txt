@@ -9,6 +9,9 @@ numpy
 # Statistics
 scipy
 
+# Machine learning
+batchgenerators
+
 # Documentation
 Sphinx
 
