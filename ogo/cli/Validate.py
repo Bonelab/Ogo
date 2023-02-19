@@ -89,14 +89,9 @@ def special_cases(n_parts,label,stats):
 # +------------------------------------------------------------------------------+
 def validate(input_image, report_file, expected_labels, overwrite, func):
         
-    # Validation is based on 'innocent until proven guilty' (i.e. default is True)
-    QA_labels = {}
-    QualityAssurance = {
-      "All Pass":  True,
-      "Expected Labels": True,
-      "Labels":   QA_labels
-    }
-    
+    # Quality assurance dictionary
+    QA_dict = {}
+
     # Check if output exists and should overwrite
     if not report_file is None:
         if os.path.isfile(report_file) and not overwrite:
@@ -126,13 +121,15 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     
     # Start the report
     report = ''
-    report += '  {:>27s}\n'.format('_____________________________________________________________________________Validation')
-    report += '  {:>27s} {:s}\n'.format('ID:', os.path.basename(input_image))
-    report += '  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0])
-    report += '  {:>27s} {:.2f}\n'.format('version:', script_version)
-    report += '  {:>27s} {:s}\n'.format('creation date:', str(date.today()))
+    report += '  {:>20s}\n'.format('___________________________________________________________________Validation')
+    report += '  {:>20s} {:s}\n'.format('ID:', os.path.basename(input_image))
+    report += '  {:>20s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0])
+    report += '  {:>20s} {:.2f}\n'.format('version:', script_version)
+    report += '  {:>20s} {:s}\n'.format('creation date:', str(date.today()))
     report += '\n'
-            
+    
+    extra_msg = ''
+          
     # Gather all labels in image and determine number of parts each label is broken into
     filt = sitk.LabelShapeStatisticsImageFilter() # Used to get labels in image
     filt.Execute(ct)
@@ -146,115 +143,68 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     
     # Check if expected labels are in image
     test_labels = []
-    QualityAssurance["Expected Labels"] = True
+    expectedLabelsFound = True
+    finalQualityAssessment = True
     for label in expected_labels:
-        if label in labels:
-            test_labels.append(label)
-            QA_labels[label] = True
-        else:
-            try:
-                label_name = lb.labels_dict[label]['LABEL']
-            except KeyError:
-                label_name = 'unknown label'
-            ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,label_name))
-            QualityAssurance["Expected Labels"] = False
-            QualityAssurance["All Pass"] = False
-    if test_labels == []:
-        os.sys.exit('[ERROR] None of the expected labels were found in image.')
-    labels = test_labels
-    
-    ogo.message('Gather each label in the image and determine number of parts.')
-    
-    report += '  {:>27s}\n'.format('_________________________________________________________________________________Report')
-    report += '  {:>27s} {:s}\n'.format('number of labels:',str(n_labels))
-    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('LABEL','PART','VOL','VOX','CENTROID','OFFSET')
-    report += '  {:>27s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('#','#','mm3','#','(X,Y,Z)','mm')
-
-    # Quality checks
-    warnings = ''
-    # 1. Examining femur symmetry
-    percent_femur = 10.0
-    if is_smaller(filt,percent_femur,1,2): # Is the right femur smaller than left femur?
-        QA_labels[1] = False
-        QualityAssurance["All Pass"] = False
-        msg = '[WARNING] Right femur is more than {}% smaller than left femur: FAIL'.format(percent_femur)
-        ogo.message(msg)
-        warnings += '  ' + msg + '\n'
-    if is_smaller(filt,percent_femur,2,1):
-        QA_labels[2] = False
-        QualityAssurance["All Pass"] = False
-        msg = '[WARNING] Left femur is more than {}% smaller than right femur: FAIL'.format(percent_femur)
-        ogo.message(msg)
-        warnings += '  ' + msg + '\n'
-        
-    # 2. Examining pelvis symmetry
-    percent_pelvis = 10.0
-    if is_smaller(filt,percent_pelvis,3,4): # Is the right pelvis smaller than left pelvis?
-        QA_labels[3] = False
-        QualityAssurance["All Pass"] = False
-        msg = '[WARNING] Right pelvis is more than {}% smaller than left pelvis: FAIL'.format(percent_pelvis)
-        ogo.message(msg)
-        warnings += '  ' + msg + '\n'
-    if is_smaller(filt,percent_pelvis,4,3):
-        QA_labels[4] = False
-        QualityAssurance["All Pass"] = False
-        msg = '[WARNING] Left pelvis is more than {}% smaller than right pelvis: FAIL'.format(percent_pelvis)
-        ogo.message(msg)
-        warnings += '  ' + msg + '\n'
-    
-    # 3. Check bone sizes are in normal range
-    bone_sizes_dict = expected_bone_volumes()
-    for label in labels:
-        if bone_sizes_dict.get(label) is not None:
-            volume = filt.GetPhysicalSize(label)
-            min_volume = bone_sizes_dict[label]["Min"]
-            max_volume = bone_sizes_dict[label]["Max"]
-            try:
-                label_name = lb.labels_dict[label]['LABEL']
-            except KeyError:
-                label_name = 'unknown label'
-
-            if volume < min_volume:
-                QA_labels[label] = False
-                QualityAssurance["All Pass"] = False
-                msg = '[WARNING] Label {:2d} ({}) volume below minimum ({} mm3): FAIL'.format(label,label_name,min_volume)
-                ogo.message(msg)
-                warnings += '  ' + msg + '\n'
-            
-            if volume > max_volume:
-                QA_labels[label] = False
-                QualityAssurance["All Pass"] = False
-                msg = '[WARNING] Label {:2d} ({}) volume above maximum ({} mm3): FAIL'.format(label,label_name,max_volume)
-                ogo.message(msg)
-                warnings += '  ' + msg + '\n'
-                
-            if label == 1 or label == 2:
-                short_femur_volume = bone_sizes_dict[label]["Short femur"]
-                if volume < short_femur_volume:
-                    msg = '[CAUTION] Label {:2d} ({}) volume likely too small for FEA ({} mm3)'.format(label,label_name,short_femur_volume)
-                    ogo.message(msg)
-                    warnings += '  ' + msg + '\n'
-
-    # Process the identification of labels and their parts
-    for idx,label in enumerate(labels):
-        ogo.message('  processing label {:>2d} ({})'.format(label,lb.labels_dict[label]['LABEL']))
         try:
             desc = lb.labels_dict[label]['LABEL']
         except KeyError:
             desc = 'unknown label'
+        
+        if label in labels:
+            test_labels.append(label)
+            QA_dict[label] = {}
+            QA_dict[label]['label_name'] = desc
+        else:
+            ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,desc))
+            expectedLabelsFound = False
+            finalQualityAssessment = False
+
+    if test_labels == []:
+        os.sys.exit('[ERROR] None of the expected labels were found in image.')
+    labels = test_labels
+    
+    ogo.message('Examine each label to determine number of parts and volume.')
+    
+    report += '  {:>20s}\n'.format('_______________________________________________________________________Report')
+    report += '  {:>20s} {:s}\n'.format('number of labels:',str(n_labels))
+    report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('LABEL','PART','VOL','VOX','CENTROID','OFFSET')
+    report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>19s} {:>6s}\n'.format('#','#','mm3','#','(X,Y,Z)','mm')
+
+    # Process the identification of labels and their parts
+    for idx,label in enumerate(labels):
+        try:
+            desc = lb.labels_dict[label]['LABEL']
+        except KeyError:
+            desc = 'unknown label'
+        ogo.message('  processing label {:>2d} ({})'.format(label,desc))
         #centroid = filt.GetCentroid(label)
         #size = filt.GetPhysicalSize(label) # volume in mm3
         
         ct_thres = ct==label
-        
         ct_conn = conn.Execute(ct,ct_thres)
         ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
         
         stats.Execute(ct_conn_sorted,ct)
         n_parts = stats.GetNumberOfLabels()
+        QA_dict[label]['n_parts'] = n_parts
+        QA_dict[label]['total_volume'] = 0
+        QA_dict[label]['errors'] = ''
+        QA_dict[label]['warnings'] = ''
+        QA_dict[label]['status'] = 'PASS'
         
+        if (n_parts>1):
+            if special_cases(n_parts,label,stats):
+                QA_dict[label]['warnings'] += 'wSPEC ' # Sacrum and L5 are sometimes two parts
+                msg = '[WARNING] Label {:2d} ({}) exception with {} parts (part {} = {:.1f} mm3)'.format(label,desc,n_parts,n_parts,stats.GetPhysicalSize(2))
+                ogo.message(msg)
+                extra_msg += '  ' + msg + '\n'
+            else:
+                QA_dict[label]['errors'] += 'eFRAG ' # More than one part indicates the bone is fragmented
+                QA_dict[label]['status'] = 'FAIL'
+            
         # Generate report data
-        report += '  {:>22s}{:>5s} '.format('('+desc+')',str(label))        
+        report += '  {:>15s}{:>5s} '.format('('+desc+')',str(label))        
         for part in stats.GetLabels(): # for each part of a given label
             centroid = stats.GetCentroid(part)
             bounding_box = stats.GetBoundingBox(part)
@@ -263,23 +213,16 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
             bb[1] = bounding_box[1] + int(math.ceil(bounding_box[4]/2))
             bb[2] = bounding_box[2] + int(math.ceil(bounding_box[5]/2))
             
+            QA_dict[label]['total_volume'] += stats.GetPhysicalSize(part)
+            
             if part==1:
                 ref_centroid = centroid
                 report += '{:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2])
             else:
-                
-                if not special_cases(n_parts,label,stats):
-                    QA_labels[label] = False # any label with more than one part cannot be valid (unless it's a broken bone!)
-                    QualityAssurance["All Pass"] = False
-                else:
-                    msg = '[CAUTION] Label {:2d} ({}) exception with {} parts (part {} = {:.1f} mm3)'.format(label,desc,n_parts,n_parts,stats.GetPhysicalSize(2))
-                    ogo.message(msg)
-                    warnings += '  ' + msg + '\n'
-                    
                 distance_between_centroids = np.sqrt((ref_centroid[0] - centroid[0])**2 + (ref_centroid[1] - centroid[1])**2 + (ref_centroid[2] - centroid[2])**2)
-                report += '  {:>22s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
+                report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
                           .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2],distance_between_centroids)
-        
+
         # Generate suggestion of new label for command line suggestion
         if n_parts>1:
             for part in stats.GetLabels():
@@ -296,31 +239,137 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
                     swap = [label,part,new_label]
                     label_repair_list.append(swap)
     
+    # Quality checks -------------------------------------------------------------------
+    # 1. Examining femur symmetry
+    if ((1 in labels) and (2 in labels)):
+        ogo.message('Examining femur symmetry.')
+        percent_femur = 10.0
+        if is_smaller(filt,percent_femur,1,2): # Is the right femur smaller than left femur?
+            QA_dict[1]['status'] = 'FAIL'
+            QA_dict[1]['errors'] += 'eSYMM '
+            msg = '[ERROR] Right femur is more than {}% smaller than left femur.'.format(percent_femur)
+            ogo.message(msg)
+            extra_msg += '  ' + msg + '\n'
+        if is_smaller(filt,percent_femur,2,1):
+            QA_dict[2]['status'] = 'FAIL'
+            QA_dict[2]['errors'] += 'eSYMM '
+            msg = '[ERROR] Left femur is more than {}% smaller than right femur.'.format(percent_femur)
+            ogo.message(msg)
+            extra_msg += '  ' + msg + '\n'
     
+    # 2. Examining pelvis symmetry
+    if ((3 in labels) and (4 in labels)):
+        ogo.message('Examining pelvis symmetry.')
+        percent_pelvis = 10.0
+        if is_smaller(filt,percent_pelvis,3,4): # Is the right pelvis smaller than left pelvis?
+            QA_dict[3]['status'] = 'FAIL'
+            QA_dict[3]['errors'] += 'eSYMM '
+            msg = '[ERROR] Right pelvis is more than {}% smaller than left pelvis.'.format(percent_pelvis)
+            ogo.message(msg)
+            extra_msg += '  ' + msg + '\n'
+        if is_smaller(filt,percent_pelvis,4,3):
+            QA_dict[4]['status'] = 'FAIL'
+            QA_dict[4]['errors'] += 'eSYMM '
+            msg = '[ERROR] Left pelvis is more than {}% smaller than right pelvis.'.format(percent_pelvis)
+            ogo.message(msg)
+            extra_msg += '  ' + msg + '\n'
+    
+    # 3. Check bone sizes are in normal range
+    ogo.message('Examining bone volumes are within expected range.')
+    bone_sizes_dict = expected_bone_volumes()
+    for label in labels:
+        if bone_sizes_dict.get(label) is not None:
+            volume = filt.GetPhysicalSize(label)
+            min_volume = bone_sizes_dict[label]['Min']
+            max_volume = bone_sizes_dict[label]['Max']
+            try:
+                desc = lb.labels_dict[label]['LABEL']
+            except KeyError:
+                desc = 'unknown label'
+
+            if volume < min_volume:
+                QA_dict[label]['errors'] += 'eMINVOL '
+                QA_dict[label]['status'] = 'FAIL'
+                msg = '[ERROR] Label {:2d} ({}) volume is below minimum ({} mm3).'.format(label,desc,min_volume)
+                ogo.message(msg)
+                extra_msg += '  ' + msg + '\n'
+            
+            if volume > max_volume:
+                QA_dict[label]['errors'] += 'eMAXVOL '
+                QA_dict[label]['status'] = 'FAIL'
+                msg = '[ERROR] Label {:2d} ({}) volume is above maximum ({} mm3).'.format(label,desc,max_volume)
+                ogo.message(msg)
+                extra_msg += '  ' + msg + '\n'
+                
+            if label == 1 or label == 2:
+                short_femur_volume = bone_sizes_dict[label]['Short femur']
+                if volume < short_femur_volume:
+                    QA_dict[label]['warnings'] += 'wNOFEA '
+                    msg = '[WARNING] Label {:2d} ({}) volume is likely too small for FEA ({} mm3)'.format(label,desc,short_femur_volume)
+                    ogo.message(msg)
+                    extra_msg += '  ' + msg + '\n'
+
+    line_hdr = '<{}>,'.format('header')
+    line_units = '<{}>,'.format('units')
+    line_data = '<{}>,'.format('data')
+
     # Final report
     report += '\n'
-    report += '  {:>27s}\n'.format('______________________________________________________________________Quality assurance')
-
-    report += '  {:>27s}: '.format('Label')+' '.join('{:5d}'.format(label) for label,passed in QualityAssurance["Labels"].items())
-    report += '\n'
-    report += '  {:>27s}: '.format('Test result')+' '.join('{:>5s}'.format("PASS" if passed else "FAIL") for label,passed in QualityAssurance["Labels"].items()) \
-                + ' (' + basename + ')'
-    report += '\n'
+    report += '  {:>20s}\n'.format('______________________________________________________Quality Assurance Check')
+    report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('LABEL','NPARTS','TOTAL_VOL','STATUS','ERRORS and WARNINGS')
+    report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('#','#','mm3','','')
     
+    for label in labels:
+        
+        desc = QA_dict[label]['label_name']
+        n_parts = QA_dict[label]['n_parts']
+        total_volume = QA_dict[label]['total_volume']
+        warnings = QA_dict[label]['warnings']
+        errors = QA_dict[label]['errors']
+        status = QA_dict[label]['status']
+        
+        report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:>10s} {:>23s}\n'.format('('+desc+')',str(label),n_parts,total_volume,status,warnings+errors)        
+        
+        line_hdr += '{},{},{},{},{},{},'.format('desc','n_parts','total_vol','warnings','errors','status')
+        line_units += '{},{},{},{},{},{},'.format('[text]','[#]','[mm3]','[msg]','[msg]','[test]')
+        line_data += '{},{},{:.1f},{},{},{},'.format(desc,n_parts,total_volume,warnings,errors,status)
+        
+        if status is 'FAIL':
+            finalQualityAssessment = False
+            
     report += '\n'
-    report += '  {:>27s}: {:>5s}\n'.format('All expected labels found',"PASS" if QualityAssurance["Expected Labels"] else "FAIL")
-
+    report += '  {:>42s}: {:>5s}\n'.format('All labels found','PASS' if expectedLabelsFound else 'FAIL')
     report += '\n'
-    report += '  {:>27s}: {:>5s}\n'.format('Final assessment',"PASS" if QualityAssurance["All Pass"] else "FAIL")
+    report += '  {:>42s}: {:>5s}\n'.format('Final assessment','PASS' if finalQualityAssessment else 'FAIL')
     
+    line_hdr += '{},{}\n'.format('labels_found','final')
+    line_units += '{},{}\n'.format('[test]','[test]')
+    line_data += '{},{}\n'.format('PASS' if expectedLabelsFound else 'FAIL','PASS' if finalQualityAssessment else 'FAIL')
+    
+    #report += '\n'
+    #report += '  Additional error or warning information:\n'
+    #report += extra_msg
     report += '\n'
-    report += warnings
+    report += '  Legend:\n'
+    report += '    eFRAG   – Error due to multiple connected components resulting in fragments\n'
+    report += '    eMAXVOL – Error due to exceeding the expected maximum bone volume\n'
+    report += '    eMINVOL – Error due to being lower than the expected minimum bone volume\n'
+    report += '    wSPEC   – Warning that L5 or sacrum may have a disconnected component\n'
+    report += '    wNOFEA  – Warning that the femurs are cut too short for FE analysis\n'
+    
+    # For grep in report
+    grep_lines = ''
+    grep_lines += '  {:>20s}\n'.format('_____________________________________________________Summary Results for GREP')
+    grep_lines += line_hdr
+    grep_lines += line_units
+    grep_lines += line_data
+    grep_lines += '\n'
     
     # Command line
     cmd_line = ''
-    cmd_line += '  {:>27s}\n'.format('___________________________________________________________________________Command line')
+    cmd_line += '  {:>20s}\n'.format('_________________________________________________________________Command line')
     cmd_line += '  {}\n'.format('Edit the command below by selecting replaced labels carefully.')
-    cmd_line += '  {}\n'.format('Should some labels be set to zero?')
+    cmd_line += '  {}\n'.format('Should some labels be set to zero (i.e. eliminated)?')
     cmd_line += '\n'
     cmd_line += '  {}\n'.format('ogoValidate repair \\')
     cmd_line += '    {} \\\n'.format(input_image)    
@@ -333,20 +382,20 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         else:
             cmd_line += '\n'
              
-    ogo.message('Printing report')
-    print('\n')
-    print(report)
-    report += cmd_line
-    
     if report_file:
         ogo.message('Saving report to file:')
         ogo.message('      \"{}\"'.format(report_file))
         txt_file = open(report_file, "w")
         txt_file.write(report)
+        txt_file.write(cmd_line)
+        txt_file.write(grep_lines)
         txt_file.close()
-
-    if label_repair_list != []:
-        print(cmd_line)
+    else:
+        ogo.message('Printing report')
+        print('\n')
+        print(report)
+        if label_repair_list != []:
+            print(cmd_line)
     
     ogo.message('Done.')
 
@@ -436,7 +485,7 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
     
     # Command line
     cmd_line = ''
-    cmd_line += '  {:>27s}\n'.format('___________________________________________________________________________Command line')
+    cmd_line += '  {:>20s}\n'.format('___________________________________________________________________________Command line')
     cmd_line += '\n'
     cmd_line += '  {}\n'.format('ogoValidate validate \\')
     cmd_line += '    {} \n'.format(output_image)    
