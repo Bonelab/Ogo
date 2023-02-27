@@ -19,19 +19,14 @@ import copy
 
 class InternalCalibration(StandardCalibration):
     """Perform internal density calibration.
-
     For details on the method, please see [1]. Mass attenuation coefficients
     as a function of energy come from [2, 3]. Each sample should come from a
     minimum area of 10 mm\ :sup:`2`.
-
     For material definitions used, see
     :class:`ogo.calibration.mass_attenuation_tables`. Calibrated images are in
     units of mg K\ :sub:`2`\ HPO\ :sub:`4` /cc.
-
     [1] Michalski, Andrew S., et al. "CT-based internal density calibration for opportunistic skeletal assessment using abdominal CT scans." Medical Engineering & Physics (2020).
-
     [2] https://www.nist.gov/pml/x-ray-mass-attenuation-coefficientslabel_list
-
     [3] White DR, Wilson IJ, Griffith RV. Report 46. J Int Comm Radiat Units Meas 2016 os24:NP-NP. doi: 10.1093/jicru/os24.1.Report46
     """  # noqa: W605, E501
 
@@ -73,13 +68,11 @@ class InternalCalibration(StandardCalibration):
 
     def predict(self, hu, voxel_volume):
         """Internal calibration predict method
-
         It is recommended to cast hu to type float (sitk.sitkFloat64) before
         passing to this function. Operators (*, +, /) are used without
         reference to type to allow this function to work with SimpleITK, numpy,
         and base python. Therefore, no explicite checks for type are performed
         internally.
-
         :param hu: Input Hounsfield unit
         :param voxel_volume: Voxel volume in  mm\ :sup:`3`
         """  # noqa: W605
@@ -121,16 +114,15 @@ class InternalCalibration(StandardCalibration):
 
         return k2hpo4
 
+
     def fit(self):
         """Override Calibration fit method.
-
         Internal calibration requires specific sampled values"""
         self._fit()
         self._is_fit = True
 
     def _fit(self):
         """Internal calibration fit
-
         Performs a grid search on all energies to find an energy which
         maximizes the coefficient of determination between sampled
         Hounsfield Units and mass attenuation. The best correlated energy

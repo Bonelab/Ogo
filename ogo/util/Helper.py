@@ -18,6 +18,7 @@ import sys
 import time
 import datetime
 import math
+import pandas as pd
 import numpy as np
 from scipy import stats
 import scipy.interpolate as interp
@@ -66,7 +67,7 @@ def get_phantom(phantom_type):
         calibration_dict['number_rods'] = 3
         calibration_dict['rod_labels'] = [141, 142, 143]
         calibration_dict['rod_names'] = ['A', 'B', 'C']
-        calibration_dict['densities'] = [100, 400, 800]
+        calibration_dict['densities'] = [0, 400, 800]
         calibration_dict['h2o_densities'] = [None]
 
     elif phantom_type in 'QRM-BDC 6-rod':
@@ -268,7 +269,7 @@ def aix(infile, image):
     print(guard)
 
 
-def infoNIFTI(reader):
+def infoNIFTII(reader):
     guard = '!-------------------------------------------------------------------------------'
     print('!> HEADER')
     print('!> {:30s} = {}'.format('TimeDimension', reader.GetTimeDimension()))
@@ -293,6 +294,7 @@ def applyMask(imageData, maskData):
     mask.NotMaskOff()
     mask.Update()
     return mask.GetOutput()
+
 
 
 def applyTestBase(mesh, material_table):
@@ -398,43 +400,6 @@ def get_label(label_string):
 
     return label
 
-# Modified from:
-#   https://gist.github.com/4368898
-#   Public domain code by anatoly techtonik <techtonik@gmail.com>
-def find_executable(executable, path=None):
-    """Find if 'executable' can be run. Looks for it in 'path'
-    (string that lists directories separated by 'os.pathsep';
-    defaults to os.environ['PATH']). Checks for all executable
-    extensions. Returns full path or None if no command is found.
-    """
-    if path is None:
-        path = os.environ['PATH']
-    paths = path.split(os.pathsep)
-
-    extlist = ['']
-    if os.name == 'os2':
-        (base, ext) = os.path.splitext(executable)
-        # executable files on OS/2 can have an arbitrary extension, but
-        # .exe is automatically appended if no dot is present in the name
-        if not ext:
-            executable = executable + ".exe"
-    elif sys.platform == 'win32':
-        pathext = os.environ['PATHEXT'].lower().split(os.pathsep)
-        (base, ext) = os.path.splitext(executable)
-        if ext.lower() not in pathext:
-            extlist = pathext
-        # Windows looks for binaries in current dir first
-        paths.insert(0, '')
-    
-    for ext in extlist:
-        execname = executable + ext
-        for path in paths:
-            for root, dirs, files in os.walk(path):
-                for name in files:
-                    if name == execname:
-                        return os.path.abspath(os.path.join(root, name))
-    else:
-        return None
 
 def bmd_metrics(vtk_image):
     """Computes the BMD metrics for the input vtk image. VTK image should be the isolated
@@ -465,6 +430,31 @@ def bmd_metrics(vtk_image):
         'Bone Volume [cm^3]': VOLUME_cm
     }
 
+def sitk_bmd_metrics(sitk_image):
+    """Computes the BMD metrics for the input Simple ITK image. Simple ITK image should be the isolated
+    bone VOI. This can be achieved through sitk.Mask. First, converts to numpy. Analysis performed in Numpy. The
+    first argument is the vtk Image Data.
+    Returns dictionary of results.
+    This does the same thing as bmd_metrics but takes in an sitk image instead of a VTK image. 
+    """
+
+    spacing = sitk_image.GetSpacing()
+    numpy_image = sitk.GetArrayFromImage(sitk_image)
+    voxel_count = np.count_nonzero(numpy_image)
+    voxel_volume = spacing[0] * spacing[1] * spacing[2]  # [mm^3]
+    voxel_volume2 = voxel_volume / 1000  # [cm^3]
+    # BMD measures
+    BMD_total = numpy_image.sum()  # [mg/cc K2HPO4]
+    if voxel_count > 0:
+        BMD_AVG = BMD_total / voxel_count  # [mg/cc K2HPO4]
+    else:
+        BMD_AVG = 0.0  # Set to zero when there are no voxels (avoid divide by 0)
+    VOLUME_mm = voxel_count * voxel_volume
+    VOLUME_cm = voxel_count * voxel_volume2  # [cm^3]
+    BMC = BMD_AVG * VOLUME_cm  # [mg HA]
+
+    return BMD_AVG
+    
 
 def bmd_preprocess(vtk_image, thresh_value):
     """Preprocess the calibrated image to remove densities less than 0 mg/cc
@@ -1138,6 +1128,17 @@ def maskThreshold(imageData, threshold_value):
     thres.Update()
     return thres.GetOutput()
 
+def sitkmaskThreshold(input_image, threshold_value):
+    """Applies the threshold value to the input image. Done using Simple ITK instead of VTK. 
+    The first argument is the image. The second argument is the threshold value to be applied.
+    Returns the thresholded image region as image Data.
+    "input image" needs to have been loaded through Simple ITK, not vtk.  
+    """
+    output_image = sitk.BinaryThreshold(input_image, threshold_value, threshold_value, 1,0)
+
+    return output_image
+
+
 
 def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):
     """Defines the material table for the FE model.
@@ -1479,6 +1480,62 @@ def writeTXTfile(input_dict, fileName, output_directory):
     for key, value in list(input_dict.items()):
         txt_file.write(str(key) + '\t' + str(value) + '\n')
     txt_file.close()
+
+
+def determine_normality(input_array):
+    shapiro_test = stats.shapiro(input_array)
+    p_value = shapiro_test.pvalue
+    if p_value > 0.05:
+        normality = True
+    else:
+        normality = False
+
+    return normality 
+
+'''_quartile_predict takes in the specific calibration parameters at the specified quartile values by the user and 
+    converts the image to K2HPO4 based on the calibration parameters at that quartile. '''
+def _quartile_predict(hu, voxel_volume, hu_to_mass_attenuation_slope, hu_to_mass_attenuation_intercept, hu_to_density_slope, hu_to_density_intercept, triglyceride_mass_attenuation, K2HPO4_mass_attenuation):  
+        voxel_volume = voxel_volume / 1000.0
+
+        # Convert HU to mass attenuation coefficient
+        u_p = (
+          hu * hu_to_mass_attenuation_slope
+          + hu_to_mass_attenuation_intercept
+        )
+
+        # Convert HU to Archimedian density
+        arch = (
+            hu * hu_to_density_slope
+            + hu_to_density_intercept
+        )
+
+        # Conver Archimedian density to total mass
+        mass = arch * voxel_volume
+
+        # Create two component model
+        k2hpo4 = mass * (
+                (u_p - triglyceride_mass_attenuation) /
+                (K2HPO4_mass_attenuation - triglyceride_mass_attenuation)
+        )
+
+        # Convert g to mg
+        k2hpo4 = k2hpo4 / voxel_volume * 1000.0
+
+        return k2hpo4
+    
+def add_to_filename(filepath, suffix):
+    '''Will add a suffix to the end of a .nii.gz file or .nii file 
+    while maintaining the original path and file'''
+    directory, filename = os.path.split(filepath)
+    if filename.endswith(".nii.gz"):
+        filename = filename[:-7] + suffix
+    elif filename.endswith(".nii"):
+        filename = filename[:-4] + suffix
+
+    new_file_path = os.path.join(directory, filename)
+
+    return new_file_path
+
 
 # def writeN88Model(model, fileName, pathname):
 #     """Writes out a N88Model.

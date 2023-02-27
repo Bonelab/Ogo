@@ -25,6 +25,8 @@ from scipy import stats
 from datetime import date
 from collections import OrderedDict
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+from scipy import stats
+
 
 import ogo.dat.MassAttenuationTables as mat
 import ogo.dat.OgoMasterLabels as lb
@@ -265,7 +267,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
 
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image, input_mask, output_image, calib_file_name, useLabels, useL4, overwrite, func):
+def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib_file_name, useLabels, useL4, overwrite, func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -370,139 +372,364 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                     '[ERROR] Invalid HU for {} ({}). Explicitly define labels to use \nor define --useL4.'.format(label,
                                                                                                                   value))
     ogo.message('')
-
-    # Perform the internal calibration fit
-    ogo.message('Computing calibration parameters.')
-    calib = InternalCalibration(
-        adipose_hu=labels_data['Adipose']['mean'],
-        air_hu=labels_data['Air']['mean'],
-        blood_hu=labels_data['Blood']['mean'],
-        bone_hu=labels_data['Cortical Bone']['mean'],
-        muscle_hu=labels_data['Skeletal Muscle']['mean'],
-        label_list=labelList
-    )
-    calib.fit()
+    
+    new_line = '\n'
 
     ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
-    ogo.message('  {:>27s} {:8.3f}'.format('Energy [keV]:', calib.effective_energy))
-    ogo.message('  {:>27s} {:8.3f}'.format('Max R^2:', calib.max_r2))
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
-    ogo.message('  {:>27s}'.format('Mass Attenuation [cm2/g]:'))
-    ogo.message('  {:>27s} {:8.3f}'.format('Adipose ', calib.adipose_mass_attenuation))
-    ogo.message('  {:>27s} {:8.3f}'.format('Air ', calib.air_mass_attenuation))
-    ogo.message('  {:>27s} {:8.3f}'.format('Blood ', calib.blood_mass_attenuation))
-    ogo.message('  {:>27s} {:8.3f}'.format('Cortical Bone ', calib.bone_mass_attenuation))
-    ogo.message('  {:>27s} {:8.3f}'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+    if MonteCarlo:
+        #setting mean and standard deviation to variables 
+        air_mean_hu = labels_data['Air']['mean']
+        air_std_hu = labels_data['Air']['stdev']
+        
+        adipose_mean_hu = labels_data['Adipose']['mean']
+        adipose_std_hu = labels_data['Adipose']['stdev']
+        
+        blood_mean_hu = labels_data['Blood']['mean']
+        blood_std_hu = labels_data['Blood']['stdev']
+        
+        bone_mean_hu = labels_data['Cortical Bone']['mean']
+        bone_std_hu = labels_data['Cortical Bone']['stdev']
+        
+        muscle_mean_hu = labels_data['Skeletal Muscle']['mean']
+        muscle_std_hu = labels_data['Skeletal Muscle']['stdev']
 
-    ogo.message('Calibrating input file.')
-    voxel_volume = np.prod(ct.GetSpacing())
-    #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
-    den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-    den = sitk.Cast(den, ct.GetPixelID())
+        #create arrays to save generated value for each loop
+        effective_engergy_vales = []
+        hu_to_mass_attenuation_slopes = []
+        hu_to_mass_attenuation_intercepts = []
+        hu_to_density_slopes = []
+        hu_to_density_intercepts = []
 
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
-    imfilt = sitk.StatisticsImageFilter()
-    imfilt.Execute(ct)
-    ogo.message('  {:>27s} {:s}'.format('INPUT Image Information:', ''))
-    ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
-    ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
-    imfilt.Execute(den)
-    ogo.message('  {:>27s} {:s}'.format('OUTPUT Image Information:', ''))
-    ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
-    ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
-    ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
-    ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        #arrays to store the attenuation values (mass attenuations change per effective energy - will be different for each quartile)
+        triglyceride_mass_attenuations = []
+        K2HPO4_mass_attenuations = []
+        adipose_mass_attenuations = []
+        air_mass_attenuations = []
+        bone_mass_attenuations = []
+        blood_mass_attenuations = []
+        muscle_mass_attenuations = []
 
-    ogo.message('Writing result to ' + output_image)
-    sitk.WriteImage(den, output_image)
+        energy_quartile_values = []
+        hu_to_mass_attenuation_slopes_quartilevalues = []
+        hu_to_mass_attenuation_intercepts_quartilevalues = []
+        hu_to_density_slopes_quartilevalues = []
+        hu_to_density_intercepts_quartilesvalues = []
+        triglyceride_quartiles = []
+        K2HPO4_quartiles = []
+        adipose_quartiles = []
+        air_quartiles = []
+        blood_quartiles = []
+        bone_quartiles = []
+        muscle_quartiles = []
+
+       
+
+        for i in range(MonteCarlo):
+
+            air_hu = np.random.normal(air_mean_hu, air_std_hu)
+            adipose_hu = np.random.normal(adipose_mean_hu, adipose_std_hu)
+            blood_hu = np.random.normal(blood_mean_hu, blood_std_hu)
+            bone_hu = np.random.normal(bone_mean_hu, bone_std_hu)
+            muscle_hu = np.random.normal(muscle_mean_hu, muscle_std_hu)
+
+            # Perform the internal calibration fit
+            calib = InternalCalibration(
+                adipose_hu,
+                air_hu,
+                blood_hu,
+                bone_hu,
+                muscle_hu,
+                label_list=labelList
+            )
+            print()
+            calib.fit()
+            
+            #save generated values into an array
+            effective_engergy_vales.append(calib.effective_energy)
+            hu_to_mass_attenuation_slopes.append(calib.hu_to_mass_attenuation_slope)
+            hu_to_mass_attenuation_intercepts.append(calib.hu_to_mass_attenuation_intercept)
+            hu_to_density_slopes.append(calib.hu_to_density_slope)
+            hu_to_density_intercepts.append(calib.hu_to_density_intercept)
+            triglyceride_mass_attenuations.append(calib.triglyceride_mass_attenuation)
+            K2HPO4_mass_attenuations.append(calib.K2HPO4_mass_attenuation)
+            adipose_mass_attenuations.append(calib.adipose_mass_attenuation)
+            air_mass_attenuations.append(calib.air_mass_attenuation)    
+            blood_mass_attenuations.append(calib.blood_mass_attenuation)
+            bone_mass_attenuations.append(calib.bone_mass_attenuation)
+            muscle_mass_attenuations.append(calib.muscle_mass_attenuation)
+            ogo.message(f'Done {i}th MonteCarlo simulation')
+        
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        if quartiles: 
+            input_quartiles = [int(item) for item in quartiles.split(',')] 
+            for k in input_quartiles:
+                energy_quartiles = np.percentile(effective_engergy_vales, k)
+                energy_quartile_values.append(energy_quartiles)
+                hu_mass_slope = np.percentile(hu_to_mass_attenuation_slopes, k)
+                hu_to_mass_attenuation_slopes_quartilevalues.append(hu_mass_slope)
+                hu_mass_intercept = np.percentile(hu_to_mass_attenuation_intercepts, k)
+                hu_to_mass_attenuation_intercepts_quartilevalues.append(hu_mass_intercept)
+                hu_density_slope = np.percentile(hu_to_density_slopes, k)
+                hu_to_density_slopes_quartilevalues.append(hu_density_slope)
+                hu_density_intercept = np.percentile(hu_to_density_intercepts, k)
+                hu_to_density_intercepts_quartilesvalues.append(hu_density_intercept)
+                triglyceride_quartile = np.percentile(triglyceride_mass_attenuations, k)
+                triglyceride_quartiles.append(triglyceride_quartile)
+                K2HPO4_quartile = np.percentile(K2HPO4_mass_attenuations, k)
+                K2HPO4_quartiles.append(K2HPO4_quartile)
+                adipose_quartile = np.percentile(adipose_mass_attenuations, k)
+                adipose_quartiles.append(adipose_quartile)
+                air_quartile = np.percentile(air_mass_attenuations, k)
+                air_quartiles.append(air_quartile)
+                blood_quartile = np.percentile(blood_mass_attenuations, k)
+                blood_quartiles.append(blood_quartile)
+                bone_quartile = np.percentile(bone_mass_attenuations, k)
+                bone_quartiles.append(bone_quartile)
+                muscle_quartile = np.percentile(muscle_mass_attenuations, k)
+                muscle_quartiles.append(muscle_quartile)
+            
+            
+            for p in range(len(input_quartiles)):
+                quart = input_quartiles[p]
+                output_image_new = f"_Q{quart}.nii.gz"
+                name = ogo.add_to_filename(output_image, output_image_new)
+
+                ogo.message(f'Calibrating input file for {input_quartiles[p]}th quartile:')
+                voxel_volume = np.prod(ct.GetSpacing())
+                den = ogo._quartile_predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume, hu_to_mass_attenuation_slopes_quartilevalues[p], hu_to_mass_attenuation_intercepts_quartilevalues[p], hu_to_density_slopes_quartilevalues[p], hu_to_density_intercepts_quartilesvalues[p], triglyceride_quartiles[p], K2HPO4_quartiles[p])
+                den = sitk.Cast(den, ct.GetPixelID())
+                sitk.WriteImage(den, name)
+                
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        #outputting each quartile's statistics 
+        for j in range(len(input_quartiles)):
+            ogo.message(f'Effective Energy for {input_quartiles[j]}th quartile: {energy_quartile_values[j]}')
+            ogo.message(f'HU-u/p slope for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_slopes_quartilevalues[j]}')
+            ogo.message(f'HU-u/p intercept for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_intercepts_quartilevalues[j]}')
+            ogo.message(f'HU-density slope for {input_quartiles[j]}th quartile: {hu_to_density_slopes_quartilevalues[j]}')
+            ogo.message(f'HU-density intercept for {input_quartiles[j]}th quartile: {hu_to_density_intercepts_quartilesvalues[j]}')
+            ogo.message(f'Triglyceride mass attenuation for {input_quartiles[j]}th quartile: {triglyceride_quartiles[j]}')
+            ogo.message(f'K2HPO4 mass attenuation for {input_quartiles[j]}th quartile: {K2HPO4_quartiles[j]}')
+            ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        
+    else: 
+        # Perform the internal calibration fit
+        ogo.message('Computing calibration parameters.')
+        calib = InternalCalibration(
+            adipose_hu=labels_data['Adipose']['mean'],
+            air_hu=labels_data['Air']['mean'],
+            blood_hu=labels_data['Blood']['mean'],
+            bone_hu=labels_data['Cortical Bone']['mean'],
+            muscle_hu=labels_data['Skeletal Muscle']['mean'],
+            label_list=labelList
+        )
+        calib.fit()
+
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        ogo.message('  {:>27s} {:8.3f}'.format('Energy [keV]:', calib.effective_energy))
+        ogo.message('  {:>27s} {:8.3f}'.format('Max R^2:', calib.max_r2))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        ogo.message('  {:>27s}'.format('Mass Attenuation [cm2/g]:'))
+        ogo.message('  {:>27s} {:8.3f}'.format('Adipose ', calib.adipose_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Air ', calib.air_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Blood ', calib.blood_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Cortical Bone ', calib.bone_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+
+        ogo.message('Calibrating input file.')
+        voxel_volume = np.prod(ct.GetSpacing())
+        #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
+        den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
+        den = sitk.Cast(den, ct.GetPixelID())
+
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        imfilt = sitk.StatisticsImageFilter()
+        imfilt.Execute(ct)
+        ogo.message('  {:>27s} {:s}'.format('INPUT Image Information:', ''))
+        ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
+        ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
+        imfilt.Execute(den)
+        ogo.message('  {:>27s} {:s}'.format('OUTPUT Image Information:', ''))
+        ogo.message('  {:>27s} {:8.1f}'.format('Minimum ', imfilt.GetMinimum()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Maximum ', imfilt.GetMaximum()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Mean ', imfilt.GetMean()))
+        ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
+        ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+
+        ogo.message('Writing result to ' + output_image)
+        sitk.WriteImage(den, output_image)
+    
 
     if calib_file_name:
-        ogo.message('Saving calibration parameters to file:')
-        ogo.message('      \"{}\"'.format(calib_file_name))
+        median = input_quartiles.index(50)
+        if MonteCarlo:
+            ogo.message('Saving calibration parameters to file:')
+            ogo.message('      \"{}\"'.format(calib_file_name))
 
-        txt_file = open(calib_file_name, "w")
+            txt_file = open(calib_file_name, "w")
 
-        txt_file.write('Internal calibration:\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s} {:s}\n'.format('ID:', os.path.basename(output_image)))
-        txt_file.write('  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0]))
-        txt_file.write('  {:>27s} {:.2f}\n'.format('version:', script_version))
-        txt_file.write('  {:>27s} {:s}\n'.format('creation date:', str(date.today())))
-        txt_file.write('\n')
-        txt_file.write('Files:\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s} {:s}\n'.format('input image:', input_image))
-        txt_file.write('  {:>27s} {:s}\n'.format('input mask:', input_mask))
-        txt_file.write('  {:>27s} {:s}\n'.format('output image:', output_image))
-        txt_file.write('  {:>27s} {:s}\n'.format('calibration file name:', calib_file_name))
-        txt_file.write('\n')
-        txt_file.write('Calibration parameters:\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s} {}\n'.format('Fit:', calib._is_fit))
-        txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
-        txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        
-        txt_file.write('  {:>27s} {:>8s} {:>8s} {:>8s}\n'.format('Density [HU]:','Mean','StdDev','#Voxels'))
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Adipose ', labels_data['Adipose']['mean'],labels_data['Adipose']['stdev'],labels_data['Adipose']['count']))
-        if 91 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Air ', labels_data['Air']['mean'],labels_data['Air']['stdev'],labels_data['Air']['count']))
-        if 92 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Blood ', labels_data['Blood']['mean'],labels_data['Blood']['stdev'],labels_data['Blood']['count']))
-        if 93 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Cortical Bone ', labels_data['Cortical Bone']['mean'],labels_data['Cortical Bone']['stdev'],labels_data['Cortical Bone']['count']))
-        if 94 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Skeletal Muscle ', labels_data['Skeletal Muscle']['mean'],labels_data['Skeletal Muscle']['stdev'],labels_data['Skeletal Muscle']['count']))
-        if 95 in labelList:
-            txt_file.write(' [used]\n')
-        else:
-            txt_file.write(' [not used]\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s}\n'.format('Mass Attenuation [cm2/g]:'))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ', calib.adipose_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Air ', calib.air_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Blood ', calib.blood_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Cortical Bone ', calib.bone_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
-        txt_file.write('\n')
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('K2HPO4 ', calib.K2HPO4_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('CHA ', calib.CHA_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Triglyceride ', calib.triglyceride_mass_attenuation))
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
-        txt_file.write('\n')
-        txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Slope', calib.hu_to_mass_attenuation_slope))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Y-Intercept', calib.hu_to_mass_attenuation_intercept))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Slope', calib.hu_to_density_slope))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept', calib.hu_to_density_intercept))
+            txt_file.write('Internal calibration:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:s}\n'.format('ID:', os.path.basename(output_image)))
+            txt_file.write('  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0]))
+            txt_file.write('  {:>27s} {:.2f}\n'.format('version:', script_version))
+            txt_file.write('  {:>27s} {:s}\n'.format('creation date:', str(date.today())))
+            txt_file.write('\n')
+            txt_file.write('Files:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:s}\n'.format('input image:', input_image))
+            txt_file.write('  {:>27s} {:s}\n'.format('input mask:', input_mask))
+            txt_file.write('  {:>27s} {:s}\n'.format('output image:', output_image))
+            txt_file.write('  {:>27s} {:s}\n'.format('calibration file name:', calib_file_name))
+            txt_file.write('\n')
+            txt_file.write('Calibration parameters:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:>8s} {:>8s} {:>8s}\n'.format('Density [HU]:','Mean','StdDev','#Voxels'))
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Adipose ', labels_data['Adipose']['mean'],labels_data['Adipose']['stdev'],labels_data['Adipose']['count']))
+            if 91 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Air ', labels_data['Air']['mean'],labels_data['Air']['stdev'],labels_data['Air']['count']))
+            if 92 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Blood ', labels_data['Blood']['mean'],labels_data['Blood']['stdev'],labels_data['Blood']['count']))
+            if 93 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Cortical Bone ', labels_data['Cortical Bone']['mean'],labels_data['Cortical Bone']['stdev'],labels_data['Cortical Bone']['count']))
+            if 94 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Skeletal Muscle ', labels_data['Skeletal Muscle']['mean'],labels_data['Skeletal Muscle']['stdev'],labels_data['Skeletal Muscle']['count']))
+            if 95 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write(f'Mass Attenuation Parameters [cm2/g]:')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median adipose mass attenuation: {adipose_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median air mass attenuation: {air_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median blood mass attenuation: {blood_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median cortical bone mass attenuation: {bone_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write(f'Median muscle mass attenuation: {muscle_quartiles[median]}')
+            txt_file.write(f'{new_line}')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            if quartiles: 
+                for j in range(len(input_quartiles)):
+                    txt_file.write(f'Effective Energy for {input_quartiles[j]}th quartile: {energy_quartile_values[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'HU-u/p slope for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_slopes_quartilevalues[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'HU-u/p intercept for {input_quartiles[j]}th quartile: {hu_to_mass_attenuation_intercepts_quartilevalues[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'HU-density slope for {input_quartiles[j]}th quartile: {hu_to_density_slopes_quartilevalues[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'HU-density intercept for {input_quartiles[j]}th quartile: {hu_to_density_intercepts_quartilesvalues[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'Triglyceride mass attenuation for {input_quartiles[j]}th quartile: {triglyceride_quartiles[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write(f'K2HPO4 mass attenuation for {input_quartiles[j]}th quartile: {K2HPO4_quartiles[j]}')
+                    txt_file.write(f'{new_line}')
+                    txt_file.write('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+                    txt_file.write(f'{new_line}')
 
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('\n')
+            txt_file.write('\n')
         #txt_file.write('Unformatted calibration parameters:\n')
         #txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
         #for label, value in calib.get_dict().items():
         #    txt_file.write('  {:>27s} {}\n'.format(label, value))
         #txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
 
-        txt_file.close()
+            txt_file.close()
+        else: 
+            ogo.message('Saving calibration parameters to file:')
+            ogo.message('      \"{}\"'.format(calib_file_name))
+
+            txt_file = open(calib_file_name, "w")
+
+            txt_file.write('Internal calibration:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:s}\n'.format('ID:', os.path.basename(output_image)))
+            txt_file.write('  {:>27s} {:s}\n'.format('python script:', os.path.splitext(os.path.basename(sys.argv[0]))[0]))
+            txt_file.write('  {:>27s} {:.2f}\n'.format('version:', script_version))
+            txt_file.write('  {:>27s} {:s}\n'.format('creation date:', str(date.today())))
+            txt_file.write('\n')
+            txt_file.write('Files:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:s}\n'.format('input image:', input_image))
+            txt_file.write('  {:>27s} {:s}\n'.format('input mask:', input_mask))
+            txt_file.write('  {:>27s} {:s}\n'.format('output image:', output_image))
+            txt_file.write('  {:>27s} {:s}\n'.format('calibration file name:', calib_file_name))
+            txt_file.write('\n')
+            txt_file.write('Calibration parameters:\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {}\n'.format('Fit:', calib._is_fit))
+            txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
+            txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            
+            txt_file.write('  {:>27s} {:>8s} {:>8s} {:>8s}\n'.format('Density [HU]:','Mean','StdDev','#Voxels'))
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Adipose ', labels_data['Adipose']['mean'],labels_data['Adipose']['stdev'],labels_data['Adipose']['count']))
+            if 91 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Air ', labels_data['Air']['mean'],labels_data['Air']['stdev'],labels_data['Air']['count']))
+            if 92 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Blood ', labels_data['Blood']['mean'],labels_data['Blood']['stdev'],labels_data['Blood']['count']))
+            if 93 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Cortical Bone ', labels_data['Cortical Bone']['mean'],labels_data['Cortical Bone']['stdev'],labels_data['Cortical Bone']['count']))
+            if 94 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8.3f} {:8.3f} {:8d}'.format('Skeletal Muscle ', labels_data['Skeletal Muscle']['mean'],labels_data['Skeletal Muscle']['stdev'],labels_data['Skeletal Muscle']['count']))
+            if 95 in labelList:
+                txt_file.write(' [used]\n')
+            else:
+                txt_file.write(' [not used]\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s}\n'.format('Mass Attenuation [cm2/g]:'))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ', calib.adipose_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Air ', calib.air_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Blood ', calib.blood_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Cortical Bone ', calib.bone_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
+            txt_file.write('\n')
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('K2HPO4 ', calib.K2HPO4_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('CHA ', calib.CHA_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Triglyceride ', calib.triglyceride_mass_attenuation))
+            txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
+            txt_file.write('\n')
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Slope', calib.hu_to_mass_attenuation_slope))
+            txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Y-Intercept', calib.hu_to_mass_attenuation_intercept))
+            txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Slope', calib.hu_to_density_slope))
+            txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept', calib.hu_to_density_intercept))
+
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('\n')
 
     ogo.message('Done internal calibration.')
 
@@ -512,12 +739,10 @@ def main():
     description = '''
 Performs quantitative density calibration of a clinical CT image either
 by phantom calibration or internal calibration. 
-
 Phantom calibration can be performed with the phantom in the image or
 by an asynchronous scan of the phantom. The image mask is used to define
 the rods in the image. If the rods are in an asynchronous scan, then set
 the appropriate argument.
-
 Currently implemented phantoms are:
   Mindways Model 3 CT
   Mindways Model 3 QA
@@ -525,13 +750,11 @@ Currently implemented phantoms are:
   QRM-BDC 6-rod
   Image Analysis QCT-3D Plus
   B-MAS 200
-
 Internal calibration is typically based on five samples in the image, 
 which are adipose tissue, skeletal muscle, cortical bone, blood, and air.
 However, the user is free to define any number of samples, and samples of
 any type. The requirement is to use the correct image labels. At least
 two labels must be defined, and current valid labels are:
-
    91 Adipose tissue
    92 Air
    93 Blood (artery)
@@ -540,12 +763,10 @@ two labels must be defined, and current valid labels are:
  
 Outputs include the calibrated density image and a text file that includes
 the calibration parameters and results.
-
 Please cite:
 Michalski AS, Besler BA, Michalak GJ, Boyd SK, 2020. CT-based internal density 
 calibration for opportunistic skeletal assessment using abdominal CT scans. 
 Med Eng Phys 78, 55-63.
-
 '''
 
     epilog = '''
@@ -560,7 +781,8 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
                             image_qct.nii.gz --useL4
 ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
                             image_qct.nii.gz --useLabels 91 92 93 95
-
+ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
+                            image_qct.nii.gz --MonteCarlo 10 --quartiles 25,50,75 --useL4 --useLabels 91 92 93 95
 '''
 
     # Setup argument parsing
@@ -593,6 +815,8 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
+    parser_internal.add_argument('--MonteCarlo', type =int, default=1000, help='Use when user wants to run a Monte Carlo simulation on calibration. Value is how many iterations that Monte Carlo should do')
+    parser_internal.add_argument('--quartiles', default=50, help="Quartiles desired for MonteCarlo simulation to generate", type=str)
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
