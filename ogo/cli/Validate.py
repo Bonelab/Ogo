@@ -99,7 +99,7 @@ def special_cases(n_parts,label,stats):
         if n_parts==2 and stats.GetPhysicalSize(2) > 400:
             return True
     
-    elif label==6: # L5 – sometimes the pedicules are separate from the vertebral body
+    elif label==6: # L5 – sometimes the pedicules are separate from the vertebral body (Pars defect)
         if n_parts==2 and stats.GetPhysicalSize(2) > 2000:
             return True
 
