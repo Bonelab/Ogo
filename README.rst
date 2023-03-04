@@ -89,7 +89,7 @@ ogo.dat
 ogo.calib
 ----------
 
-Use of templated calibration functions is through command line ogoImageCalibration
+The calibration functionality is templated as described below and is best accessed using CLI :code:`ogoImageCalibration`
 
 :code:`ogo.calib.calibration`
 
@@ -97,15 +97,15 @@ Use of templated calibration functions is through command line ogoImageCalibrati
 
 :code:`ogo.calib.standard_calibration`
 
-- inherits from calibration and implements basic commands
+- inherits from :code:`calibration` and implements basic commands
 
 :code:`ogo.calib.internal_calibration`
 
-- function for performing internal calibration; inherits from standard_calibration and calibration
+- function for performing internal calibration; inherits from :code:`standard_calibration` and :code:`calibration`
 
 :code:`ogo.calib.mindways_calibration`
 
-- function for performing phantom calibration; inherits from standard_calibration and calibration
+- function for performing phantom calibration; inherits from :code:`standard_calibration` and :code:`calibration`
 
 Command Line Apps
 =================
