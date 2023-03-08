@@ -376,6 +376,9 @@ def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib
     new_line = '\n'
 
     ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+
+    ct_np = sitk.GetArrayFromImage(ct).flatten()
+
     if MonteCarlo:
         #setting mean and standard deviation to variables 
         air_mean_hu = labels_data['Air']['mean']
@@ -426,11 +429,37 @@ def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib
 
         for i in range(MonteCarlo):
 
-            air_hu = np.random.normal(air_mean_hu, air_std_hu)
-            adipose_hu = np.random.normal(adipose_mean_hu, adipose_std_hu)
-            blood_hu = np.random.normal(blood_mean_hu, blood_std_hu)
-            bone_hu = np.random.normal(bone_mean_hu, bone_std_hu)
-            muscle_hu = np.random.normal(muscle_mean_hu, muscle_std_hu)
+            #air_hu = np.random.normal(air_mean_hu, air_std_hu)
+            #adipose_hu = np.random.normal(adipose_mean_hu, adipose_std_hu)
+            #blood_hu = np.random.normal(blood_mean_hu, blood_std_hu)
+            #bone_hu = np.random.normal(bone_mean_hu, bone_std_hu)
+            #muscle_hu = np.random.normal(muscle_mean_hu, muscle_std_hu)
+
+            adipose_image = sitk.BinaryThreshold(mask, 91, 91, 1, 0)
+            adipose_output = sitk.Mask(ct, adipose_image) 
+            adipose_output_np = sitk.GetArrayFromImage(adipose_output).flatten()
+
+            blood_image = sitk.BinaryThreshold(mask, 93, 93, 1, 0)
+            blood_output = sitk.Mask(ct, blood_image) 
+            blood_output_np = sitk.GetArrayFromImage(blood_output).flatten()
+
+            air_image = sitk.BinaryThreshold(mask, 92, 92, 1, 0)
+            air_output = sitk.Mask(ct, air_image)
+            air_output_np = sitk.GetArrayFromImage(air_output).flatten()
+
+            bone_image = sitk.BinaryThreshold(mask, 7, 7, 1, 0)
+            bone_output = sitk.Mask(ct, bone_image) 
+            bone_output_np = sitk.GetArrayFromImage(bone_output).flatten()
+
+            muscle_image = sitk.BinaryThreshold(mask, 95, 95, 1, 0)
+            muscle_output = sitk.Mask(ct, muscle_image) 
+            muscle_output_np = sitk.GetArrayFromImage(muscle_output).flatten()
+                    
+            air_hu = ct_np[air_output_np!=0]
+            adipose_hu = ct_np[adipose_output_np!=0]
+            blood_hu = ct_np[blood_output_np!=0]
+            bone_hu = ct_np[bone_output_np!=0]
+            muscle_hu = ct_np[muscle_output_np!=0]
 
             # Perform the internal calibration fit
             calib = InternalCalibration(

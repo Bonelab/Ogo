@@ -1536,6 +1536,14 @@ def add_to_filename(filepath, suffix):
 
     return new_file_path
 
+def round_sigfigs(num, sig_figs):
+    if num == 0:
+        return 0
+    return round(num, -int(math.floor(math.log10(abs(num)))) + sig_figs - 1)
+
+def round_list_sigfigs(lst, sig_figs):
+    return [round_sigfigs(num, sig_figs) for num in lst]
+
 
 # def writeN88Model(model, fileName, pathname):
 #     """Writes out a N88Model.
