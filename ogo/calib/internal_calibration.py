@@ -185,41 +185,46 @@ class InternalCalibration(StandardCalibration):
 
         def _get_mass_attenuation_at_index(idx):
             """Return the mass attenuation array at a given index"""
-            attenuation = np.array([
+            attenuation = np.array(self._subset([
             self._interpolate_tables['adipose_table'].loc[idx, 'Mass Attenuation [cm2/g]'],
             self._interpolate_tables['air_table'].loc[idx, 'Mass Attenuation [cm2/g]'],
             self._interpolate_tables['blood_table'].loc[idx, 'Mass Attenuation [cm2/g]'],
             self._interpolate_tables['bone_table'].loc[idx, 'Mass Attenuation [cm2/g]'],
             self._interpolate_tables['muscle_table'].loc[idx, 'Mass Attenuation [cm2/g]']
-            ])
-            attenuation = np.repeat(attenuation, [adipose_shape, air_shape, blood_shape, bone_shape, muscle_shape])
+            ]))
+            
+            attenuation = np.repeat(attenuation, self._subset(shapes))
+            
             return attenuation
         
+
         # Measured HU values
-        HU = np.concatenate([
+        HU = np.concatenate(self._subset([
             self.adipose_hu,
             self.air_hu,
             self.blood_hu,
             self.bone_hu,
             self.muscle_hu
-        ])
-
+        ]))
+        
         air_shape = self.air_hu.shape[0]
         adipose_shape = self.adipose_hu.shape[0]
         blood_shape = self.blood_hu.shape[0]
         bone_shape = self.bone_hu.shape[0]
         muscle_shape = self.muscle_hu.shape[0]
-
+        shapes = [adipose_shape, air_shape, blood_shape, bone_shape, muscle_shape]
+       
+       
         n = len(self._interpolate_tables['adipose_table'])
         max_index = -1
         max_r2 = -np.Inf
 
         for i in np.arange(1, n, 1):
             # Get the values at this energy level
-            attenuation2 = _get_mass_attenuation_at_index(i)
+            attenuation = _get_mass_attenuation_at_index(i)
 
             # Least squares fit
-            res = stats.linregress(HU, attenuation2)
+            res = stats.linregress(HU, attenuation)
             r_squared = res[2] ** 2
         
             # Take best fit
@@ -251,63 +256,32 @@ class InternalCalibration(StandardCalibration):
         self._water_mass_attenuation = self._interpolate_tables['water_table'].loc[
             max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
 
-        print("Done estimating the effective energy")
         # Save memory
         del self._interpolate_tables
 
     def _determine_hu_to_mass_attenuation(self):
         """Compute HU to mass attenuation relationship"""
         # Get values
-        HU = []
-        if 92 in self._label_list:
-            HU.append(self.adipose_hu)  
-        if 91 in self._label_list:
-            HU.append(self.air_hu)
-        if 93 in self._label_list:
-            HU.append(self.blood_hu)
-        if 94 in self._label_list: 
-            HU.append(self.bone_hu)
-        if 95 in self._label_list:
-            HU.append(self.muscle_hu)
+        HU = np.concatenate(self._subset([
+            self.adipose_hu,
+            self.air_hu,
+            self.blood_hu,
+            self.bone_hu,
+            self.muscle_hu
+        ]))
 
-        HU = np.concatenate(HU)
-
-        attenuation = []
-        if 92 in self._label_list:
-            attenuation.append(self.adipose_mass_attenuation)
-        if 91 in self._label_list:
-            attenuation.append(self.air_mass_attenuation)
-        if 93 in self._label_list:
-            attenuation.append(self.blood_mass_attenuation)
-        if 94 in self._label_list: 
-            attenuation.append(self.bone_mass_attenuation)
-        if 95 in self._label_list:
-            attenuation.append(self.muscle_mass_attenuation)
-
-        np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
-        attenuation = np.array(attenuation)
+        attenuation = np.array(self._subset([self.adipose_mass_attenuation, self.air_mass_attenuation, 
+                                    self.blood_mass_attenuation, self.bone_mass_attenuation, self.muscle_mass_attenuation]))
+        
        
         adipose_shape = self.adipose_hu.shape[0]
         air_shape = self.air_hu.shape[0]
         blood_shape = self.blood_hu.shape[0]
         bone_shape = self.bone_hu.shape[0]
         muscle_shape = self.muscle_hu.shape[0]
-
-        rep = []
-        if 92 in self._label_list:
-            rep.append(adipose_shape)
-        if 91 in self._label_list:
-            rep.append(air_shape)
-        if 93 in self._label_list:
-            rep.append(blood_shape)
-        if 94 in self._label_list: 
-            rep.append(bone_shape)
-        if 95 in self._label_list:
-            rep.append(muscle_shape)
-
-        np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
-        rep = np.array(rep)
-        attenuation = np.repeat(attenuation, rep)
+        shapes = [adipose_shape, air_shape, blood_shape, bone_shape, muscle_shape] 
+    
+        attenuation = np.repeat(attenuation, self._subset(shapes))
 
         # Perform linear regression
         linreg = stats.linregress(HU, attenuation)
@@ -315,20 +289,17 @@ class InternalCalibration(StandardCalibration):
         # Store values
         self._hu_to_mass_attenuation_slope = linreg[0]
         self._hu_to_mass_attenuation_intercept = linreg[1]
-        print("HU/mass attenuation relationship reached")
 
     def _determine_hu_to_density(self):
         """Compute HU to density relationship"""
         # Get HU
-        HU = np.array([
+        HU = np.concatenate(self._subset([
             self.adipose_hu,
             self.air_hu,
             self.blood_hu,
             self.bone_hu,
             self.muscle_hu
-        ])
-
-        HU = np.concatenate(HU)
+        ]))
     
         # Convert to densities
         def _convert_value(hu_values, attenuation):
@@ -346,7 +317,9 @@ class InternalCalibration(StandardCalibration):
         density_blood = _convert_value(self.blood_hu, self.blood_mass_attenuation)
         density_bone = _convert_value(self.bone_hu, self.bone_mass_attenuation)
         density_muscle = _convert_value(self.muscle_hu, self.muscle_mass_attenuation)
-        densities_total = density_adipose + density_air + density_blood + density_bone + density_muscle
+        den = [density_adipose, density_air, density_blood, density_bone, density_muscle]
+
+        densities_total = np.concatenate(self._subset(den))
 
         # Perform linear regression
         linreg = stats.linregress(HU, densities_total)
