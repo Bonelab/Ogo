@@ -24,8 +24,7 @@ import SimpleITK as sitk
 from scipy import stats
 from datetime import date
 from collections import OrderedDict
-from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
-from scipy import stats
+
 
 
 import ogo.dat.MassAttenuationTables as mat
@@ -439,8 +438,13 @@ def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib
                 blood_hu,
                 bone_hu,
                 muscle_hu,
-                label_list=labelList
-            )
+                adipose_std_hu, 
+                air_std_hu,
+                blood_std_hu, 
+                bone_std_hu,
+                muscle_std_hu, 
+                label_list=labelList)
+            
             print()
             calib.fit()
             

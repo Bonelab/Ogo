@@ -15,6 +15,9 @@ import scipy.interpolate as interp
 from scipy import stats
 from collections import OrderedDict
 import copy
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+from scipy import stats
+import statsmodels.api as sm
 
 
 class InternalCalibration(StandardCalibration):
@@ -36,7 +39,8 @@ class InternalCalibration(StandardCalibration):
     """  # noqa: W605, E501
 
     def __init__(self,
-                 adipose_hu=0, air_hu=0, blood_hu=0, bone_hu=0, muscle_hu=0, label_list=(91, 92, 93, 94, 95)):
+                 adipose_hu=0, air_hu=0, blood_hu=0, bone_hu=0, muscle_hu=0, adipose_std_hu=0, 
+                 air_std_hu=0, blood_std_hu=0, bone_std_hu=0, muscle_std_hu=0, label_list=(91, 92, 93, 94, 95), ):
         super(InternalCalibration, self).__init__()
 
         # User input values
@@ -45,6 +49,12 @@ class InternalCalibration(StandardCalibration):
         self._blood_hu = blood_hu
         self._bone_hu = bone_hu
         self._muscle_hu = muscle_hu
+
+        self.adipose_std_hu = adipose_std_hu
+        self.air_std_hu = air_std_hu 
+        self.blood_std_hu = blood_std_hu
+        self.bone_std_hu = bone_std_hu
+        self.muscle_std_hu = muscle_std_hu
 
         self._label_list = list(label_list)
 
@@ -190,14 +200,14 @@ class InternalCalibration(StandardCalibration):
 
         def _get_mass_attenuation_at_index(idx):
             """Return the mass attenuation array at a given index"""
-            return [self._subset([
+            return self._subset([
                 self._interpolate_tables['adipose_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['air_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['blood_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['bone_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['muscle_table'].loc[idx, 'Mass Attenuation [cm2/g]']  # noqa: E501
             ])
-            ]
+            
 
         # Measured HU values
         HU = self._subset([
@@ -207,7 +217,22 @@ class InternalCalibration(StandardCalibration):
             self.bone_hu,
             self.muscle_hu
         ])
-
+        var = self._subset([
+            self.adipose_std_hu, 
+            self.air_std_hu, 
+            self.blood_std_hu, 
+            self.bone_std_hu, 
+            self.muscle_std_hu
+        ])
+        def _get_variance_weight_array(stds):
+            weights = []
+            for i in range(len(stds)):
+                variance = 1 / stds[i] ** 2
+                weights.append(variance)
+            return weights
+            
+        weights = _get_variance_weight_array(var)
+        
         n = len(self._interpolate_tables['adipose_table'])
         max_index = -1
         max_r2 = -np.Inf
@@ -215,10 +240,12 @@ class InternalCalibration(StandardCalibration):
         for i in np.arange(1, n, 1):
             # Get the values at this energy level
             attenuation = _get_mass_attenuation_at_index(i)
-
+            
             # Least squares fit
-            EE_lr = stats.linregress(HU, attenuation)
-            r_squared = EE_lr[2] ** 2
+            X = sm.add_constant(HU)
+            wls_model = sm.WLS(attenuation, X, weights=weights)
+            wls_results = wls_model.fit()
+            r_squared = wls_results.rsquared
 
             # Take best fit
             if r_squared > max_r2:
