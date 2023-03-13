@@ -27,6 +27,15 @@ def getLabels(image):
     
     return labels
     
+def resolve_key_from_value(label_name):
+    #labels = [v['LABEL'] for k, v in lb.labels_dict.items() if ((v['TOTSEG']+'.nii.gz') in filename)]
+    labels = [v['LABEL'] for k, v in lb.labels_dict.items()]
+    if labels:
+        keys = [k for k, v in lb.labels_dict.items() if v['LABEL'] == label_name]
+        if keys:
+            return int(keys[0])
+    return None
+
 def boundingbox(image):
     
     dim = image.GetDimensions()
@@ -57,7 +66,7 @@ def boundingbox(image):
     
     return rmin, rmax, cmin, cmax, zmin, zmax
 
-def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isosurface, elevation, azimuth, flip, overwrite=False):
+def Visualize(input_filename, outfile, offscreen, select, collection, gaussian, radius, isosurface, elevation, azimuth, flip, overwrite=False):
     
     # Check if output exists and should overwrite
     if os.path.isfile(outfile) and not overwrite:
@@ -102,6 +111,28 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
         desc = lb.labels_dict[label]['LABEL']
         ogo.message('{:5d}: ({:3d},{:3d},{:3d}) – {}'.format(label,rgb[0],rgb[1],rgb[2],desc))
     
+    # Specify a selection of labels (helpful for TotalSegmentator results)
+    if collection:
+        if collection == 'all':
+            valid_list = [v['LABEL'] for k, v in lb.labels_dict.items()]
+        elif collection == 'ossai':
+            valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1']
+        elif collection == 'skeleton':
+            valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1', 'T12', 'T11', 'T10', 'T9', 'T8', 'Humerus Right', 'Humerus Left', 'T7', 'T6', 'T5', 'T4', 'T3', 'T2', 'T1', 'C7', 'C6', 'C5', 'C4', 'C3', 'C2', 'C1', 'Rib Left 1', 'Rib Left 2', 'Rib Left 3', 'Rib Left 4', 'Rib Left 5', 'Rib Left 6', 'Rib Left 7', 'Rib Left 8', 'Rib Left 9', 'Rib Left 10', 'Rib Left 11', 'Rib Left 12', 'Rib Right 1', 'Rib Right 2', 'Rib Right 3', 'Rib Right 4', 'Rib Right 5', 'Rib Right 6', 'Rib Right 7', 'Rib Right 8', 'Rib Right 9', 'Rib Right 10', 'Rib Right 11', 'Rib Right 12', 'Scapula Left', 'Scapula Right', 'Clavicula Left', 'Clavicula Right']
+        elif collection == 'cardio':
+            valid_list = ['Heart Myocardium', 'Heart Atrium Left', 'Heart Ventricle Left', 'Heart Atrium Right', 'Heart Ventricle Right', 'Aorta', 'Inferior Vena Cava', 'Portal Vein and Splenic Vein', 'Pulmonary Artery', 'Iliac Artery Left', 'Iliac Artery Right', 'Iliac Vena Left', 'Iliac Vena Right']
+        elif collection == 'organs':
+            valid_list = ['Face', 'Brain', 'Trachea', 'Lung Upper Lobe Left', 'Lung Lower Lobe Left', 'Lung Upper Lobe Right', 'Lung Middle Lobe Right', 'Lung Lower Lobe Right', 'Adrenal Gland Right', 'Adrenal Gland Left', 'Spleen', 'Kidney Right', 'Kidney Left', 'Gallbladder', 'Liver', 'Pancreas']
+        elif collection == 'gastro':
+            valid_list = ['Esophagus', 'Stomach', 'Duodenum', 'Small Bowel', 'Colon', 'Urinary Bladder']
+        elif collection == 'muscle':
+            valid_list = ['Autochthon Left', 'Autochthon Right', 'Iliopsoas Left', 'Iliopsoas right', 'Gluteus Maximus Left', 'Gluteus Maximus Right', 'Gluteus Medius Left', 'Gluteus Medius Right', 'Gluteus Minimus Left', 'Gluteus Minimus Right']
+        else:
+            os.sys.exit('[ERROR] Unknown collection defined: {}'.format(collection))
+        
+        for item in valid_list:
+            select.append(resolve_key_from_value(item))
+    
     # Reduce list to user selected labels
     if len(select)>0:
         tmp = []
@@ -109,7 +140,7 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
             if label in labels:
                 tmp.append(label)
             else:
-                ogo.message('[WARNING]: Selected label {} does not exist.'.format(label))
+                ogo.message('[WARNING]: Selected label {} [{}] not in input image.'.format(lb.labels_dict[label]['LABEL'],label))
         labels = tmp
     
     # Create lists for VTK classes
@@ -218,6 +249,7 @@ USAGE:
 ogoVisualize bone.nii.gz
 ogoVisualize bone.nii.gz --outfile image.tif
 ogoVisualize bone.nii.gz --outfile image.tif --overwrite
+ogoVisualize bone.nii.gz --outfile image.tif --collection skeleton --overwrite
 '''
 
     # Setup argument parsing
@@ -228,7 +260,9 @@ ogoVisualize bone.nii.gz --outfile image.tif --overwrite
         epilog=epilog
     )
     parser.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
-    parser.add_argument('--select', type=int, nargs='*', default=[], metavar='#',help='Select specific labels (e.g. 1 2 3; default: all)')
+    parser.add_argument('--select', type=int, nargs='*', default=[], metavar='#',help='Specify labels (e.g. 1 2 3; default: all)')
+    parser.add_argument('--collection', default=None, choices=['all', 'ossai', 'skeleton', 'cardio', 'organs', 'muscle', 'gastro'],
+                                                           help='Specify collection for visualization (default: %(default)s)')
     parser.add_argument('--gaussian', type=float, default=0.7, metavar='GAUSS',help='Gaussian filter (default: %(default)s)')
     parser.add_argument('--radius', type=int, default=2, metavar='RAD',help='Radius of Gaussian filter (default: %(default)s)')
     parser.add_argument('--isosurface', type=int, default=100, metavar='ISOSURF',help='Isosurface extraction (default: %(default)s)')
