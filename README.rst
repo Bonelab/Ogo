@@ -152,6 +152,8 @@ with the :code:`ogo` environment activated.
      - can validate accuracy of labels from machine learning and has basic repair functions
    * - :code:`ogoVisualize`
      - allow either offscreen or interactive visualization of labels
+   * - :code:`ogoMorphologicalOperation`
+     - performs dilate, erode, opening, closing on labels
    * - :code:`ogodcm2nii`
      - convert DICOM files to NIfTI images
 
