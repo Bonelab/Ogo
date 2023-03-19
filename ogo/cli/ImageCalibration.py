@@ -995,6 +995,8 @@ ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
                             image_qct.nii.gz --phantom 'QRM-BDC 3-rod' 
 ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz \\
                             image_qct.nii.gz --async_image asynch_image.nii.gz 
+ogoImageCalibration phantom image.nii.gz rod_mask.nii.gz image_qct_name.nii.gz --phantom 'Mindways Model 3 CT'  \\
+                            --calib_file_name filename.txt --MonteCarlo 10 --quartiles 50,75
 ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
                             image_qct.nii.gz --useL4
 ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
