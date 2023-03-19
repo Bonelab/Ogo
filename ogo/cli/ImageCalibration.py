@@ -58,7 +58,18 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
     ogo.message('Reading input CT image to be calibrated:')
     ogo.message('      \"{}\"'.format(input_image))
-    ct = sitk.ReadImage(input_image)
+    # read image in with VTK
+    niireader = vtk.vtkNIFTIImageReader()
+    niireader.SetFileName(input_image)
+    niireader.Update()
+    nii = niireader.GetOutput()
+
+    # convert VTK image data to NumPy
+    nii_np = vtk_to_numpy(nii.GetPointData().GetScalars()).reshape(nii.GetDimensions(),order='F')
+
+    # convert to SimpleITK 
+    ct = sitk.GetImageFromArray(nii_np)
+    ct.SetSpacing(nii.GetSpacing())
 
     # Read input mask
     if not os.path.isfile(input_mask):
@@ -69,7 +80,20 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
     ogo.message('Reading input mask used for calibration:')
     ogo.message('      \"{}\"'.format(input_mask))
-    rods = sitk.ReadImage(input_mask)
+
+    # read in with VTK 
+    maskreader = vtk.vtkNIFTIImageReader()
+    maskreader.SetFileName(input_mask)
+    maskreader.Update()
+    mask_vtk = maskreader.GetOutput()
+
+    # convert VTK image data to NumPy
+    mask_np = vtk_to_numpy(mask_vtk.GetPointData().GetScalars()).reshape(mask_vtk.GetDimensions(),order='F')
+
+    # convert to SimpleITK 
+    rods = sitk.GetImageFromArray(mask_np)
+    rods.SetSpacing(mask_vtk.GetSpacing())
+    
 
     # Read asynchronous input image, if available
     if (async_image):
@@ -82,6 +106,19 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
         ogo.message('Reading asynchronous image of phantom...')
         ogo.message('      \"{}\"'.format(async_image))
         async_ct = sitk.ReadImage(async_image)
+
+        # read in with VTK 
+        async_reader = vtk.vtkNIFTIImageReader()
+        async_reader.SetFileName(input_mask)
+        async_reader.Update()
+        async_vtk = async_reader.GetOutput()
+
+        # convert VTK image data to NumPy
+        async_np = vtk_to_numpy(async_vtk.GetPointData().GetScalars()).reshape(async_vtk.GetDimensions(),order='F')
+
+        # convert to SimpleITK 
+        async_ct = sitk.GetImageFromArray(async_np)
+        async_ct.SetSpacing(async_vtk.GetSpacing())
 
         ogo.message('NOTE: Asynchronous calibration selected.')
         ogo.message('      Using mask file against asynchronous file:')
@@ -286,7 +323,20 @@ def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib
 
     ogo.message('Reading input CT image to be calibrated:')
     ogo.message('      \"{}\"'.format(input_image))
-    ct = sitk.ReadImage(input_image)
+    
+    # read image in with VTK
+    niireader = vtk.vtkNIFTIImageReader()
+    niireader.SetFileName(input_image)
+    niireader.Update()
+    nii = niireader.GetOutput()
+
+    # convert VTK image data to NumPy
+    nii_np = vtk_to_numpy(nii.GetPointData().GetScalars()).reshape(nii.GetDimensions(),order='F')
+
+    # convert to SimpleITK 
+    ct = sitk.GetImageFromArray(nii_np)
+    ct.SetSpacing(nii.GetSpacing())
+    
 
     # Read input mask
     if not os.path.isfile(input_mask):
@@ -297,7 +347,20 @@ def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib
 
     ogo.message('Reading input mask used for calibration:')
     ogo.message('      \"{}\"'.format(input_mask))
-    mask = sitk.ReadImage(input_mask)
+
+    # read in with VTK 
+    maskreader = vtk.vtkNIFTIImageReader()
+    maskreader.SetFileName(input_mask)
+    maskreader.Update()
+    mask_vtk = maskreader.GetOutput()
+
+    # convert VTK image data to NumPy
+    mask_np = vtk_to_numpy(mask_vtk.GetPointData().GetScalars()).reshape(mask_vtk.GetDimensions(),order='F')
+
+    # convert to SimpleITK 
+    mask = sitk.GetImageFromArray(mask_np)
+    mask.SetSpacing(mask_vtk.GetSpacing())
+    
 
     # Dictionary of valid labels for internal calibration.
     labels = OrderedDict()
