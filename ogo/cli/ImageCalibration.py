@@ -659,7 +659,6 @@ def internal(input_image, input_mask, output_image, MonteCarlo, quartiles, calib
                 muscle_hu,
                 label_list=labelList
             )
-            print()
             calib.fit()
             
             #save generated values into an array
