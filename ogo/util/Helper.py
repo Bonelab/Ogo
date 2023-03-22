@@ -37,7 +37,7 @@ start_time = time.time()
 def get_phantom(phantom_type):
     calibration_dict = OrderedDict()
 
-    if phantom_type in 'Mindways Model 3 CT':
+    if phantom_type == 'Mindways Model 3 CT':
         calibration_dict['name'] = 'Mindways Model 3 CT'
         calibration_dict['units'] = 'mg/cc'
         calibration_dict['type'] = 'k2hpo4'
@@ -48,7 +48,7 @@ def get_phantom(phantom_type):
         calibration_dict['densities'] = [-51.83, -53.40, 58.88, 157.05, 375.83]
         calibration_dict['h2o_densities'] = [1012.25, 1056.95, 1103.57, 1119.52, 923.20]
 
-    elif phantom_type in 'Mindways Model 3 QA':
+    elif phantom_type == 'Mindways Model 3 QA':
         calibration_dict['name'] = 'Mindways Model 3 QA'
         calibration_dict['units'] = 'mg/cc'
         calibration_dict['type'] = 'k2hpo4'
@@ -59,7 +59,7 @@ def get_phantom(phantom_type):
         calibration_dict['densities'] = [58.88, -53.40, 157.05, 157.13]
         calibration_dict['h2o_densities'] = [1103.57, 1056.95, 1119.52, 1120.10]
 
-    elif phantom_type in 'QRM-BDC 3-rod':
+    elif phantom_type == 'QRM-BDC 3-rod':
         calibration_dict['name'] = 'QRM-BDC 3-rod'
         calibration_dict['units'] = 'mg/cc'
         calibration_dict['type'] = 'CHA'
@@ -70,7 +70,7 @@ def get_phantom(phantom_type):
         calibration_dict['densities'] = [0, 400, 800]
         calibration_dict['h2o_densities'] = [None]
 
-    elif phantom_type in 'QRM-BDC 6-rod':
+    elif phantom_type == 'QRM-BDC 6-rod':
         calibration_dict['name'] = 'QRM-BDC 6-rod'
         calibration_dict['units'] = 'mg/cc'
         calibration_dict['type'] = 'CHA'
@@ -81,7 +81,7 @@ def get_phantom(phantom_type):
         calibration_dict['densities'] = [0, 100, 200, 400, 600, 800]
         calibration_dict['h2o_densities'] = [None]
 
-    elif phantom_type in 'Image Analysis QCT-3D Plus':
+    elif phantom_type == 'Image Analysis QCT-3D Plus':
         calibration_dict['name'] = 'Image Analysis QCT-3D Plus'
         calibration_dict['units'] = 'mg/cc'
         calibration_dict['type'] = 'CHA'
@@ -92,7 +92,7 @@ def get_phantom(phantom_type):
         calibration_dict['densities'] = [8.0, 97.3, 189.8]
         calibration_dict['h2o_densities'] = [None]
 
-    elif phantom_type in 'B-MAS 200':
+    elif phantom_type == 'B-MAS 200':
         calibration_dict['name'] = 'B-MAS 200'
         calibration_dict['units'] = 'mg/cc'
         calibration_dict['type'] = 'CHA'
@@ -1522,6 +1522,11 @@ def _quartile_predict(hu, voxel_volume, hu_to_mass_attenuation_slope, hu_to_mass
         k2hpo4 = k2hpo4 / voxel_volume * 1000.0
 
         return k2hpo4
+
+def quartile_phantom_predict(hu, slope, intercept):
+        """Standard linear equation prediction"""
+        density = hu * slope + intercept
+        return density
     
 def add_to_filename(filepath, suffix):
     '''Will add a suffix to the end of a .nii.gz file or .nii file 
@@ -1535,14 +1540,6 @@ def add_to_filename(filepath, suffix):
     new_file_path = os.path.join(directory, filename)
 
     return new_file_path
-
-def round_sigfigs(num, sig_figs):
-    if num == 0:
-        return 0
-    return round(num, -int(math.floor(math.log10(abs(num)))) + sig_figs - 1)
-
-def round_list_sigfigs(lst, sig_figs):
-    return [round_sigfigs(num, sig_figs) for num in lst]
 
 
 # def writeN88Model(model, fileName, pathname):
