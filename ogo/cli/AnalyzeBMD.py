@@ -37,8 +37,6 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
                 print('Not overwriting. Exiting...')
                 os.sys.exit()
 
-    
-
     # Set up to read image and mask inputs
     if not os.path.isfile(image_filename):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(image_filename))
@@ -110,7 +108,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
     # Loop through each of the valid labels and calculate BMD
     for idx, lab in enumerate(labels):
 
-        bone_mask = ogo.maskThreshold(reader_mask.GetOutput(), lab) #Applies the threshold value to the input image.
+        bone_mask = ogo.maskThreshold(reader_mask.GetOutput(), lab)
         bone_VOI = ogo.applyMask(reader_image.GetOutput(), bone_mask)
         bmd_outcomes = ogo.bmd_metrics(bone_VOI)
 
@@ -158,16 +156,12 @@ This script computes BMD by applying a mask to the calibrated input image.
 Multiple labels representing different bones in the mask image can be assessed
 at once. However, if only a subset of labels are needed to be analysed they
 should be defined (see example calls).
-
 If no output text file is defined then results are output to the screen.
-
 WARNING: If your input image is not calibrated then the results here will be 
 incorrect. There is no calibration done as part of this application.
-
 '''
     epilog = '''
 Example calls:
-
 ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz
 ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz >> results.txt
 ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz --output_filename output.txt

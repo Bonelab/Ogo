@@ -176,6 +176,8 @@ class InternalCalibration(StandardCalibration):
                 'Mass Attenuation [cm2/g]': interp_table
             })
 
+    # do monte carlo simulation here and keep energy, and mass attenuations of k2hpo4 and tri to mean a mean and standard dev of the mass attenutations to get an error 
+    # 
     def _determine_scan_effective_energy(self):
         """Determine scan effective energy"""
 
@@ -263,11 +265,14 @@ class InternalCalibration(StandardCalibration):
         ])
 
         # Perform linear regression
+        # turn this to a wegithed linear regression and then get the standard error from it 
         linreg = stats.linregress(HU, attenuation)
 
         # Store values
         self._hu_to_mass_attenuation_slope = linreg[0]
         self._hu_to_mass_attenuation_intercept = linreg[1]
+        # get slope standard error and save it 
+        # get intercept standard error and save it 
 
     def _determine_hu_to_density(self):
         """Compute HU to density relationship"""
@@ -297,11 +302,14 @@ class InternalCalibration(StandardCalibration):
         ])
 
         # Perform linear regression
+        # turn this to a weighted linear regression and get the standard errors 
         linreg = stats.linregress(HU, densities)
 
         # Store values
         self._hu_to_density_slope = linreg[0]
         self._hu_to_density_intercept = linreg[1]
+        # get the standard error for the slope 
+        # get the standard error for the intercept 
 
     @property
     def adipose_hu(self):
