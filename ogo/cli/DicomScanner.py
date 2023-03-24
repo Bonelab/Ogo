@@ -147,6 +147,11 @@ def DicomScanner(input_dir, output_csv, deliminator, selection, overwrite):
         
     meta_dict =  get_dicom_tags()
     
+    if selection:
+        print('true')
+    else:
+        print('false')
+    exit()
     # Write header
     write.header = ['Directory', 'Series', 'Name', 'Number of Images']
     for key, value in meta_dict.items():
