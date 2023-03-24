@@ -159,6 +159,8 @@ def DicomScanner(input_dir, output_csv, deliminator, selection, overwrite):
     # Use a FIFO queue to process all files
     # We assume no one has made loops using symlinks...
     
+    ogo.message('Starting with directory\n\n     {}\n'.format(input_dir))
+    
     while not dir_queue.empty():
         # Pop a directory
         this_dir = dir_queue.get()
@@ -172,17 +174,14 @@ def DicomScanner(input_dir, output_csv, deliminator, selection, overwrite):
             full_path = os.path.abspath(os.path.join(this_dir, name))
             if os.path.isdir(full_path):
                 # Push onto queue
-                ogo.message('Adding directory to queue\n\n     {}\n'.format(full_path))
+                ogo.message('Adding directory to queue\n\n     ../{}\n'.format(full_path.replace(input_dir,'')))
                 dir_queue.put(full_path) # A list of *all* sub-directories in input_directory (input1)
                 continue
-                
-            #n_dir = dir_queue.qsize()
-            #ogo.message('Number of directories on queue: {}'.format(n_dir))
-    
+                            
             # Work with a DICOM image (all directories have been identified; working on files)
             if not dcm_processed and os.path.isfile(full_path):
                 
-                ogo.message('Processing\n\n     {}\n'.format(full_path))
+                ogo.message('Processing\n\n     ../{}\n'.format(full_path.replace(input_dir,'')))
             
                 # Catch cases where file is not DICOM (e.g. desktop.ini)
                 try:
@@ -199,7 +198,7 @@ def DicomScanner(input_dir, output_csv, deliminator, selection, overwrite):
                 for idx,this_series in enumerate(series_ids):
                     
                     ogo.message('')
-                    ogo.message('Working on series {} of {}'.format(idx,n_series_ids))
+                    ogo.message('Working on series {} of {}'.format(idx+1,n_series_ids))
                     
                     dicom_names = reader.GetGDCMSeriesFileNames(this_dir,this_series)
                     n_dicom_names = len(dicom_names)
@@ -225,7 +224,7 @@ def DicomScanner(input_dir, output_csv, deliminator, selection, overwrite):
                     try:
                         reader.Execute()
                     except:
-                        print('[ERROR] Problem reading: {}'.format(full_path))
+                        ogo.message('[ERROR] Problem reading: {}'.format(full_path))
                         continue
 
                     #this_name = re.match(r'.*\/(RETRO_\d+)\/.*', this_dir)[1]
@@ -240,7 +239,7 @@ def DicomScanner(input_dir, output_csv, deliminator, selection, overwrite):
                             for k in all_data_keys:
                                 print(k,reader.GetMetaData(5,k))
                         except:
-                            print(' ** NO META KEYS for {}, series {}'.format(this_name,this_series))
+                            ogo.message('[WARNING] NO META KEYS for {}, series {}'.format(this_name,this_series))
                     
                     # Parse meta data
                     for key, value in meta_dict.items():
@@ -269,8 +268,6 @@ on fixed criteria from the meta data.
 Example call: 
      
 ogoDicomScanner ./root_dicom_data_dir --output_csv ./processed_headers.csv
-ogoDicomScanner /Users/skboyd/Library/CloudStorage/OneDrive-UniversityofCalgary/ML/data/CTDXAICI/dicom/2023-03-06/data/controls
-ogoDicomScanner /Users/skboyd/Library/CloudStorage/OneDrive-UniversityofCalgary/ML/data/CTDXAICI/dicom/2023-03-06/data/controls/CTDXAICI_0030
 
 '''
 
