@@ -245,8 +245,8 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
         txt_file.write('  {:>27s} {:12.6f}\n'.format('Slope:', calibrator.slope))
         txt_file.write('  {:>27s} {:12.6f}\n'.format('Intercept:', calibrator.intercept))
         txt_file.write('  {:>27s} {:12.6f}\n'.format('R^2:', calibrator.r_value ** 2))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('Slope Std Err', calibrator.std_err))
-        txt_file.write('  {:>27s} {:12.6f}\n'.format('Intercept Std Err', calibrator.std_err_intercept))
+        txt_file.write('  {:>27s} {:24.16f}\n'.format('Slope Std Err', calibrator.std_err))
+        txt_file.write('  {:>27s} {:24.16f}\n'.format('Intercept Std Err', calibrator.std_err_intercept))
         
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
         txt_file.write('  {:>27s}\n'.format('Density [HU]:'))
@@ -272,11 +272,6 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
         txt_file.write('\n')
-        txt_file.write('Unformatted calibration parameters:\n')
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        for label, value in calibrator.get_dict().items():
-            txt_file.write('  {:>27s} {}\n'.format(label, value))
-        txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
 
         txt_file.close()
 
