@@ -13,8 +13,14 @@ import pandas as pd
 import numpy as np
 import scipy.interpolate as interp
 from scipy import stats
+from scipy.optimize import minimize_scalar
 from collections import OrderedDict
+import SimpleITK as sitk 
+import math 
 import copy
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
 
 
 class InternalCalibration(StandardCalibration):
@@ -31,15 +37,24 @@ class InternalCalibration(StandardCalibration):
     """  # noqa: W605, E501
 
     def __init__(self,
-                 adipose_hu=0, air_hu=0, blood_hu=0, bone_hu=0, muscle_hu=0, label_list=(91, 92, 93, 94, 95)):
+                 iterations=0, adipose_hu=0, air_hu=0, blood_hu=0, bone_hu=0, muscle_hu=0, adipose_std=0, 
+                 air_std=0, blood_std=0, bone_std=0, muscle_std=0, label_list=(91, 92, 93, 94, 95)):
         super(InternalCalibration, self).__init__()
 
         # User input values
+        self.iterations = iterations
+
         self._adipose_hu = adipose_hu
         self._air_hu = air_hu
         self._blood_hu = blood_hu
         self._bone_hu = bone_hu
         self._muscle_hu = muscle_hu
+
+        self.adipose_std = adipose_std
+        self.air_std = air_std
+        self.blood_std = blood_std
+        self.bone_std = bone_std
+        self.muscle_std = muscle_std
 
         self._label_list = list(label_list)
 
@@ -60,9 +75,18 @@ class InternalCalibration(StandardCalibration):
 
         self._hu_to_mass_attenuation_slope = 0
         self._hu_to_mass_attenuation_intercept = 0
+        self._hu_to_mass_attenuation_slope_error = 0
+        self._hu_to_mass_attenuation_intercept_error = 0
 
         self._hu_to_density_slope = 0
         self._hu_to_density_intercept = 0
+        self._hu_to_density_slope_error = 0
+        self._hu_to_density_intercept_error = 0
+
+        self.k2hpo4_stdev = 0
+        self.triglyceride_stddev = 0
+        self.k2hpo4_standard_error = 0
+        self.triglyceride_standard_error = 0
 
         self._voxel_volume = 0
 
@@ -80,6 +104,21 @@ class InternalCalibration(StandardCalibration):
             return self._predict(hu, voxel_volume)
         else:
             raise RuntimeError('Must fit before predict can be run.')
+        
+    def _montecarlo_predict(self, hu, voxel_volume):
+            """Internal calibration predict method
+            It is recommended to cast hu to type float (sitk.sitkFloat64) before
+            passing to this function. Operators (*, +, /) are used without
+            reference to type to allow this function to work with SimpleITK, numpy,
+            and base python. Therefore, no explicite checks for type are performed
+            internally.
+            :param hu: Input Hounsfield unit
+            :param voxel_volume: Voxel volume in  mm\ :sup:`3`
+            """  # noqa: W605
+            if self._is_fit:
+                return self.montecarlo_predict(hu, voxel_volume)
+            else:
+                raise RuntimeError('Must fit before predict can be run.')
 
     def _predict(self, hu, voxel_volume):
         """Internal calibration _predict method"""
@@ -113,6 +152,82 @@ class InternalCalibration(StandardCalibration):
         k2hpo4 = k2hpo4 / voxel_volume * 1000.0
 
         return k2hpo4
+    
+    def montecarlo_predict(self, hu, voxel_volume):
+        """Internal calibration _predict method"""
+
+        # Convert voxel volume to cm3
+        self._voxel_volume = copy.deepcopy(voxel_volume)
+        voxel_volume = voxel_volume / 1000.0
+
+        # Convert HU to mass attenuation coefficient
+        u_p = (
+          hu * self.hu_to_mass_attenuation_slope
+          + self.hu_to_mass_attenuation_intercept
+        )
+
+        # Convert HU to Archimedian density
+        arch = (
+            hu * self.hu_to_density_slope
+            + self.hu_to_density_intercept
+        )
+
+        # Conver Archimedian density to total mass
+        mass = arch * voxel_volume
+
+        # Create two component model
+        k2hpo4 = mass * (
+                (u_p - self.triglyceride_mass_attenuation) /
+                (self.K2HPO4_mass_attenuation - self.triglyceride_mass_attenuation)
+        )
+
+        # Convert g to mg
+        k2hpo4 = k2hpo4 / voxel_volume * 1000.0
+        
+        error_hu_mass_attenuation = sitk.Sqrt(
+            sitk.Square((hu * self._hu_to_mass_attenuation_slope_error))
+            + (self._hu_to_mass_attenuation_intercept_error) ** 2
+        )
+
+        error_hu_density = sitk.Sqrt(
+            sitk.Square((hu * self._hu_to_density_slope_error))
+            + (self._hu_to_density_intercept_error) ** 2
+        )
+
+        mu_k_minus_mu_t = self.K2HPO4_mass_attenuation - self.triglyceride_mass_attenuation
+        sq_mu_k_minus_mu_t = mu_k_minus_mu_t ** 2
+        error_mass = sitk.Multiply( error_hu_density, voxel_volume)
+
+        #error propagation 
+        uncertainty_k2hpo4 = sitk.Sqrt(
+                sitk.Square(sitk.Multiply(sitk.Divide(u_p - self.triglyceride_mass_attenuation, mu_k_minus_mu_t), error_mass))
+                + sitk.Square(sitk.Multiply(sitk.Divide(mass, mu_k_minus_mu_t), error_hu_mass_attenuation))
+                + 
+                sitk.Square(
+                    sitk.Multiply(
+                        sitk.Divide(
+                                sitk.Multiply(sitk.Subtract(self.triglyceride_mass_attenuation, u_p), self.K2HPO4_mass_attenuation),
+                                sq_mu_k_minus_mu_t
+                            ),
+                        self.k2hpo4_standard_error
+                    )
+                )
+                + 
+                sitk.Square(
+                    sitk.Multiply(
+                        sitk.Divide(
+                            sitk.Multiply(mass, sitk.Subtract(u_p, self.K2HPO4_mass_attenuation)),
+                            sq_mu_k_minus_mu_t
+                        ),
+                        self.triglyceride_standard_error
+                    )
+                )
+                )
+        
+        uncertainty_k2hpo4 = uncertainty_k2hpo4 / voxel_volume * 1000.0
+
+
+        return (k2hpo4, uncertainty_k2hpo4)
 
 
     def fit(self):
@@ -132,6 +247,24 @@ class InternalCalibration(StandardCalibration):
         self._determine_scan_effective_energy()
         self._determine_hu_to_mass_attenuation()
         self._determine_hu_to_density()
+
+    def montecarlofit(self):
+        """Override Calibration fit method.
+        Internal calibration requires specific sampled values"""
+        self.montecarlo_fit()
+        self._is_fit = True
+
+    def montecarlo_fit(self):
+        """Internal calibration fit
+        Performs a grid search on all energies to find an energy which
+        maximizes the coefficient of determination between sampled
+        Hounsfield Units and mass attenuation. The best correlated energy
+        is used as the scan effective energy."""
+
+        self._interpolate_mass_attenuation()
+        self.montecarlo_determine_scan_effective_energy()
+        self.montecarlo_determine_hu_to_mass_attenuation()
+        self.montecarlo_determine_hu_to_density()
 
     def _subset(self, all_samples):
         """Returns only the samples will be employed in linear regressions.
@@ -189,7 +322,7 @@ class InternalCalibration(StandardCalibration):
                 self._interpolate_tables['muscle_table'].loc[idx, 'Mass Attenuation [cm2/g]']  # noqa: E501
             ])
             ]
-
+        
         # Measured HU values
         HU = self._subset([
             self.adipose_hu,
@@ -203,7 +336,7 @@ class InternalCalibration(StandardCalibration):
         max_index = -1
         max_r2 = -np.Inf
 
-        for i in np.arange(1, n, 1):
+        for i in np.arange(100, n, 1):
             # Get the values at this energy level
             attenuation = _get_mass_attenuation_at_index(i)
 
@@ -243,6 +376,96 @@ class InternalCalibration(StandardCalibration):
         # Save memory
         del self._interpolate_tables
 
+    
+    def montecarlo_determine_scan_effective_energy(self):
+        """Determine scan effective energy"""
+
+        def _get_mass_attenuation_at_energy(energy):
+            """Return the mass attenuation array at a given index"""
+            return [self._subset([
+                self._interpolate_tables['adipose_table'].loc[energy, 'Mass Attenuation [cm2/g]'],  # noqa: E501
+                self._interpolate_tables['air_table'].loc[energy, 'Mass Attenuation [cm2/g]'],  # noqa: E501
+                self._interpolate_tables['blood_table'].loc[energy, 'Mass Attenuation [cm2/g]'],  # noqa: E501
+                self._interpolate_tables['bone_table'].loc[energy, 'Mass Attenuation [cm2/g]'],  # noqa: E501
+                self._interpolate_tables['muscle_table'].loc[energy, 'Mass Attenuation [cm2/g]']  # noqa: E501
+            ])
+            ]
+        
+        effective_energy_arr = []
+        k2hpo4 = []
+        triglyceride = []
+
+        n = len(self._interpolate_tables['adipose_table'])
+        max_index = -1
+        max_r2 = -np.Inf
+    
+        for k in tqdm(range(self.iterations)):
+            air_hu_rand = np.random.normal(self.air_hu, self.air_std)
+            adipose_hu_rand = np.random.normal(self.adipose_hu, self.adipose_std)
+            blood_hu_rand = np.random.normal(self.blood_hu, self.blood_std)
+            bone_hu_rand = np.random.normal(self.bone_hu, self.bone_std)
+            muscle_hu_rand = np.random.normal(self.muscle_hu, self.muscle_std)
+        
+        
+            # Measured HU values
+            HU = self._subset([
+                adipose_hu_rand,
+                air_hu_rand,
+                blood_hu_rand,
+                bone_hu_rand,
+                muscle_hu_rand
+            ])
+
+            for i in np.arange(100, n, 1):
+                # Get the values at this energy level
+                attenuation = _get_mass_attenuation_at_energy(i)
+
+                # Least squares fit
+                EE_lr = stats.linregress(HU, attenuation)
+                r_squared = EE_lr[2] ** 2
+
+                # Take best fit
+                if r_squared > max_r2:
+                    max_r2 = r_squared
+                    max_index = i
+
+            # Set values
+            self._effective_energy = self._interpolate_tables['adipose_table'].loc[max_index, 'Energy [keV]']  # noqa: E501
+            self._max_r2 = max_r2
+            effective_energy_arr.append(self._effective_energy)
+            
+
+            self._adipose_mass_attenuation = self._interpolate_tables['adipose_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+            self._air_mass_attenuation = self._interpolate_tables['air_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+            self._blood_mass_attenuation = self._interpolate_tables['blood_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+            self._bone_mass_attenuation = self._interpolate_tables['bone_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+            self._muscle_mass_attenuation = self._interpolate_tables['muscle_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+
+            self._K2HPO4_mass_attenuation = self._interpolate_tables['k2hpo4_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+            k2hpo4.append(self._K2HPO4_mass_attenuation)
+            self._CHA_mass_attenuation = self._interpolate_tables['cha_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+            self._triglyceride_mass_attenuation = self._interpolate_tables['triglyceride_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+            triglyceride.append(self._triglyceride_mass_attenuation)
+            self._water_mass_attenuation = self._interpolate_tables['water_table'].loc[
+                max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
+
+        k2hpo4_np = np.array(k2hpo4)
+        self._K2HPO4_mass_attenuation = np.mean(k2hpo4_np)
+        self.k2hpo4_stdev = np.std(k2hpo4_np)
+        self.k2hpo4_standard_error = self.k2hpo4_stdev / np.sqrt(self.iterations)
+        triglyceride_np = np.array(triglyceride)
+        self._triglyceride_mass_attenuation = np.mean(triglyceride_np)
+        self.triglyceride_stddev = np.std(triglyceride_np)
+        self.triglyceride_standard_error = self.triglyceride_stddev / np.sqrt(self.iterations)
+
     def _determine_hu_to_mass_attenuation(self):
         """Compute HU to mass attenuation relationship"""
         # Get values
@@ -268,6 +491,34 @@ class InternalCalibration(StandardCalibration):
         # Store values
         self._hu_to_mass_attenuation_slope = linreg[0]
         self._hu_to_mass_attenuation_intercept = linreg[1]
+
+    def montecarlo_determine_hu_to_mass_attenuation(self):
+        """Compute HU to mass attenuation relationship"""
+        # Get values
+        HU = self._subset([
+            self.adipose_hu,
+            self.air_hu,
+            self.blood_hu,
+            self.bone_hu,
+            self.muscle_hu
+        ])
+
+        attenuation = self._subset([
+            self.adipose_mass_attenuation,
+            self.air_mass_attenuation,
+            self.blood_mass_attenuation,
+            self.bone_mass_attenuation,
+            self.muscle_mass_attenuation
+        ])
+
+        # Perform linear regression
+        linreg = stats.linregress(HU, attenuation)
+
+        # Store values
+        self._hu_to_mass_attenuation_slope = linreg[0]
+        self._hu_to_mass_attenuation_intercept = linreg[1]
+        self._hu_to_mass_attenuation_slope_error = linreg.stderr
+        self._hu_to_mass_attenuation_intercept_error = linreg.intercept_stderr
 
     def _determine_hu_to_density(self):
         """Compute HU to density relationship"""
@@ -302,6 +553,42 @@ class InternalCalibration(StandardCalibration):
         # Store values
         self._hu_to_density_slope = linreg[0]
         self._hu_to_density_intercept = linreg[1]
+
+    def montecarlo_determine_hu_to_density(self):
+        """Compute HU to density relationship"""
+        # Get HU
+        HU = self._subset([
+            self.adipose_hu,
+            self.air_hu,
+            self.blood_hu,
+            self.bone_hu,
+            self.muscle_hu
+        ])
+
+        # Convert to densities
+        def _convert_value(hu, attenuation):
+            water_attenuation = self.water_mass_attenuation
+            water_density = 1.0
+
+            return (
+                           hu / 1000 * water_attenuation * water_density + water_attenuation * water_density) / attenuation  # noqa: E501
+
+        densities = self._subset([
+            _convert_value(self.adipose_hu, self.adipose_mass_attenuation),
+            _convert_value(self.air_hu, self.air_mass_attenuation),
+            _convert_value(self.blood_hu, self.blood_mass_attenuation),
+            _convert_value(self.bone_hu, self.bone_mass_attenuation),
+            _convert_value(self.muscle_hu, self.muscle_mass_attenuation)
+        ])
+
+        # Perform linear regression
+        linreg = stats.linregress(HU, densities)
+
+        # Store values
+        self._hu_to_density_slope = linreg[0]
+        self._hu_to_density_intercept = linreg[1]
+        self._hu_to_density_slope_error = linreg.stderr
+        self._hu_to_density_intercept_error = linreg.intercept_stderr
 
     @property
     def adipose_hu(self):
@@ -454,8 +741,12 @@ class InternalCalibration(StandardCalibration):
             ('Water u/p [cm2/g]', self.water_mass_attenuation),
 
             ('HU-u/p Slope', self.hu_to_mass_attenuation_slope),
+            ('HU -u/p Slope Standard Error', self._hu_to_mass_attenuation_slope_error)
             ('HU-u/p Y-Intercept', self.hu_to_mass_attenuation_intercept),
+            ('HU-u/p Y-Intercept Standard Error', self._hu_to_mass_attenuation_intercept_error)
 
             ('HU-Material Density Slope', self.hu_to_density_slope),
+            ('HU-Material Denstiy Slope Standard Error', self._hu_to_density_slope_error)
             ('HU-Material Density Y-Intercept', self.hu_to_density_intercept)
+            ('HU-Material Density Y-Intercept Standard Error', self._hu_to_density_intercept_error)
         ])

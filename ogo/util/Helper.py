@@ -295,6 +295,11 @@ def applyMask(imageData, maskData):
     mask.Update()
     return mask.GetOutput()
 
+def sitkapplyMask(imageData, maskData):
+    mask = sitk.Mask(imageData, maskData)
+    return mask
+
+
 
 
 def applyTestBase(mesh, material_table):
@@ -1127,6 +1132,8 @@ def maskThreshold(imageData, threshold_value):
     thres.SetOutputScalarTypeToUnsignedChar()
     thres.Update()
     return thres.GetOutput()
+
+
 
 def sitkmaskThreshold(input_image, threshold_value):
     """Applies the threshold value to the input image. Done using Simple ITK instead of VTK. 

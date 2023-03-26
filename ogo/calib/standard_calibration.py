@@ -11,6 +11,8 @@ from scipy import stats
 import copy
 from collections import OrderedDict
 from .calibration import Calibration
+import numpy as np
+import SimpleITK as sitk
 
 
 class StandardCalibration(Calibration):
@@ -37,6 +39,7 @@ class StandardCalibration(Calibration):
         self._r_value = 0.0
         self._p_value = 0.0
         self._std_err = 0.0
+        self._intercept_std_err = 0.0
 
         self._hu = None
         self._rho = None
@@ -65,13 +68,23 @@ class StandardCalibration(Calibration):
     def std_err(self):
         """Return the standard error around the line of best fit"""
         return self._std_err
+    
+    @property
+    def std_err_intercept(self):
+        """Return the standard error for the intercept of the line of best fit"""
+        return self._intercept_std_err
 
     def _fit(self, hounsfield_units, densities):
         """Standard least squares fit"""
-        (
-            self._slope, self._intercept, self._r_value,
-            self._p_value, self._std_err
-        ) = stats.linregress(hounsfield_units, densities)
+ 
+        results = stats.linregress(hounsfield_units, densities)
+        self._slope = results.slope
+        self._intercept = results.intercept
+        self._r_value = results.rvalue
+        self._p_value = results.pvalue
+        self._std_err = results.stderr
+        self._intercept_std_err = results.intercept_stderr
+
 
         # Save for printing
         self._hu = copy.deepcopy(hounsfield_units)
@@ -80,6 +93,13 @@ class StandardCalibration(Calibration):
     def _predict(self, hu):
         """Standard linear equation prediction"""
         return hu * self._slope + self._intercept
+    
+    def montecarlo_predict(self, hu):
+        """Standard linear equation prediction"""
+        density_uncertainty = sitk.Sqrt(
+            ((hu * self._std_err) ** 2) + (self._intercept_std_err ** 2)
+        )
+        return density_uncertainty
 
     def _predict_inverse(self, density):
         """Standard linear equation inverse prediction"""
@@ -94,6 +114,7 @@ class StandardCalibration(Calibration):
             ('R value',         self.r_value),
             ('P value',         self.p_value),
             ('Standard Error',  self.std_err),
+            ('Intercept Std Err', self.std_err_intercept)
 
             ('HU',          str(self._hu)),
             ('Densities',   str(self._rho))
