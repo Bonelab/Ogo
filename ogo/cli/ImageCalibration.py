@@ -206,7 +206,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
     #writing out calibrated image
     ogo.message('Writing calibrated output image to file:')
     ogo.message('      \"{}\"'.format(output_image))
-    sitk.WriteImage(density, output_image)
+    sitk.WriteImage(den, output_image)
     
     #creating new file name 
     error_suffix = f"_error.nii.gz"
