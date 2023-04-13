@@ -258,7 +258,7 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
         name, ext = os.path.splitext(input_filename)
         if 'gz' in ext:
             name = os.path.splitext(name)[0]  # Manages files with double extension
-        outfile = '{}_e{:03d}_a{:03d}.tif'.format(name,elevation,azimuth)
+        outfile = '{}_{:s}_{:.0f}_2d.tif'.format(name,image_orientation,slice_percent)
         ogo.message('[WARNING]: No filename specified for output image.')
         ogo.message('           Creating a filename based on input file.')
         ogo.message('           {}'.format(outfile))
@@ -467,7 +467,7 @@ ogoVisualize vis2d RETRO_00053.nii.gz
     parser_vis2d.add_argument('--window', type=float, default=0.0, metavar='WINDOW',help='Initial window. For <=0, computed from dynamic range (default: %(default)s)')
     parser_vis2d.add_argument('--level', type=float, default=0.0, metavar='LEVEL',help='Initial level. For <=0, computed from dynamic range (default: %(default)s)')
     parser_vis2d.add_argument('--nThreads', type=int, default=1, metavar='THREAD',help='Number of threads (default: %(default)s)')
-    parser_vis2d.add_argument('--image_orientation', default='sagittal', choices=['sagittal', 'coronal', 'axial'],
+    parser_vis2d.add_argument('--image_orientation', default='coronal', choices=['sagittal', 'coronal', 'axial'],
                                 help='Initiate a particular orientation (default: %(default)s)')
     parser_vis2d.add_argument('--slice_percent', default=float(50), type=float, help='Set percent slice through image (default: %(default)s)')
     parser_vis2d.add_argument('--outfile', default=None, metavar='FN', help='Output image file (*.tif) (default: %(default)s)')
