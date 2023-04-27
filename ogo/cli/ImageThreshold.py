@@ -141,7 +141,7 @@ ogoImageThreshold --upper_threshold 1500 input.nii.gz output.nii.gz
     parser.add_argument('--lower_threshold', type=int, default=-32768, metavar='VAL', help='Lower threshold (default: %(default)s)')
     parser.add_argument('--upper_threshold', type=int, default=32767, metavar='VAL', help='Upper threshold (default: %(default)s)')
     parser.add_argument('--inside_value', type=int, default=0, metavar='VAL', help='Inside value (default: %(default)s)')
-    parser.add_argument('--outside_value', type=int, default=127, metavar='VAL', help='Outside value (default: %(default)s)')
+    parser.add_argument('--outside_value', type=int, default=80, metavar='VAL', help='Outside value (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
 
     # Parse and display
