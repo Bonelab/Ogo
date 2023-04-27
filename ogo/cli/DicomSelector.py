@@ -93,7 +93,7 @@ def try_by_series_description(df):
     
 def try_by_slice_thickness(df): # If we can't get 1.0mm, then get 2.0mm, etc.
     #slice_thicknesses = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
-    slice_thicknesses = [1.5, 2.0, 2.5, 3.0]
+    slice_thicknesses = [3.0]
     
     for slice_thickness in slice_thicknesses:
         tmp_reduced_df = df.loc[(df['SliceThickness'] <= slice_thickness)]
@@ -131,7 +131,7 @@ def try_by_number_of_images(df): # If we can't get 1000 slices, then get 900, et
 
 def try_by_pixel_spacing(df): # If we can't get 0.5mm, then get 0.6mm, etc.
     #pixel_spacings = ['0.5', '0.6', '0.7', '0.8', '0.9', '1.0', '1.5']
-    pixel_spacings = ['0.8', '0.9', '1.0', '1.5']
+    pixel_spacings = ['1.0', '1.5']
     
     for pixel_spacing in pixel_spacings:
         tmp_reduced_df = df.loc[(df['PixelSpacing'].str.contains(pixel_spacing, na=False))]
@@ -160,7 +160,7 @@ def exclude_by_number_of_images(df,n_images):
 # Sort scans
 def DicomSelector(csvfile,output,overwrite):
     
-    minNumberOfSlices = 50
+    minNumberOfSlices = 30
     exclude_keywords = ['NECK','CTNKE','CTHDE','HEAD','LUNG','CHEST'] # Add LEGS, MPR, LIVER?
     
     # Check for valid input
@@ -321,7 +321,6 @@ def DicomSelector(csvfile,output,overwrite):
     # Final selection
     ogo.message('Dataframe size is reduced to {}.'.format(sorted_df.shape[0]))
     ogo.message('')
-#    ogo.message('  criteria: NumberOfSlices > {} (n={})'.format(minNumberOfSlices,csvData.shape[0]))
     
     # Write csv file
     ogo.message('Writing csv output file:')
@@ -329,7 +328,7 @@ def DicomSelector(csvfile,output,overwrite):
     sorted_df.to_csv(output)
     ogo.message('')
 
-    # Write file to pull the dicom files
+    # Write script to pull the dicom files
     ogo.message('Writing file for pulling dicom files:')
     ogo.message('  {}'.format(output_pull))
     ogo.message('')
@@ -390,7 +389,6 @@ def DicomSelector(csvfile,output,overwrite):
         fpull.write(ogoVisualize_cmd)
         fpull.write(os.linesep)
         
-    #fpull.write('# dicomtonifti -o ./nifti ./dicom --batch --compress --recurse\n')
     fpull.write('exit\n')
     fpull.close()
     
