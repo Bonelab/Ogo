@@ -126,7 +126,7 @@ Utility to threshold a NIFTI file.
 '''
     epilog = '''
 Example calls: 
-ogoImageThreshold --threshold 1000 input.nii.gz output.nii.gz
+ogoImageThreshold --upper_threshold 1500 input.nii.gz output.nii.gz
 '''
 
     # Setup argument parsing
