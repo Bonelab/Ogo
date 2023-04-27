@@ -320,10 +320,12 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
       
     # Set image orientation
     print('Image orientation set to {}'.format(image_orientation))
+    # First vector – direction corresponding to moving horizontally left-to-right across the screen,
+    # Second vector – direction corresponding to moving bottom-to-top up the screen 
     if image_orientation == 'sagittal': # 'x' key
-        interactorStyle.SetImageOrientation((0,1,0), (0,0,-1))
+        interactorStyle.SetImageOrientation((0,1,0), (0,0,1))
     elif image_orientation == 'coronal': # 'y' key
-        interactorStyle.SetImageOrientation((1,0,0), (0,0,-1))
+        interactorStyle.SetImageOrientation((1,0,0), (0,0,1))
     elif image_orientation == 'axial': # 'z' key
         interactorStyle.SetImageOrientation((1,0,0), (0,1,0))
     else:
