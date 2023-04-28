@@ -9,6 +9,7 @@ import os
 import sys
 import vtk
 import numpy as np
+import pandas as pd
 import argparse
 import time
 from datetime import date
@@ -22,7 +23,7 @@ script_version = 2.0
 
 
 # Start Script
-def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader, overwrite=False):
+def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader, excel, overwrite=False):
     if output_filename:
         ogo.message("Start of Script...")
 
@@ -142,6 +143,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
                 print(",".join("{}".format(k) for k, v in parameters_dict.items()))
             print(",".join("{}".format(v) for k, v in parameters_dict.items()))
 
+
     if output_filename:
         txt_file.close()
         print()
@@ -186,6 +188,8 @@ ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz --labels 7 8 9 10
                         help='Specify list of labels; space separated (e.g. 1 2 3) (Default: report all available)')
     parser.add_argument('--output_filename', default=None, metavar='TEXTFILE',
                         help='Output file name (*.txt) (Default: dump to screen)')
+    parser.add_argument('--excel', default=None,
+                        help='Output excel file name (*.xlsx)')
     parser.add_argument('--noheader', action='store_true', help='Suppress printing header (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     print()

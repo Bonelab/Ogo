@@ -31,6 +31,7 @@ import ogo.dat.OgoMasterLabels as lb
 from ogo.calib.internal_calibration import InternalCalibration
 from ogo.calib.mindways_calibration import MindwaysCalibration
 from ogo.calib.standard_calibration import StandardCalibration
+from ogo.calib.monte_carlo_calibration import MonteCarloCalibration
 import ogo.util.Helper as ogo
 from ogo.util.echo_arguments import echo_arguments
 from ogo.util.write_txt import write_txt
@@ -396,7 +397,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
         ogo.message(f'Starting Monte Carlo simulation...')
 
             # Perform the internal calibration fit
-        calib = InternalCalibration(
+        Monte = MonteCarloCalibration(
             iterations = MonteCarlo,
             adipose_hu=labels_data['Adipose']['mean'],
             air_hu=labels_data['Air']['mean'],
@@ -409,12 +410,34 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
             bone_std= labels_data['Cortical Bone']['stdev'],
             muscle_std = labels_data['Skeletal Muscle']['stdev'], 
             label_list=labelList)
-        calib.montecarlofit()
+        Monte.montecarlofit()
+
+        calib = InternalCalibration(
+            adipose_hu=labels_data['Adipose']['mean'],
+            air_hu=labels_data['Air']['mean'],
+            blood_hu=labels_data['Blood']['mean'],
+            bone_hu=labels_data['Cortical Bone']['mean'],
+            muscle_hu=labels_data['Skeletal Muscle']['mean'],
+            label_list=labelList)
+        calib.fit()
+
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        ogo.message('  {:>27s} {:8.3f}'.format('Energy [keV]:', calib.effective_energy))
+        ogo.message('  {:>27s} {:8.3f}'.format('Max R^2:', calib.max_r2))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
+        ogo.message('  {:>27s}'.format('Mass Attenuation [cm2/g]:'))
+        ogo.message('  {:>27s} {:8.3f}'.format('Adipose ', calib.adipose_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Air ', calib.air_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Blood ', calib.blood_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Cortical Bone ', calib.bone_mass_attenuation))
+        ogo.message('  {:>27s} {:8.3f}'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
+        ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
 
         ogo.message('Calibrating input file.')
         voxel_volume = np.prod(ct.GetSpacing())
         #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
-        den , uncertainty = calib._montecarlo_predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
+        den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
+        uncertainty = Monte._montecarlo_predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
         den = sitk.Cast(den, ct.GetPixelID())
         uncertainty = sitk.Cast(uncertainty, ct.GetPixelID())
 
@@ -474,7 +497,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
         ogo.message('  {:>27s} {:8.3f}'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
         ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
 
-        ogo.message('Calibrating input file and creating error image...')
+        ogo.message('Calibrating input file.')
         voxel_volume = np.prod(ct.GetSpacing())
         #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
         den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
@@ -500,7 +523,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
 
         ogo.message('Writing result to ' + output_image)
         sitk.WriteImage(den, output_image)
-    
+
+        
 
     if calib_file_name:
         
@@ -561,21 +585,21 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
             txt_file.write('  {:>27s} {:8.3f}\n'.format('Skeletal Muscle ', calib.muscle_mass_attenuation))
             txt_file.write('\n')
             txt_file.write('  {:>27s} {:8.3f}\n'.format('K2HPO4 ', calib.K2HPO4_mass_attenuation))
-            txt_file.write('  {:>27s} {:24.16f}\n'.format('K2HPO4 Std Err', calib.k2hpo4_standard_error))
+            txt_file.write('  {:>27s} {:24.16f}\n'.format('K2HPO4 Std Err', Monte.k2hpo4_standard_error))
             txt_file.write('  {:>27s} {:8.3f}\n'.format('CHA ', calib.CHA_mass_attenuation))
             txt_file.write('  {:>27s} {:8.3f}\n'.format('Triglyceride ', calib.triglyceride_mass_attenuation))
-            txt_file.write('  {:>27s} {:24.16f}\n'.format('Triglyceride Std Err', calib.triglyceride_standard_error))
+            txt_file.write('  {:>27s} {:24.16f}\n'.format('Triglyceride Std Err', Monte.triglyceride_standard_error))
             txt_file.write('  {:>27s} {:8.3f}\n'.format('Water ', calib.water_mass_attenuation))
             txt_file.write('\n')
             txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
             txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Slope', calib.hu_to_mass_attenuation_slope))
-            txt_file.write('  {:>27s} {:24.16f}\n'.format('HU-u/p Slope Std Err', calib._hu_to_mass_attenuation_slope_error))
+            txt_file.write('  {:>27s} {:24.16f}\n'.format('HU-u/p Slope Std Err', Monte._hu_to_mass_attenuation_slope_error))
             txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-u/p Y-Intercept', calib.hu_to_mass_attenuation_intercept))
-            txt_file.write('  {:>27s} {:24.16f}\n'.format('HU-u/p Y-Intercept Std Err', calib._hu_to_mass_attenuation_intercept_error))
+            txt_file.write('  {:>27s} {:24.16f}\n'.format('HU-u/p Y-Intercept Std Err', Monte._hu_to_mass_attenuation_intercept_error))
             txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Slope', calib.hu_to_density_slope))
-            txt_file.write('  {:>27s} {:24.16f}\n'.format('HU-Material Density Slope Std Err', calib._hu_to_density_slope_error))
+            txt_file.write('  {:>27s} {:24.16f}\n'.format('HU-Material Density Slope Std Err', Monte._hu_to_density_slope_error))
             txt_file.write('  {:>27s} {:12.6f}\n'.format('HU-Material Density Y-Intercept', calib.hu_to_density_intercept))
-            txt_file.write('  {:>27s} {:24.16f}\n'.format('HU-Material Density Y-Intercept Std Err', calib._hu_to_density_intercept_error))
+            txt_file.write('  {:>27s} {:24.16f}\n'.format('HU-Material Density Y-Intercept Std Err', Monte._hu_to_density_intercept_error))
 
             txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
             txt_file.write('\n')
