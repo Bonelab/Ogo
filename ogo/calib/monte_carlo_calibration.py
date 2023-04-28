@@ -18,7 +18,6 @@ from collections import OrderedDict
 import SimpleITK as sitk 
 import math 
 import copy
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 

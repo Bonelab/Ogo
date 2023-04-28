@@ -438,8 +438,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
         #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
         den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
         uncertainty = Monte._montecarlo_predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-        den = sitk.Cast(den, ct.GetPixelID())
-        uncertainty = sitk.Cast(uncertainty, ct.GetPixelID())
+        #den = sitk.Cast(den, ct.GetPixelID())
+        #uncertainty = sitk.Cast(uncertainty, ct.GetPixelID())
 
         ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
         imfilt = sitk.StatisticsImageFilter()
@@ -501,7 +501,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
         voxel_volume = np.prod(ct.GetSpacing())
         #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
         den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-        den = sitk.Cast(den, ct.GetPixelID())
+        #den = sitk.Cast(den, ct.GetPixelID())
 
         ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
         imfilt = sitk.StatisticsImageFilter()
