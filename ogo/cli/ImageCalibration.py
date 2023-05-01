@@ -176,16 +176,11 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
     ogo.message('  Slope:     {:8.6f}'.format(calibrator.slope))
     ogo.message('  Intercept: {:8.6f}'.format(calibrator.intercept))
     ogo.message('  R^2:       {:8.6f}'.format(calibrator.r_value ** 2))
-    #ogo.message('  Slope Std Err:       {:8.6f}'.format(calibrator.stderr))
-    #ogo.message('  Intercept Std Err:       {:8.6f}'.format(calibrator.intercept_stderr))
-    
 
 
     ogo.message('Calibrating CT file.')
     density = calibrator.predict(sitk.Cast(ct, sitk.sitkFloat64))
     uncertainty = calibrator.montecarlo_predict(sitk.Cast(ct, sitk.sitkFloat64))
-    den = sitk.Cast(density, ct.GetPixelID())
-    uncertainty = sitk.Cast(uncertainty, ct.GetPixelID())
 
     # Check that the calibration results are within a reasonable range
     threshold_warning = 2  # percent
@@ -207,14 +202,14 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
     #writing out calibrated image
     ogo.message('Writing calibrated output image to file:')
     ogo.message('      \"{}\"'.format(output_image))
-    sitk.WriteImage(den, output_image)
+    sitk.WriteImage(density, output_image)
     
     #creating new file name 
     error_suffix = f"_error.nii.gz"
     output_image_error = ogo.add_to_filename(output_image, error_suffix)
 
     #writing out calibrated error image
-    ogo.message('Writing calibrated output image to file:')
+    ogo.message('Writing calibrated error output image to file:')
     ogo.message('      \"{}\"'.format(output_image))
     sitk.WriteImage(uncertainty, output_image_error)
 
@@ -276,7 +271,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
         txt_file.close()
 
-    ogo.message('Done ImageCalibration.')
+    ogo.message('Done Image Calibration.')
 
 
 # INTERNAL CALIBARATION ------------------------------------------------------------------
@@ -435,11 +430,9 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
 
         ogo.message('Calibrating input file.')
         voxel_volume = np.prod(ct.GetSpacing())
-        #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
+
         den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
         uncertainty = Monte._montecarlo_predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-        #den = sitk.Cast(den, ct.GetPixelID())
-        #uncertainty = sitk.Cast(uncertainty, ct.GetPixelID())
 
         ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
         imfilt = sitk.StatisticsImageFilter()
@@ -465,13 +458,12 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
         ogo.message('  {:>27s} {:8.1f}'.format('Variance ', imfilt.GetVariance()))
         ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
 
-        ogo.message('Writing result to ' + output_image)
+        ogo.message('Writing calibrated image to ' + output_image)
         sitk.WriteImage(den, output_image)
 
-        ogo.message('Writing result error image to ' + output_image_error)
+        ogo.message('Writing calibrated error image to ' + output_image_error)
         sitk.WriteImage(uncertainty, output_image_error)
 
-        
     else: 
         # Perform the internal calibration fit
         ogo.message('Computing calibration parameters.')
@@ -499,9 +491,9 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
 
         ogo.message('Calibrating input file.')
         voxel_volume = np.prod(ct.GetSpacing())
-        #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
+
         den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-        #den = sitk.Cast(den, ct.GetPixelID())
+       
 
         ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
         imfilt = sitk.StatisticsImageFilter()

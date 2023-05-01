@@ -14,6 +14,7 @@ import numpy as np
 import scipy.interpolate as interp
 from scipy import stats
 from collections import OrderedDict
+import matplotlib.pyplot as plt
 import copy
 
 
@@ -201,6 +202,8 @@ class InternalCalibration(StandardCalibration):
         n = len(self._interpolate_tables['adipose_table'])
         max_index = -1
         max_r2 = -np.Inf
+        r_sqauures = []
+        energies = []
 
         for i in np.arange(1, n, 1):
             # Get the values at this energy level
@@ -209,15 +212,19 @@ class InternalCalibration(StandardCalibration):
             # Least squares fit
             EE_lr = stats.linregress(HU, attenuation)
             r_squared = EE_lr[2] ** 2
-
+            r_sqauures.append(r_squared)
             # Take best fit
             if r_squared > max_r2:
                 max_r2 = r_squared
                 max_index = i
+                
 
         # Set values
         self._effective_energy = self._interpolate_tables['adipose_table'].loc[max_index, 'Energy [keV]']  # noqa: E501
         self._max_r2 = max_r2
+        plt.plot(r_sqauures)
+        plt.show()
+        
 
         self._adipose_mass_attenuation = self._interpolate_tables['adipose_table'].loc[
             max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
