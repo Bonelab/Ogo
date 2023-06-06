@@ -372,7 +372,7 @@ def DicomSelector(csvfile,output,overwrite):
             '${OUTPUT_DICOM_DIR}', \
             fname \
             )
-        dicomtonifti_cmd = 'dicomtonifti --compress {}/\'{}\' -o {}\'/{}.nii.gz\'\n'.format( \
+        dicomtonifti_cmd = 'dicomtonifti -brz --fsl {}/\'{}\' -o {}\'/{}.nii.gz\'\n'.format( \
             '${OUTPUT_DICOM_DIR}', \
             fname, \
             '${OUTPUT_NIFTI_DIR}', \

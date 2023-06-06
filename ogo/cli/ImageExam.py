@@ -14,6 +14,7 @@ import math
 from vtk.util.numpy_support import vtk_to_numpy
 from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
+import SimpleITK as sitk
 
 
 def ImageExam(input_filename, header, histogram, bins):
@@ -43,13 +44,21 @@ def ImageExam(input_filename, header, histogram, bins):
     ogo.aix(input_filename, reader.GetOutput())
 
     if header:
-        ogo.message('Header from NIFTI file')
+        ogo.message('Header from NIFTI file (VTK reader)')
         ogo.infoNIFTI(reader)
-
+        
+        ogo.message('Header from NIFTI file –-> Using SimpleITK reader')
+        ct = sitk.ReadImage(input_filename)
+        for k in ct.GetMetaDataKeys(): 
+            v = ct.GetMetaData(k) 
+            print('  {:20s} = {}'.format(k,v))
+        
     if histogram:
         ogo.message('Histogram of NIFTI image data')
         ogo.histogram(reader.GetOutput(), bins)
-
+    
+    
+    
     # ogo.message('Done ogoImageExam!')
 
 
