@@ -66,6 +66,28 @@ def boundingbox(image):
     
     return rmin, rmax, cmin, cmax, zmin, zmax
 
+def getNIfTITransform(reader):
+    # Grab the NIfTI transform (see NIH https://nifti.nimh.nih.gov/pub/dist/src/niftilib/nifti1.h)
+    found=False
+    if reader.GetQFormMatrix():
+        mat = reader.GetQFormMatrix()
+        ogo.message('QForm transform:')
+        found=True
+    elif reader.GetSFormMatrix():
+        mat = reader.GetSFormMatrix()
+        if found:
+            ogo.message('[WARNING]: Both QForm and SForm have been found. Using SForm.')
+        ogo.message('SForm transform:')
+    else:
+        mat = vtk.vtkMatrix4x4()
+        ogo.message('[WARNING]: Neither QForm nor SForm transform found. Using Identity.')
+        ogo.message('Identity transform:')
+
+    for i in range(4):
+        ogo.message('['+' '.join('{:8.3f}'.format(mat.GetElement(i,j)) for j in range(4))+']')
+    
+    return mat
+    
 def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elevation, azimuth, flip, outfile, offscreen, overwrite, func):
     
     # Check if output exists and should overwrite
@@ -100,6 +122,8 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
     reader = vtk.vtkNIFTIImageReader()
     reader.SetFileName(input_filename)
     reader.Update()
+    
+    mat = getNIfTITransform(reader)
     
     image = reader.GetOutput()
     ibounds = image.GetBounds()
@@ -202,15 +226,16 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
         mapper[idx].SetInputConnection(mcube[idx].GetOutputPort())
         
         actor[idx].SetMapper(mapper[idx])
+        actor[idx].SetUserMatrix(mat)
         actor[idx].GetProperty().SetColor(rgb[0]/255.0,rgb[1]/255.0,rgb[2]/255.0)
       
         renderer.AddActor( actor[idx] )
     
     # Set up the camera
     if flip:  # Orients camera along Z axis
-        renderer.GetActiveCamera().SetViewUp(0,0,1)
-    else:
         renderer.GetActiveCamera().SetViewUp(0,0,-1)
+    else:
+        renderer.GetActiveCamera().SetViewUp(0,0,1)
         
     renderer.GetActiveCamera().SetPosition((ibounds[1]-ibounds[0]),\
                                            (ibounds[3]-ibounds[2])*5,\
@@ -275,8 +300,10 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
     reader.SetFileName(input_filename)
     reader.Update()
     
+    mat = getNIfTITransform(reader)
+    
     image = reader.GetOutput()
-    image_bounds = image.GetBounds()
+    #image_bounds = image.GetBounds()
     
     # Get scalar range for W/L and padding
     scalarRanges = reader.GetOutput().GetScalarRange()
@@ -303,7 +330,10 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
     inputSlice = vtk.vtkImageSlice()
     inputSlice.SetMapper(inputMapper)
     inputSlice.SetProperty(imageProperty)
+    inputSlice.SetUserMatrix(mat)
     
+    image_bounds = inputSlice.GetBounds() # We get the bounds *after* applying the transform
+
     # Create Renderer -> RenderWindow -> RenderWindowInteractor -> InteractorStyle
     renderer = vtk.vtkRenderer()
     renderer.AddActor(inputSlice)
@@ -319,37 +349,41 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
     interactorStyle.SetCurrentRenderer(renderer)
       
     # Set image orientation
-    print('Image orientation set to {}'.format(image_orientation))
+    ogo.message('Image orientation set to {}'.format(image_orientation))
     # First vector – direction corresponding to moving horizontally left-to-right across the screen,
     # Second vector – direction corresponding to moving bottom-to-top up the screen 
     if image_orientation == 'sagittal': # 'x' key
-        interactorStyle.SetImageOrientation((0,1,0), (0,0,1))
+        interactorStyle.SetImageOrientation((0,1,0), (0,0,1)) # last vector was 0,0,1
     elif image_orientation == 'coronal': # 'y' key
-        interactorStyle.SetImageOrientation((1,0,0), (0,0,1))
+        interactorStyle.SetImageOrientation((-1,0,0), (0,0,1)) # last vector was 0,0,1
     elif image_orientation == 'axial': # 'z' key
         interactorStyle.SetImageOrientation((1,0,0), (0,1,0))
     else:
-        print('Error selecting image orientation')
+        ogo.message('Error selecting image orientation')
         os.sys.exit()
     renderer.ResetCamera()
     
     # Set slice
-    print('Percent slice set to {:.1f}%'.format(slice_percent))
+    ogo.message('Percent slice set to {:.1f}%'.format(slice_percent))
     camera = renderer.GetActiveCamera()
     fp = list(camera.GetFocalPoint())
+    #print('** Focal point: '+' '.join('{:8.3f}'.format(i) for i in fp))
+    #print('** Bounds:      '+' '.join('{:8.3f}'.format(i) for i in image_bounds))
+    
     if image_orientation == 'sagittal': # 'x' key
-        fp[0] = (image_bounds[1] - image_bounds[0]) * slice_percent / 100.0
+        fp[0] = image_bounds[0] + ((image_bounds[1] - image_bounds[0]) * slice_percent / 100.0)
     elif image_orientation == 'coronal': # 'y' key
-        fp[1] = (image_bounds[3] - image_bounds[2]) * slice_percent / 100.0
+        fp[1] = image_bounds[2] + ((image_bounds[3] - image_bounds[2]) * slice_percent / 100.0)
     elif image_orientation == 'axial': # 'z' key
-        fp[2] = (image_bounds[5] - image_bounds[4]) * slice_percent / 100.0
+        fp[2] = image_bounds[4] + ((image_bounds[5] - image_bounds[4]) * slice_percent / 100.0)
     else:
-        print('Error selecting percent slice')
+        ogo.message('Error selecting percent slice')
         os.sys.exit()
     camera.SetFocalPoint(fp)
+    #print('** Focal point: '+' '.join('{:8.3f}'.format(i) for i in fp))
 
     fp = list(renderer.GetActiveCamera().GetFocalPoint())
-    print('Focal point is '+', '.join('{:.1f}'.format(i) for i in fp))
+    ogo.message('Focal point is '+', '.join('{:.1f}'.format(i) for i in fp))
 
     interactor = vtk.vtkRenderWindowInteractor()
     interactor.SetInteractorStyle(interactorStyle)
@@ -358,7 +392,7 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
     # Add some functionality to switch layers for window/level
     def layerSwitcher(obj,event):
         if str(interactor.GetKeyCode()) == 'w':
-            print("Image W/L: {w}/{l}".format(w=imageProperty.GetColorWindow(), l=imageProperty.GetColorLevel()))
+            ogo.message("Image W/L: {w}/{l}".format(w=imageProperty.GetColorWindow(), l=imageProperty.GetColorLevel()))
         elif str(interactor.GetKeyCode()) == 'n':
             # Set interpolation to nearest neighbour (good for voxel visualization)
             imageProperty.SetInterpolationTypeToNearest()
@@ -378,7 +412,7 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
             picker = vtk.vtkCellPicker()
             picker.Pick(x,y,0,renderer)
             point = picker.GetPointIJK()
-            print('IJK: '+', '.join('{:5d}'.format(i) for i in point))
+            ogo.message('IJK: '+', '.join('{:5d}'.format(i) for i in point))
         
     # Add ability to switch between active layers
     interactor.AddObserver('KeyPressEvent', layerSwitcher, -1.0) # Call layerSwitcher as last observer
@@ -397,7 +431,7 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
         writer.SetFileName(outfile)
         writer.SetInputConnection(windowToImage.GetOutputPort())
         writer.Write()
-        print('Writing {}'.format(outfile))
+        ogo.message('Writing {}'.format(outfile))
     
     ogo.message('Done.')
     
