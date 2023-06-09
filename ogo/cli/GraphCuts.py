@@ -162,7 +162,7 @@ def periosteal(mark_image, sheet_image, peri_image, path_binaries, \
     
     # Read the input mark image so that we can check it is the correct type of image
     # (We expect either 8bit or 16bit unsigned images for the labels)
-    ct_mark = sitk.ReadImage(mark_image)
+    ct_mark = sitk.ReadImage(mark_image, sitk.sitkUInt16)
     pixel_id = ct_mark.GetPixelID()
     if ((pixel_id is sitk.sitkUInt8) or \
         (pixel_id is sitk.sitkUInt16)):

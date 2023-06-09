@@ -14,9 +14,9 @@ from vtk.util.numpy_support import vtk_to_numpy
 from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 
-def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, overwrite=False):
+def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, keepOnlyLabels, overwrite=False):
 
-    ogo.message('Start ogoReplaceLabels!')
+    #ogo.message('Start ogoReplaceLabels!')
     
     # Check if output exists and should overwrite
     if os.path.isfile(output_filename) and not overwrite:
@@ -31,7 +31,7 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ov
         ogo.message('       [input #{:d} != output #{:d}]'.format(len(inputLabels),len(outputLabels)))
         os.sys.exit()
     
-    # Check that at least least one set of input/output labels is defined
+    # Check that at least least one set of labels is defined
     if len(inputLabels) < 1:
         ogo.message('ERROR: At least one label must be defined.')
         os.sys.exit()
@@ -71,7 +71,7 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ov
     
     ogo.message('Input image labels:')
     ogo.histogram(image,128)
-    
+
     array = vtk_to_numpy(image.GetPointData().GetScalars())
     
     # Replace each label by cycling through image data; one cycle per label
@@ -131,6 +131,7 @@ ogoReplaceLabels input.nii.gz output.nii.gz --inputLabels 4 5 --outputLabels 0 7
     parser.add_argument('output_filename', help='Output image file (*.nii, *.nii.gz)')
     parser.add_argument('--inputLabels', type=int, nargs='*', default=[0], metavar='ID', help='Target label input IDs; space separated (e.g. 1 2 3)')
     parser.add_argument('--outputLabels', type=int, nargs='*', default=[0], metavar='ID', help='Target label output IDs; space separated (e.g. 4 5 6)')
+    parser.add_argument('--keepOnlyLabels', type=int, nargs='*', default=[], metavar='ID', help='Labels to keep (others removed); (e.g. 7 8 9)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
 
     print()

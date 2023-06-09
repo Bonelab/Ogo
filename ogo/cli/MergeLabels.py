@@ -259,7 +259,7 @@ Example calls:
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     parser.add_argument('--add_multilabel', action='store_true', help='Adds multi-label images')
     parser.add_argument('--swap_labels', type=int, nargs='*', default=[], metavar='ID', help='input1 labels swapped into input2 (e.g. 1 2 3)')
-    parser.add_argument('--merge_method', default='strict',choices=['aggregate', 'strict', 'keep', 'pack'],
+    parser.add_argument('--merge_method', default='pack',choices=['aggregate', 'strict', 'keep', 'pack'],
                                                            help='Select merge rules (default: %(default)s)')
     parser.add_argument('--collection', default='all', choices=['all', 'ossai', 'skeleton', 'cardio', 'organs', 'muscle', 'gastro'],
                                                            help='Select collection (default: %(default)s)')

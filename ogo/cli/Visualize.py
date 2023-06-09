@@ -27,6 +27,15 @@ def getLabels(image):
     
     return labels
     
+def resolve_key_from_value(label_name):
+    #labels = [v['LABEL'] for k, v in lb.labels_dict.items() if ((v['TOTSEG']+'.nii.gz') in filename)]
+    labels = [v['LABEL'] for k, v in lb.labels_dict.items()]
+    if labels:
+        keys = [k for k, v in lb.labels_dict.items() if v['LABEL'] == label_name]
+        if keys:
+            return int(keys[0])
+    return None
+
 def boundingbox(image):
     
     dim = image.GetDimensions()
@@ -57,19 +66,42 @@ def boundingbox(image):
     
     return rmin, rmax, cmin, cmax, zmin, zmax
 
-def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isosurface, elevation, azimuth, flip, overwrite=False):
+def getNIfTITransform(reader):
+    # Grab the NIfTI transform (see NIH https://nifti.nimh.nih.gov/pub/dist/src/niftilib/nifti1.h)
+    found=False
+    if reader.GetQFormMatrix():
+        mat = reader.GetQFormMatrix()
+        ogo.message('QForm transform:')
+        found=True
+    elif reader.GetSFormMatrix():
+        mat = reader.GetSFormMatrix()
+        if found:
+            ogo.message('[WARNING]: Both QForm and SForm have been found. Using SForm.')
+        ogo.message('SForm transform:')
+    else:
+        mat = vtk.vtkMatrix4x4()
+        ogo.message('[WARNING]: Neither QForm nor SForm transform found. Using Identity.')
+        ogo.message('Identity transform:')
+
+    for i in range(4):
+        ogo.message('['+' '.join('{:8.3f}'.format(mat.GetElement(i,j)) for j in range(4))+']')
+    
+    return mat
+    
+def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elevation, azimuth, flip, outfile, offscreen, overwrite, func):
     
     # Check if output exists and should overwrite
-    if os.path.isfile(outfile) and not overwrite:
-        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(outfile))
-        if result.lower() not in ['y', 'yes']:
-            ogo.message('Not overwriting. Exiting...')
-            os.sys.exit()
+    if outfile:
+        if os.path.isfile(outfile) and not overwrite:
+            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(outfile))
+            if result.lower() not in ['y', 'yes']:
+                ogo.message('Not overwriting. Exiting...')
+                os.sys.exit()
     
-    if outfile is not 'None' and not (outfile.lower().endswith('.tif')):
+    if (outfile is not None) and (not (outfile.lower().endswith('.tif'))):
         os.sys.exit('[ERROR] Output must be a TIF file ending with .tif: \"{}\"'.format(outfile))
     
-    if offscreen and outfile is 'None':
+    if offscreen and outfile is None:
         # Create default output filename for image
         name, ext = os.path.splitext(input_filename)
         if 'gz' in ext:
@@ -91,6 +123,8 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
     reader.SetFileName(input_filename)
     reader.Update()
     
+    mat = getNIfTITransform(reader)
+    
     image = reader.GetOutput()
     ibounds = image.GetBounds()
     
@@ -102,6 +136,28 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
         desc = lb.labels_dict[label]['LABEL']
         ogo.message('{:5d}: ({:3d},{:3d},{:3d}) – {}'.format(label,rgb[0],rgb[1],rgb[2],desc))
     
+    # Specify a selection of labels (helpful for TotalSegmentator results)
+    if collection:
+        if collection == 'all':
+            valid_list = [v['LABEL'] for k, v in lb.labels_dict.items()]
+        elif collection == 'ossai':
+            valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1']
+        elif collection == 'skeleton':
+            valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1', 'T12', 'T11', 'T10', 'T9', 'T8', 'Humerus Right', 'Humerus Left', 'T7', 'T6', 'T5', 'T4', 'T3', 'T2', 'T1', 'C7', 'C6', 'C5', 'C4', 'C3', 'C2', 'C1', 'Rib Left 1', 'Rib Left 2', 'Rib Left 3', 'Rib Left 4', 'Rib Left 5', 'Rib Left 6', 'Rib Left 7', 'Rib Left 8', 'Rib Left 9', 'Rib Left 10', 'Rib Left 11', 'Rib Left 12', 'Rib Right 1', 'Rib Right 2', 'Rib Right 3', 'Rib Right 4', 'Rib Right 5', 'Rib Right 6', 'Rib Right 7', 'Rib Right 8', 'Rib Right 9', 'Rib Right 10', 'Rib Right 11', 'Rib Right 12', 'Scapula Left', 'Scapula Right', 'Clavicula Left', 'Clavicula Right']
+        elif collection == 'cardio':
+            valid_list = ['Heart Myocardium', 'Heart Atrium Left', 'Heart Ventricle Left', 'Heart Atrium Right', 'Heart Ventricle Right', 'Aorta', 'Inferior Vena Cava', 'Portal Vein and Splenic Vein', 'Pulmonary Artery', 'Iliac Artery Left', 'Iliac Artery Right', 'Iliac Vena Left', 'Iliac Vena Right']
+        elif collection == 'organs':
+            valid_list = ['Face', 'Brain', 'Trachea', 'Lung Upper Lobe Left', 'Lung Lower Lobe Left', 'Lung Upper Lobe Right', 'Lung Middle Lobe Right', 'Lung Lower Lobe Right', 'Adrenal Gland Right', 'Adrenal Gland Left', 'Spleen', 'Kidney Right', 'Kidney Left', 'Gallbladder', 'Liver', 'Pancreas']
+        elif collection == 'gastro':
+            valid_list = ['Esophagus', 'Stomach', 'Duodenum', 'Small Bowel', 'Colon', 'Urinary Bladder']
+        elif collection == 'muscle':
+            valid_list = ['Autochthon Left', 'Autochthon Right', 'Iliopsoas Left', 'Iliopsoas right', 'Gluteus Maximus Left', 'Gluteus Maximus Right', 'Gluteus Medius Left', 'Gluteus Medius Right', 'Gluteus Minimus Left', 'Gluteus Minimus Right']
+        else:
+            os.sys.exit('[ERROR] Unknown collection defined: {}'.format(collection))
+        
+        for item in valid_list:
+            select.append(resolve_key_from_value(item))
+    
     # Reduce list to user selected labels
     if len(select)>0:
         tmp = []
@@ -109,7 +165,7 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
             if label in labels:
                 tmp.append(label)
             else:
-                ogo.message('[WARNING]: Selected label {} does not exist.'.format(label))
+                ogo.message('[WARNING]: Selected label {} [{}] not in input image.'.format(lb.labels_dict[label]['LABEL'],label))
         labels = tmp
     
     # Create lists for VTK classes
@@ -170,15 +226,16 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
         mapper[idx].SetInputConnection(mcube[idx].GetOutputPort())
         
         actor[idx].SetMapper(mapper[idx])
+        actor[idx].SetUserMatrix(mat)
         actor[idx].GetProperty().SetColor(rgb[0]/255.0,rgb[1]/255.0,rgb[2]/255.0)
       
         renderer.AddActor( actor[idx] )
     
     # Set up the camera
     if flip:  # Orients camera along Z axis
-        renderer.GetActiveCamera().SetViewUp(0,0,1)
-    else:
         renderer.GetActiveCamera().SetViewUp(0,0,-1)
+    else:
+        renderer.GetActiveCamera().SetViewUp(0,0,1)
         
     renderer.GetActiveCamera().SetPosition((ibounds[1]-ibounds[0]),\
                                            (ibounds[3]-ibounds[2])*5,\
@@ -208,16 +265,210 @@ def Visualize(input_filename, outfile, offscreen, select, gaussian, radius, isos
     
     ogo.message('Done.')
     
+def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, slice_percent, offscreen, overwrite, func):
+    
+    # Check if output exists and should overwrite
+    if outfile:
+        if os.path.isfile(outfile) and not overwrite:
+            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(outfile))
+            if result.lower() not in ['y', 'yes']:
+                ogo.message('Not overwriting. Exiting...')
+                os.sys.exit()
+    
+    if (outfile is not None) and (not (outfile.lower().endswith('.tif'))):
+        os.sys.exit('[ERROR] Output must be a TIF file ending with .tif: \"{}\"'.format(outfile))
+    
+    if offscreen and outfile is None:
+        # Create default output filename for image
+        name, ext = os.path.splitext(input_filename)
+        if 'gz' in ext:
+            name = os.path.splitext(name)[0]  # Manages files with double extension
+        outfile = '{}_{:s}_{:.0f}_2d.tif'.format(name,image_orientation,slice_percent)
+        ogo.message('[WARNING]: No filename specified for output image.')
+        ogo.message('           Creating a filename based on input file.')
+        ogo.message('           {}'.format(outfile))
+    
+    # Read input
+    if not os.path.isfile(input_filename):
+        os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_filename))
+
+    if not (input_filename.lower().endswith('.nii') or input_filename.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_filename))
+    
+    ogo.message('Reading input image ' + input_filename)
+    reader = vtk.vtkNIFTIImageReader()
+    reader.SetFileName(input_filename)
+    reader.Update()
+    
+    mat = getNIfTITransform(reader)
+    
+    image = reader.GetOutput()
+    #image_bounds = image.GetBounds()
+    
+    # Get scalar range for W/L and padding
+    scalarRanges = reader.GetOutput().GetScalarRange()
+
+    # Determine if we need to autocompute the window/level
+    if window <= 0:
+        window = scalarRanges[1] - scalarRanges[0]
+        level = (scalarRanges[1] + scalarRanges[0])/2
+
+    # Setup input Mapper + Property -> Slice
+    inputMapper = vtk.vtkOpenGLImageSliceMapper()
+    inputMapper.SetInputConnection(reader.GetOutputPort())
+    inputMapper.SliceAtFocalPointOn()
+    inputMapper.SliceFacesCameraOn()
+    inputMapper.BorderOn()
+    inputMapper.SetNumberOfThreads(nThreads)
+    inputMapper.StreamingOn()
+        
+    imageProperty = vtk.vtkImageProperty()
+    imageProperty.SetColorLevel(level)
+    imageProperty.SetColorWindow(window)
+    imageProperty.SetInterpolationTypeToNearest()
+
+    inputSlice = vtk.vtkImageSlice()
+    inputSlice.SetMapper(inputMapper)
+    inputSlice.SetProperty(imageProperty)
+    inputSlice.SetUserMatrix(mat)
+    
+    image_bounds = inputSlice.GetBounds() # We get the bounds *after* applying the transform
+
+    # Create Renderer -> RenderWindow -> RenderWindowInteractor -> InteractorStyle
+    renderer = vtk.vtkRenderer()
+    renderer.AddActor(inputSlice)
+
+    renderWindow = vtk.vtkRenderWindow()
+    renderWindow.SetSize(2048,2048)
+    renderWindow.AddRenderer(renderer)
+    if offscreen:
+        renderWindow.SetOffScreenRendering(1)
+
+    interactorStyle = vtk.vtkInteractorStyleImage()
+    interactorStyle.SetInteractionModeToImageSlicing()
+    interactorStyle.SetCurrentRenderer(renderer)
+      
+    # Set image orientation
+    ogo.message('Image orientation set to {}'.format(image_orientation))
+    # First vector – direction corresponding to moving horizontally left-to-right across the screen,
+    # Second vector – direction corresponding to moving bottom-to-top up the screen 
+    if image_orientation == 'sagittal': # 'x' key
+        interactorStyle.SetImageOrientation((0,1,0), (0,0,1)) # last vector was 0,0,1
+    elif image_orientation == 'coronal': # 'y' key
+        interactorStyle.SetImageOrientation((-1,0,0), (0,0,1)) # last vector was 0,0,1
+    elif image_orientation == 'axial': # 'z' key
+        interactorStyle.SetImageOrientation((1,0,0), (0,1,0))
+    else:
+        ogo.message('Error selecting image orientation')
+        os.sys.exit()
+    renderer.ResetCamera()
+    
+    # Set slice
+    ogo.message('Percent slice set to {:.1f}%'.format(slice_percent))
+    camera = renderer.GetActiveCamera()
+    fp = list(camera.GetFocalPoint())
+    #print('** Focal point: '+' '.join('{:8.3f}'.format(i) for i in fp))
+    #print('** Bounds:      '+' '.join('{:8.3f}'.format(i) for i in image_bounds))
+    
+    if image_orientation == 'sagittal': # 'x' key
+        fp[0] = image_bounds[0] + ((image_bounds[1] - image_bounds[0]) * slice_percent / 100.0)
+    elif image_orientation == 'coronal': # 'y' key
+        fp[1] = image_bounds[2] + ((image_bounds[3] - image_bounds[2]) * slice_percent / 100.0)
+    elif image_orientation == 'axial': # 'z' key
+        fp[2] = image_bounds[4] + ((image_bounds[5] - image_bounds[4]) * slice_percent / 100.0)
+    else:
+        ogo.message('Error selecting percent slice')
+        os.sys.exit()
+    camera.SetFocalPoint(fp)
+    #print('** Focal point: '+' '.join('{:8.3f}'.format(i) for i in fp))
+
+    fp = list(renderer.GetActiveCamera().GetFocalPoint())
+    ogo.message('Focal point is '+', '.join('{:.1f}'.format(i) for i in fp))
+
+    interactor = vtk.vtkRenderWindowInteractor()
+    interactor.SetInteractorStyle(interactorStyle)
+    interactor.SetRenderWindow(renderWindow)
+
+    # Add some functionality to switch layers for window/level
+    def layerSwitcher(obj,event):
+        if str(interactor.GetKeyCode()) == 'w':
+            ogo.message("Image W/L: {w}/{l}".format(w=imageProperty.GetColorWindow(), l=imageProperty.GetColorLevel()))
+        elif str(interactor.GetKeyCode()) == 'n':
+            # Set interpolation to nearest neighbour (good for voxel visualization)
+            imageProperty.SetInterpolationTypeToNearest()
+            interactor.Render()
+        elif str(interactor.GetKeyCode()) == 'c':
+            # Set interpolation to cubic (makes a better visualization)
+            imageProperty.SetInterpolationTypeToCubic()
+            interactor.Render()
+        elif str(interactor.GetKeyCode()) == 'r':
+            window = scalarRanges[1] - scalarRanges[0]
+            level = (scalarRanges[1] + scalarRanges[0])/2
+            imageProperty.SetColorLevel(level)
+            imageProperty.SetColorWindow(window)
+            interactor.Render()
+        elif str(interactor.GetKeyCode()) == 'u':
+            x, y = interactor.GetEventPosition()
+            picker = vtk.vtkCellPicker()
+            picker.Pick(x,y,0,renderer)
+            point = picker.GetPointIJK()
+            ogo.message('IJK: '+', '.join('{:5d}'.format(i) for i in point))
+        
+    # Add ability to switch between active layers
+    interactor.AddObserver('KeyPressEvent', layerSwitcher, -1.0) # Call layerSwitcher as last observer
+    
+    # Initialize and go
+    interactor.Initialize()
+    if not offscreen:
+        interactor.Start()
+
+    if outfile is not None:
+        interactor.Render()
+        windowToImage = vtk.vtkWindowToImageFilter()
+        windowToImage.SetInput(renderWindow)
+        
+        writer = vtk.vtkTIFFWriter()
+        writer.SetFileName(outfile)
+        writer.SetInputConnection(windowToImage.GetOutputPort())
+        writer.Write()
+        ogo.message('Writing {}'.format(outfile))
+    
+    ogo.message('Done.')
+    
 def main():
     # Setup description
     description='''
-Generates an offscreen rendering of a NIFTI file.
+Visualize NIfTI files in either 2d or 3d.
+
+For 3d visualization, only segmented datasets are expected.
+
+For 2d visualization, keyboard mappings are:
+    w   Print window/Level to terminal
+    n   Set interpolator to nearest neighbour
+    c   Set interpolator to cubic
+    r   Reset window/level
+    u   Print current cursor voxel position
+    x   View in x-plane (saggital)
+    y   View in y-plane (coronal)
+    z   View in z-plane (axial)
+    q   Quit
+
+For 2d visualization, mouse mappings are:
+    left click + vertical scroll                Modify window
+    left click + horizontal scroll              Modify level
+    right click + vertical scroll               Zoom
+    control + left click + vertical scroll      Slice level
+    control + right click + vertical scroll     Rotate slice
+    shift + left click + vertical scroll        Translate slice
+
 '''
     epilog='''
 USAGE: 
-ogoVisualize bone.nii.gz
-ogoVisualize bone.nii.gz --outfile image.tif
-ogoVisualize bone.nii.gz --outfile image.tif --overwrite
+ogoVisualize vis3d bone_labels.nii.gz
+ogoVisualize vis3d bone_labels.nii.gz --offscreen
+ogoVisualize vis3d bone_labels.nii.gz --outfile image.tif --collection skeleton
+
+ogoVisualize vis2d RETRO_00053.nii.gz
 '''
 
     # Setup argument parsing
@@ -227,24 +478,45 @@ ogoVisualize bone.nii.gz --outfile image.tif --overwrite
         description=description,
         epilog=epilog
     )
-    parser.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
-    parser.add_argument('--select', type=int, nargs='*', default=[], metavar='#',help='Select specific labels (e.g. 1 2 3; default: all)')
-    parser.add_argument('--gaussian', type=float, default=0.7, metavar='GAUSS',help='Gaussian filter (default: %(default)s)')
-    parser.add_argument('--radius', type=int, default=2, metavar='RAD',help='Radius of Gaussian filter (default: %(default)s)')
-    parser.add_argument('--isosurface', type=int, default=100, metavar='ISOSURF',help='Isosurface extraction (default: %(default)s)')
-    parser.add_argument('--elevation', type=int, default=10, metavar='ELEV',help='Camera elevation (default: %(default)s deg)')
-    parser.add_argument('--azimuth', type=int, default=40, metavar='AZI',help='Camera azimuth (default: %(default)s deg)')
-    parser.add_argument('--flip', action='store_true', help='Camera ViewUp flip (default: %(default)s)')
-    parser.add_argument('-o','--outfile', default='None', metavar='FN', help='Output image file (*.tif) (default: %(default)s)')
-    parser.add_argument('--offscreen', action='store_true', help='Set to offscreen rendering (default: %(default)s)')
-    parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
+    subparsers = parser.add_subparsers()
+    
+    # 3d visualization
+    parser_vis3d = subparsers.add_parser('vis3d')
+    parser_vis3d.add_argument('input_filename', help='Input segmented image file (*.nii, *.nii.gz)')
+    parser_vis3d.add_argument('--select', type=int, nargs='*', default=[], metavar='#',help='Specify labels (e.g. 1 2 3; default: all)')
+    parser_vis3d.add_argument('--collection', default=None, choices=['all', 'ossai', 'skeleton', 'cardio', 'organs', 'muscle', 'gastro'],
+                                                           help='Specify collection for visualization (default: %(default)s)')
+    parser_vis3d.add_argument('--gaussian', type=float, default=0.7, metavar='GAUSS',help='Gaussian filter (default: %(default)s)')
+    parser_vis3d.add_argument('--radius', type=int, default=2, metavar='RAD',help='Radius of Gaussian filter (default: %(default)s)')
+    parser_vis3d.add_argument('--isosurface', type=int, default=100, metavar='ISOSURF',help='Isosurface extraction (default: %(default)s)')
+    parser_vis3d.add_argument('--elevation', type=int, default=10, metavar='ELEV',help='Camera elevation (default: %(default)s deg)')
+    parser_vis3d.add_argument('--azimuth', type=int, default=40, metavar='AZI',help='Camera azimuth (default: %(default)s deg)')
+    parser_vis3d.add_argument('--flip', action='store_true', help='Camera ViewUp flip (default: %(default)s)')
+    parser_vis3d.add_argument('--outfile', default=None, metavar='FN', help='Output image file (*.tif) (default: %(default)s)')
+    parser_vis3d.add_argument('--offscreen', action='store_true', help='Set to offscreen rendering (default: %(default)s)')
+    parser_vis3d.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
+    parser_vis3d.set_defaults(func=vis3d)
+
+    # 2d visualization
+    parser_vis2d = subparsers.add_parser('vis2d')
+    parser_vis2d.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
+    parser_vis2d.add_argument('--window', type=float, default=0.0, metavar='WINDOW',help='Initial window. For <=0, computed from dynamic range (default: %(default)s)')
+    parser_vis2d.add_argument('--level', type=float, default=0.0, metavar='LEVEL',help='Initial level. For <=0, computed from dynamic range (default: %(default)s)')
+    parser_vis2d.add_argument('--nThreads', type=int, default=1, metavar='THREAD',help='Number of threads (default: %(default)s)')
+    parser_vis2d.add_argument('--image_orientation', default='coronal', choices=['sagittal', 'coronal', 'axial'],
+                                help='Initiate a particular orientation (default: %(default)s)')
+    parser_vis2d.add_argument('--slice_percent', default=float(50), type=float, help='Set percent slice through image (default: %(default)s)')
+    parser_vis2d.add_argument('--outfile', default=None, metavar='FN', help='Output image file (*.tif) (default: %(default)s)')
+    parser_vis2d.add_argument('--offscreen', action='store_true', help='Set to offscreen rendering (default: %(default)s)')
+    parser_vis2d.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
+    parser_vis2d.set_defaults(func=vis2d)
 
     # Parse and display
     args = parser.parse_args()
     print(echo_arguments('Visualize', vars(args)))
 
     # Run program
-    Visualize(**vars(args))
+    args.func(**vars(args))
 
 if __name__ == '__main__':
     main()

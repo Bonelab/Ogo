@@ -574,7 +574,8 @@ Part – component labelling identifies each unconnected part for a label
 Validation is based on the anatomical constraints and checks that are tested:
   
 - The input image contains all expected labels (the list may be user defined)
-- A label has only one part (exceptions for Sacrum and L5, which may contain 2)
+- A label has only one part (exceptions for Sacrum and L5, which may contain 2
+  due to a Pars fracture)
 - The left and right femur are the same volume (within a given tolerance)
 - The left and right pelvis are the same volume (within a given tolerance)
 - Each bone is within the expected min/max volume range that is pre-defined

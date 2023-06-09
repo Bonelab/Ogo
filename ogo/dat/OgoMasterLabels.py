@@ -129,6 +129,7 @@ labels_dict = {
    74: {'RGB': [    0,  250,  154], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Scapula Right', 'TOTSEG': 'scapula_right'},
    75: {'RGB': [    0,  255,  127], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Clavicula Left', 'TOTSEG': 'clavicula_left'},
    76: {'RGB': [   46,  139,   87], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Clavicula Right', 'TOTSEG': 'clavicula_right'},
+   80: {'RGB': [  162,   22,   92], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Metal', 'TOTSEG': 'empty'},
    81: {'RGB': [  192,  192,  192], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Not bone', 'TOTSEG': 'empty'},
    91: {'RGB': [  128,    0,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Adipose', 'TOTSEG': 'empty'},
    92: {'RGB': [  128,  128,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Air', 'TOTSEG': 'empty'},
