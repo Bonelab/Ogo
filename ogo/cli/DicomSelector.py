@@ -148,7 +148,7 @@ def exclude_by_series_description(df,keywords):
         tmp_reduced_df = df.loc[(df['SeriesDescription'].str.contains(keyword, na=False, case=False) == False)]
         df = tmp_reduced_df
     
-    return tmp_reduced_df, '({} keys)'.format(len(keywords)), tmp_reduced_df.shape[0]  
+    return tmp_reduced_df, '('+','.join('{}'.format(k) for k in keywords)+')', tmp_reduced_df.shape[0]  
     
 def exclude_by_number_of_images(df,n_images):
     
@@ -156,12 +156,17 @@ def exclude_by_number_of_images(df,n_images):
         
     return tmp_reduced_df, '(min={})'.format(n_images), tmp_reduced_df.shape[0]
 
+def exclude_by_slice_thickness(df,slice_thickness):
+    
+    tmp_reduced_df = df.loc[(df['SliceThickness'] <= slice_thickness)]
+        
+    return tmp_reduced_df, '(Th={:.2f})'.format(slice_thickness), tmp_reduced_df.shape[0]
+
 # +------------------------------------------------------------------------------+
 # Sort scans
-def DicomSelector(csvfile,output,overwrite):
+def DicomSelector(csvfile,output,minNumberSlices,maxSliceThickness,overwrite):
     
-    minNumberOfSlices = 30
-    exclude_keywords = ['NECK','CTNKE','CTHDE','HEAD','LUNG','CHEST'] # Add LEGS, MPR, LIVER?
+    exclude_keywords = ['NECK','CTNKE','CTHDE','HEAD','CHEST'] # Add LEGS, LUNG, MPR, LIVER?
     
     # Check for valid input
     if os.path.splitext(csvfile)[1].lower() not in '.csv':
@@ -204,7 +209,6 @@ def DicomSelector(csvfile,output,overwrite):
                                     ascending=[True, True, False, True], 
                                     inplace=True)
     
-    # Remove all series with <minNumberOfSlices slices
     ogo.message('Dataframe size is {}.'.format(csvData.shape[0]))
     ogo.message('')
 
@@ -223,16 +227,23 @@ def DicomSelector(csvfile,output,overwrite):
         for this_date in date_list:
             reduced_df = name_csvData.loc[(name_csvData['AcquisitionDate'] == this_date)]
             n_series = reduced_df.shape[0]
-            ogo.message('{:s} on {}'.format(name,this_date))
+            ogo.message('{:22s} {:>10s} {:>10s}'.format(name,this_date,'N'))
             ogo.message('  {:20s} {:>10s} {:>10d}'.format('Start',' ',n_series))
             
-            # Exclude based on Number of Images
+            # Exclude based on Number of Images (slices)
             if n_series > 1:
-                reduced_df, val, n_series = exclude_by_number_of_images(reduced_df,minNumberOfSlices)
+                reduced_df, val, n_series = exclude_by_number_of_images(reduced_df,minNumberSlices)
                 ogo.message('  {:20s} {:>10} {:>10d}'.format('NumberOfImages',val,reduced_df.shape[0]))
             if debugging:
                 print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
-                  
+            
+            # Exclude based on Slice Thickness
+            if n_series > 1:
+                reduced_df, val, n_series = exclude_by_slice_thickness(reduced_df,maxSliceThickness)
+                ogo.message('  {:20s} {:>10} {:>10d}'.format('SliceThickness',val,reduced_df.shape[0]))
+            if debugging:
+                print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
+            
             # Exclude based on Series Description
             if n_series > 1:
                 reduced_df, val, n_series = exclude_by_series_description(reduced_df,exclude_keywords)
@@ -240,26 +251,26 @@ def DicomSelector(csvfile,output,overwrite):
             if debugging:
                 print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
             
-            # Include by Modality
-            if n_series > 1:
-                reduced_df, val, n_series = try_by_modality(reduced_df)
-                ogo.message('  {:20s} {:>10s} {:>10d}'.format('Modality',val,reduced_df.shape[0]))
-            if debugging:
-                print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
-             
-            # Include by Slice Thickness
-            if n_series > 1:
-                reduced_df, val, n_series = try_by_slice_thickness(reduced_df)
-                ogo.message('  {:20s} {:>10} {:>10d}'.format('SliceThickness',val,reduced_df.shape[0]))
-            if debugging:
-                print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
-            
-            # Pixel Spacing
-            if n_series > 1:
-                reduced_df, val, n_series = try_by_pixel_spacing(reduced_df)
-                ogo.message('  {:20s} {:>10} {:>10d}'.format('PixelSpacing',val,reduced_df.shape[0]))
-            if debugging:
-                print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
+            ## Include by Modality
+            #if n_series > 1:
+            #    reduced_df, val, n_series = try_by_modality(reduced_df)
+            #    ogo.message('  {:20s} {:>10s} {:>10d}'.format('Modality',val,reduced_df.shape[0]))
+            #if debugging:
+            #    print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
+            # 
+            ## Include by Slice Thickness
+            #if n_series > 1:
+            #    reduced_df, val, n_series = try_by_slice_thickness(reduced_df)
+            #    ogo.message('  {:20s} {:>10} {:>10d}'.format('SliceThickness',val,reduced_df.shape[0]))
+            #if debugging:
+            #    print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
+            #
+            ## Pixel Spacing
+            #if n_series > 1:
+            #    reduced_df, val, n_series = try_by_pixel_spacing(reduced_df)
+            #    ogo.message('  {:20s} {:>10} {:>10d}'.format('PixelSpacing',val,reduced_df.shape[0]))
+            #if debugging:
+            #    print(reduced_df.loc[:,["SeriesNumber","NumberOfReferences","SeriesDescription","SliceThickness","PixelSpacing"]])
             
             ogo.message('  {:20s} {:>10s} {:>10d}'.format('Finish',' ',n_series))
                   
@@ -358,13 +369,18 @@ def DicomSelector(csvfile,output,overwrite):
     fpull.write('conda activate ogo\n')
     fpull.write(os.linesep)
 
+    current_name = ''
     for index, row in sorted_df.iterrows():
         fname = '{}_{}_{}_{}'.format( \
             row['Name'], \
-            str(row['StudyDate']).replace('-',''), \
+            str(row['AcquisitionDate']).replace('-',''), \
             str(row['SeriesDescription']).replace(',','_').replace(' ','_').replace('__','_'), \
             int(row['SeriesNumber']) \
             )
+        this_name = '{}_{}'.format( \
+            row['Name'], \
+            str(row['AcquisitionDate']).replace('-',''))
+            
         dicompull_cmd = 'dicompull -k SeriesInstanceUID={} {}/\'{}\' -o {}\'/{}\'\n'.format( \
             row['SeriesInstanceUID'], \
             '${BASE_DIR}', \
@@ -372,18 +388,25 @@ def DicomSelector(csvfile,output,overwrite):
             '${OUTPUT_DICOM_DIR}', \
             fname \
             )
-        dicomtonifti_cmd = 'dicomtonifti -brz --fsl {}/\'{}\' -o {}\'/{}.nii.gz\'\n'.format( \
+        dicomtonifti_cmd = 'dicomtonifti -brz --fsl {}/\'{}\' -o {}\'/{}_0000.nii.gz\'\n'.format( \
             '${OUTPUT_DICOM_DIR}', \
             fname, \
             '${OUTPUT_NIFTI_DIR}', \
-            fname \
+            this_name \
             )
-        ogoVisualize_cmd = 'ogoVisualize vis2d --offscreen {}/\'{}.nii.gz\' --outfile {}/\'{}.tif\'\n'.format( \
+        ogoVisualize_cmd = 'ogoVisualize vis2d --offscreen {}/\'{}_0000.nii.gz\' --outfile {}/\'{}_0000_2d.tif\'\n'.format( \
             '${OUTPUT_NIFTI_DIR}', \
-            fname, \
+            this_name, \
             '${OUTPUT_NIFTI_DIR}', \
-            fname \
+            this_name \
             )
+        
+        if this_name != current_name:
+            name_hdr = '# {}\n'.format(this_name)
+            fpull.write(name_hdr)
+            fpull.write(os.linesep)
+            current_name = this_name
+            
         fpull.write(dicompull_cmd)
         fpull.write(dicomtonifti_cmd)
         fpull.write(ogoVisualize_cmd)
@@ -399,14 +422,24 @@ def main():
     description = '''
 Takes a CSV file of meta data where each row represents a dicom series within
 dicom studies. The selection criteria is used to narrow the search for the 
-best series. 
+best series.
+
+Currently it is set to only exclude series that are certain to be useless:
+  – excludes based on having a minimum number of slices
+  – excludes based on having a maximum slice thickness
+  – excludes any series with certain keyworks (hardcoded, not case sensitive)
+  
+If you want to try different inclusion/exclusion criteria you should edit the
+source code.
 
 '''
 
     epilog = '''
 Example call: 
      
+ogoDicomSelector list.csv ! will output list_selected.csv
 ogoDicomSelector list.csv --output narrowed_list.csv
+ogoDicomSelector list.csv --minNumberSlices 50 --output narrowed_list.csv
 
 '''
 
@@ -424,7 +457,9 @@ ogoDicomSelector list.csv --output narrowed_list.csv
                                         help='Reduced list of dicom series (*.csv, default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', 
                                         help='Overwrite output file without asking')
-
+    parser.add_argument('--minNumberSlices', type=int, nargs=1, default=30, metavar='N', help='Exclude series with fewer slices (default: %(default)s)')
+    parser.add_argument('--maxSliceThickness', type=float, nargs=1, default=3.0, metavar='MM', help='Exclude series with thicker slices (default: %(default)s mm)')
+    
     # Parse and display
     args = parser.parse_args()
     print(echo_arguments('DicomSelector', vars(args)))
