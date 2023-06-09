@@ -166,7 +166,7 @@ def exclude_by_slice_thickness(df,slice_thickness):
 # Sort scans
 def DicomSelector(csvfile,output,minNumberSlices,maxSliceThickness,overwrite):
     
-    exclude_keywords = ['NECK','CTNKE','CTHDE','HEAD','CHEST'] # Add LEGS, LUNG, MPR, LIVER?
+    exclude_keywords = ['NECK','CTNKE','CTHDE','HEAD','LEGS'] # Add CHEST, LUNG, MPR, LIVER?
     
     # Check for valid input
     if os.path.splitext(csvfile)[1].lower() not in '.csv':
@@ -381,20 +381,20 @@ def DicomSelector(csvfile,output,minNumberSlices,maxSliceThickness,overwrite):
             row['Name'], \
             str(row['AcquisitionDate']).replace('-',''))
             
-        dicompull_cmd = 'dicompull -k SeriesInstanceUID={} {}/\'{}\' -o {}\'/{}\'\n'.format( \
+        dicompull_cmd = '#dicompull -k SeriesInstanceUID={} {}/\'{}\' -o {}\'/{}\'\n'.format( \
             row['SeriesInstanceUID'], \
             '${BASE_DIR}', \
             os.path.split(row['ReferencedFileID'])[0], \
             '${OUTPUT_DICOM_DIR}', \
             fname \
             )
-        dicomtonifti_cmd = 'dicomtonifti -brz --fsl {}/\'{}\' -o {}\'/{}_0000.nii.gz\'\n'.format( \
+        dicomtonifti_cmd = '#dicomtonifti -brz --fsl {}/\'{}\' -o {}\'/{}_0000.nii.gz\'\n'.format( \
             '${OUTPUT_DICOM_DIR}', \
             fname, \
             '${OUTPUT_NIFTI_DIR}', \
             this_name \
             )
-        ogoVisualize_cmd = 'ogoVisualize vis2d --offscreen {}/\'{}_0000.nii.gz\' --outfile {}/\'{}_0000_2d.tif\'\n'.format( \
+        ogoVisualize_cmd = '#ogoVisualize vis2d --offscreen {}/\'{}_0000.nii.gz\' --outfile {}/\'{}_0000_2d.tif\'\n'.format( \
             '${OUTPUT_NIFTI_DIR}', \
             this_name, \
             '${OUTPUT_NIFTI_DIR}', \
@@ -402,7 +402,7 @@ def DicomSelector(csvfile,output,minNumberSlices,maxSliceThickness,overwrite):
             )
         
         if this_name != current_name:
-            name_hdr = '# {}\n'.format(this_name)
+            name_hdr = '# {} {:s}\n'.format(this_name,'-'*80)
             fpull.write(name_hdr)
             fpull.write(os.linesep)
             current_name = this_name
@@ -458,7 +458,7 @@ ogoDicomSelector list.csv --minNumberSlices 50 --output narrowed_list.csv
     parser.add_argument('--overwrite', action='store_true', 
                                         help='Overwrite output file without asking')
     parser.add_argument('--minNumberSlices', type=int, nargs=1, default=30, metavar='N', help='Exclude series with fewer slices (default: %(default)s)')
-    parser.add_argument('--maxSliceThickness', type=float, nargs=1, default=3.0, metavar='MM', help='Exclude series with thicker slices (default: %(default)s mm)')
+    parser.add_argument('--maxSliceThickness', type=float, nargs=1, default=4.0, metavar='MM', help='Exclude series with thicker slices (default: %(default)s mm)')
     
     # Parse and display
     args = parser.parse_args()
