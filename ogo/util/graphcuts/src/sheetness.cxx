@@ -97,7 +97,7 @@ int main(int argc, char * argv[])
   thresholder->SetUpperThreshold(threshold);
   thresholder->Update();
 
-	std::cout << "Connected components filter on background" << std::endl;
+  std::cout << "Connected components filter on background" << std::endl;
   ConnectedComponentImageFilterType::Pointer connected = ConnectedComponentImageFilterType::New ();
   connected->SetInput(thresholder->GetOutput());
 
@@ -109,8 +109,8 @@ int main(int argc, char * argv[])
 
   MaskThesholdFilter::Pointer inverter = MaskThesholdFilter::New();
   inverter->SetInput(labelShapeKeepNObjectsImageFilter->GetOutput());
-	inverter->SetUpperThreshold(0);
-	inverter->Update();
+  inverter->SetUpperThreshold(0);
+  inverter->Update();
 
   std::cout << "Writing mask to " << maskFileName << std::endl;
   MaskWriterType::Pointer maskWriter = MaskWriterType::New();
@@ -131,8 +131,8 @@ int main(int argc, char * argv[])
 
   MaskThesholdFilter2::Pointer inverter2 = MaskThesholdFilter2::New();
   inverter2->SetInput(thresholder->GetOutput());
-	inverter2->SetUpperThreshold(0);
-	inverter2->Update();
+  inverter2->SetUpperThreshold(0);
+  inverter2->Update();
 
   StructuringElementType structuringElement = StructuringElementType::Ball( radius );
   ErodeFilterType::Pointer erodeFilter = ErodeFilterType::New();
@@ -140,11 +140,11 @@ int main(int argc, char * argv[])
   erodeFilter->SetKernel( structuringElement );
   erodeFilter->Update();
 
-	MaskSpatialObject::Pointer skinMaskSpatialObject = MaskSpatialObject::New();
-	skinMaskSpatialObject->SetImage(inverter->GetOutput());
+  MaskSpatialObject::Pointer skinMaskSpatialObject = MaskSpatialObject::New();
+  skinMaskSpatialObject->SetImage(inverter->GetOutput());
 
-	MaskSpatialObject::Pointer erodedMaskSpatialObject = MaskSpatialObject::New();
-	erodedMaskSpatialObject->SetImage(erodeFilter->GetOutput());
+  MaskSpatialObject::Pointer erodedMaskSpatialObject = MaskSpatialObject::New();
+  erodedMaskSpatialObject->SetImage(erodeFilter->GetOutput());
 
   /* Multiscale measure */
   MultiScaleHessianFilterType::Pointer multiScaleFilter = MultiScaleHessianFilterType::New();
@@ -156,7 +156,7 @@ int main(int argc, char * argv[])
   CalgaryEigenToMeasureImageFilterType::Pointer calgaryFilter = CalgaryEigenToMeasureImageFilterType::New();
 
   estimationFilter->SetMask(erodedMaskSpatialObject);
-	calgaryFilter->SetMask(skinMaskSpatialObject);
+  calgaryFilter->SetMask(skinMaskSpatialObject);
 
   estimationFilter->SetFrobeniusNormWeight(weight);
 

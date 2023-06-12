@@ -79,7 +79,7 @@ int main(int argc, char * argv[])
   } else {
     std::cout << "  SetEnhanceBrightObjects:     " << "Enhancing dark objects" << std::endl;
   }
-  std::cout << "  NumberOfSigma:               " << numberOfSigma << std::endl;
+  std::cout << "  Number of Sigma:             " << numberOfSigma << std::endl;
   std::cout << "  Minimum Sigma:               " << minSigma << std::endl;
   std::cout << "  Maximum Sigma:               " << maxSigma << std::endl;
   std::cout << "  Low Threshold:               " << lowThreshold << std::endl;
@@ -93,7 +93,7 @@ int main(int argc, char * argv[])
   reader->SetFileName(inputFileName);
   reader->Update();
 
-  std::cout << "Creating mask by thresholding outside [" << lowThreshold << "-" << highThreshold << "]" << std::endl;
+  std::cout << "Creating mask by thresholding outside [" << lowThreshold << " - " << highThreshold << "]" << std::endl;
   BinaryThesholdFilter::Pointer thresholder = BinaryThesholdFilter::New();
   thresholder->SetInput(reader->GetOutput());
   thresholder->SetLowerThreshold(lowThreshold);
@@ -161,10 +161,17 @@ int main(int argc, char * argv[])
   CalgaryEigenToMeasureImageFilterType::Pointer calgaryFilter = CalgaryEigenToMeasureImageFilterType::New();
 
   estimationFilter->SetMask(erodedMaskSpatialObject);
-  calgaryFilter->SetMask(skinMaskSpatialObject);
-
   estimationFilter->SetFrobeniusNormWeight(weight);
 
+  calgaryFilter->SetMask(skinMaskSpatialObject);
+  if (enhanceBrightObjects == 1) {
+    calgaryFilter->SetEnhanceBrightObjects();
+    std::cout << "  Enhancing bright objects" << std::endl;
+  } else {
+    calgaryFilter->SetEnhanceDarkObjects();
+    std::cout << "  Enhancing dark objects" << std::endl;
+  }
+  
   std::cout << "Running multiScaleFilter..." << std::endl;
   multiScaleFilter->SetInput(reader->GetOutput());
   multiScaleFilter->SetEigenToMeasureImageFilter(calgaryFilter);
