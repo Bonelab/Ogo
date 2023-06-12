@@ -69,6 +69,11 @@ def sheetness(input_image, sheet_image, path_binaries, enhance, \
     if not (sheet_image.lower().endswith('.nii') or sheet_image.lower().endswith('.nii.gz')):
         os.sys.exit('[ERROR] Output sheet image must be type NIFTI file: \"{}\"'.format(sheet_image))
     
+    # Check trace_weight within allowable 
+    if trace_weight < 0 or trace_weight > 1:
+        ogo.message('Trace weight out of range: {}'.format(trace_weight))
+        os.sys.exit()
+        
     ogo.message('{}'.format('-------------- Files'))
     ogo.message('{:>7s}: {}'.format('input',input_image))
     ogo.message('{:>7s}: {}'.format('skin',skin_image))
@@ -86,9 +91,9 @@ def sheetness(input_image, sheet_image, path_binaries, enhance, \
     ogo.message('Starting analysis...')
 
     if (enhance=='bright'):
-        enhance_mode=True
+        enhance_mode=1
     else:
-        enhance_mode=False
+        enhance_mode=0
             
     # Assemble the command for executing the Sheetness2 function
     cmd = [
@@ -97,8 +102,7 @@ def sheetness(input_image, sheet_image, path_binaries, enhance, \
     ]
     
     cmd = [str(x) for x in cmd]
-    ogo.message('  CMD: {}'.format(cmd))
-    exit()
+    #ogo.message('  CMD: {}'.format(cmd))
     
     res = subprocess.check_output(cmd)
     
@@ -301,7 +305,10 @@ in Ogo/ogo/util/graphcuts . If you try and execute ogoGraphCuts without
 installing the binaries first you will be redirected OGO_GRAPHCUTS_INSTALL.txt
 
 sheetness – Computes an image enhancement using eigenvalues of the local 
-            Hessian matrix over many scales.
+            Hessian matrix over many scales. The trace_weight variable affects 
+            contrast significantly (more contrast with lower value). Set a range
+            of sigma and the filter will find the optimum. Set the threshold 
+            upper/lower to identify data over which parameters are optimized.
 '''
 
     epilog = '''
@@ -330,9 +337,9 @@ ogoGraphCuts periosteal image_MARK.nii.gz
     parser_sheetness.add_argument('--sheet_image', metavar='FILE', help='Output sheetness image (*.nii, *.nii.gz) (default: input_image_SHEET.nii.gz)')
     parser_sheetness.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
     parser_sheetness.add_argument('--enhance', default='bright', choices=['bright', 'dark'], help='Select enhancement mode (default: %(default)s)')
-    parser_sheetness.add_argument('--num_sigma', metavar='INT', type=int, default=2, help='Number of sigma steps to use for enhancing in Hessian filter (default: %(default)s)')
-    parser_sheetness.add_argument('--min_sigma', metavar='FLOAT', type=float, default=0.5, help='Minimum sigma (default: %(default)s)')
-    parser_sheetness.add_argument('--max_sigma', metavar='FLOAT', type=float, default=1.0, help='Maximum sigma (default: %(default)s)')
+    parser_sheetness.add_argument('--num_sigma', metavar='INT', type=int, default=2, help='Number of sigmas to test for enhancing in Hessian filter (default: %(default)s)')
+    parser_sheetness.add_argument('--min_sigma', metavar='FLOAT', type=float, default=0.5, help='Minimum sigma to test (default: %(default)s)')
+    parser_sheetness.add_argument('--max_sigma', metavar='FLOAT', type=float, default=1.0, help='Maximum sigma to test (default: %(default)s)')
     parser_sheetness.add_argument('--air_thres', metavar='FLOAT', type=float, default=-400.0, help='Threshold for determining air (default: %(default)s)')
     parser_sheetness.add_argument('--metal_thres', metavar='FLOAT', type=float, default=1200.0, help='Threshold for determining metal (default: %(default)s)')
     parser_sheetness.add_argument('--trace_weight', metavar='FLOAT', type=float, default=0.05, help='Frobenius norm weight for reducing noise (default: %(default)s)')
