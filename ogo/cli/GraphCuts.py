@@ -22,7 +22,7 @@ import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
         
 # +------------------------------------------------------------------------------+
-def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
+def sheetness(input_image, sheet_image, path_binaries, enhance, \
               num_sigma, min_sigma, max_sigma, air_thres, metal_thres, trace_weight, \
               overwrite, func):
 
@@ -74,7 +74,7 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     ogo.message('{:>7s}: {}'.format('skin',skin_image))
     ogo.message('{:>7s}: {}'.format('sheet',sheet_image))
     ogo.message('{}'.format('--------- Parameters'))
-    ogo.message('{:>15s}: {:>12s}'.format('enhance_bright',str(enhance_bright)))
+    ogo.message('{:>15s}: {:>12s}'.format('enhance',str(enhance)))
     ogo.message('{:>15s}: {:12d}'.format('num_sigma',num_sigma))
     ogo.message('{:>15s}: {:12.2f}'.format('min_sigma',min_sigma))
     ogo.message('{:>15s}: {:12.2f}'.format('max_sigma',max_sigma))
@@ -85,15 +85,21 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     ogo.message('  {}'.format(sheetness_binary_path))
     ogo.message('Starting analysis...')
 
+    if (enhance=='bright'):
+        enhance_mode=True
+    else:
+        enhance_mode=False
+            
     # Assemble the command for executing the Sheetness2 function
     cmd = [
-      sheetness_binary_path, input_image, skin_image, sheet_image, enhance_bright,
+      sheetness_binary_path, input_image, skin_image, sheet_image, enhance_mode,
       num_sigma, min_sigma, max_sigma, air_thres, metal_thres, trace_weight
     ]
     
     cmd = [str(x) for x in cmd]
-    #ogo.message('  CMD: {}'.format(cmd))
-
+    ogo.message('  CMD: {}'.format(cmd))
+    exit()
+    
     res = subprocess.check_output(cmd)
     
     #ogo.message('Results: {}'.format(res))
@@ -293,6 +299,9 @@ It is necessary to install and compile the binaries for graph cuts before
 this script will work. To learn more, read OGO_GRAPHCUTS_INSTALL.txt located
 in Ogo/ogo/util/graphcuts . If you try and execute ogoGraphCuts without 
 installing the binaries first you will be redirected OGO_GRAPHCUTS_INSTALL.txt
+
+sheetness – Computes an image enhancement using eigenvalues of the local 
+            Hessian matrix over many scales.
 '''
 
     epilog = '''
@@ -320,13 +329,13 @@ ogoGraphCuts periosteal image_MARK.nii.gz
     parser_sheetness.add_argument('input_image', metavar='FILE IN', help='Input raw CT image file (*.nii, *.nii.gz)')
     parser_sheetness.add_argument('--sheet_image', metavar='FILE', help='Output sheetness image (*.nii, *.nii.gz) (default: input_image_SHEET.nii.gz)')
     parser_sheetness.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
-    parser_sheetness.add_argument('--enhance_bright', action='store_false', help='Enhance bright objects (default: %(default)s)')
-    parser_sheetness.add_argument('--num_sigma', metavar='INT', type=int, default=2, help='How many sigmas to use for enhancing (default: %(default)s)')
-    parser_sheetness.add_argument('--min_sigma', metavar='FLOAT', type=float, default=0.5, help='How many sigmas to use for enhancing (default: %(default)s)')
-    parser_sheetness.add_argument('--max_sigma', metavar='FLOAT', type=float, default=1.0, help='How many sigmas to use for enhancing (default: %(default)s)')
+    parser_sheetness.add_argument('--enhance', default='bright', choices=['bright', 'dark'], help='Select enhancement mode (default: %(default)s)')
+    parser_sheetness.add_argument('--num_sigma', metavar='INT', type=int, default=2, help='Number of sigma steps to use for enhancing in Hessian filter (default: %(default)s)')
+    parser_sheetness.add_argument('--min_sigma', metavar='FLOAT', type=float, default=0.5, help='Minimum sigma (default: %(default)s)')
+    parser_sheetness.add_argument('--max_sigma', metavar='FLOAT', type=float, default=1.0, help='Maximum sigma (default: %(default)s)')
     parser_sheetness.add_argument('--air_thres', metavar='FLOAT', type=float, default=-400.0, help='Threshold for determining air (default: %(default)s)')
     parser_sheetness.add_argument('--metal_thres', metavar='FLOAT', type=float, default=1200.0, help='Threshold for determining metal (default: %(default)s)')
-    parser_sheetness.add_argument('--trace_weight', metavar='FLOAT', type=float, default=0.05, help='Weight for reducing noise (default: %(default)s)')
+    parser_sheetness.add_argument('--trace_weight', metavar='FLOAT', type=float, default=0.05, help='Frobenius norm weight for reducing noise (default: %(default)s)')
     parser_sheetness.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking (default: %(default)s)')
     parser_sheetness.set_defaults(func=sheetness)
 
