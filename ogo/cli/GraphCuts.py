@@ -304,11 +304,14 @@ this script will work. To learn more, read OGO_GRAPHCUTS_INSTALL.txt located
 in Ogo/ogo/util/graphcuts . If you try and execute ogoGraphCuts without 
 installing the binaries first you will be redirected OGO_GRAPHCUTS_INSTALL.txt
 
-sheetness – Computes an image enhancement using eigenvalues of the local 
-            Hessian matrix over many scales. The trace_weight variable affects 
-            contrast significantly (more contrast with lower value). Set a range
-            of sigma and the filter will find the optimum. Set the threshold 
-            upper/lower to identify data over which parameters are optimized.
+sheetness – A filter to enhance structures using Hessian eigensystem-based 
+            measures in a multiscale framework. Minimum and maximum sigma and 
+            number of scales can be set. Output sheetness file has values that
+            range between -1 and 1. The trace_weight variable affects 
+            contrast significantly (more contrast with lower value). Set the 
+            threshold upper/lower to identify data over which parameters are 
+            optimized. The enhance bright fills the bone from inside to out 
+            (dark inverts the sheetness output).
 '''
 
     epilog = '''

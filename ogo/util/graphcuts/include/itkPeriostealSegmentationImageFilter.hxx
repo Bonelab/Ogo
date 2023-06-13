@@ -39,6 +39,14 @@ PeriostealSegmentationImageFilter< TInputImage, TMaskImage, TOutputImage >
 {
   DistanceType weight = 0;
 
+  /*
+  std::cout << "----------------:   ComputeDataTerm" << std::endl;
+  std::cout << "  InputPixelType:   " << p << std::endl;
+  std::cout << "       LabelType:   " << l << std::endl;
+  std::cout << "   MaskPixelType:   " << m << std::endl;
+  std::cout << std::endl;
+  */
+  
   switch (l) {
     case 0:
       // {p,S}
@@ -77,6 +85,16 @@ PeriostealSegmentationImageFilter< TInputImage, TMaskImage, TOutputImage >
 {
   DistanceType weight = 0;
 
+  /*
+  std::cout << "----------------:   ComputeSmoothnessTerm" << std::endl;
+  std::cout << "  InputPixelType:   " << p << std::endl;
+  std::cout << "  InputPixelType:   " << q << std::endl;
+  std::cout << "    DistanceType:   " << d << std::endl;
+  std::cout << "   MaskPixelType:   " << m_p << std::endl;
+  std::cout << "   MaskPixelType:   " << m_q << std::endl;
+  std::cout << std::endl;
+  */
+  
   if ( (p > q) )
   {
     weight = std::exp(-1.0 * (std::pow(p - q, 2)) / (2.0* std::pow(this->m_Sigma, 2) ) );

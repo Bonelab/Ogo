@@ -158,11 +158,10 @@ int main(int argc, char * argv[])
   std::cout << "Sigma Array: " << sigmaArray << std::endl;
 
   CalgaryEigenToMeasureParameterEstimationFilterType::Pointer estimationFilter = CalgaryEigenToMeasureParameterEstimationFilterType::New();
-  CalgaryEigenToMeasureImageFilterType::Pointer calgaryFilter = CalgaryEigenToMeasureImageFilterType::New();
-
   estimationFilter->SetMask(erodedMaskSpatialObject);
   estimationFilter->SetFrobeniusNormWeight(weight);
 
+  CalgaryEigenToMeasureImageFilterType::Pointer calgaryFilter = CalgaryEigenToMeasureImageFilterType::New();
   calgaryFilter->SetMask(skinMaskSpatialObject);
   if (enhanceBrightObjects == 1) {
     calgaryFilter->SetEnhanceBrightObjects();
