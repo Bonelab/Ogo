@@ -8,12 +8,28 @@
 # Imports
 import argparse
 import os
+import SimpleITK as sitk
+import ogo.dat.OgoMasterLabels as lb
+
 import vtk
 import numpy as np
 from vtk.util.numpy_support import vtk_to_numpy
 from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 
+def get_labels(ct):
+    filt = sitk.LabelShapeStatisticsImageFilter()
+    filt.Execute(ct)
+    labels = filt.GetLabels()
+    return labels
+
+def get_label_description(label):
+    try:
+        desc = lb.labels_dict[label]['LABEL']
+    except KeyError:
+        desc = 'unknown label'
+    return desc
+    
 def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, keepOnlyLabels, overwrite=False):
 
     #ogo.message('Start ogoReplaceLabels!')
@@ -31,93 +47,132 @@ def ReplaceLabels(input_filename, output_filename, inputLabels, outputLabels, ke
         ogo.message('       [input #{:d} != output #{:d}]'.format(len(inputLabels),len(outputLabels)))
         os.sys.exit()
     
-    # Check that at least least one set of labels is defined
-    if len(inputLabels) < 1:
-        ogo.message('ERROR: At least one label must be defined.')
+    # Check that either inputLabels or keepOnlyLabels are defined (one or the other, or both is OK)
+    if (not inputLabels) and (not keepOnlyLabels):
+        ogo.message('ERROR: No labels defined.')
+        ogo.message('       Define --keepOnlyLabels or --inputLabels & --outputLabels')
         os.sys.exit()
-        
-    # Check that labels exist and are in range
-    print('Labels to be replaced:')
-    for idx,ids in enumerate(inputLabels):
-        print('!> {:3d} --> {:3d}'.format(inputLabels[idx],outputLabels[idx]))
-        if (inputLabels[idx]<0 or inputLabels[idx]>255 or outputLabels[idx]<0 or outputLabels[idx]>255):
-            ogo.message('ERROR: Labels out of range. Must be 0-255.')
-            ogo.message('       [Suspects are input label {:d} or output label {:d}]'.format(inputLabels[idx],outputLabels[idx]))
-            os.sys.exit()
-    
-    # Making a map for the labels
-    map_for_labels = dict(zip(inputLabels, outputLabels))
 
+    # Feedback on labels to be replaced
+    ogo.message('')
+    ogo.message('Labels to be replaced:')
+    if inputLabels:
+        for idx,ids in enumerate(inputLabels):
+            desc1 = get_label_description(inputLabels[idx])
+            desc2 = get_label_description(outputLabels[idx])
+            ogo.message('!> {:3d} ({:s})  --> {:3d} ({:s})'.format(inputLabels[idx],desc1,outputLabels[idx],desc2))
+            if (inputLabels[idx]<0 or inputLabels[idx]>255 or outputLabels[idx]<0 or outputLabels[idx]>255):
+                ogo.message('ERROR: Labels out of range. Must be 0-255.')
+                ogo.message('       [Suspects are input label {:d} or output label {:d}]'.format(inputLabels[idx],outputLabels[idx]))
+                os.sys.exit()
+    else:
+        ogo.message('!> none defined')
+    map_for_labels = dict(zip(inputLabels, outputLabels))
+    
+    # Feedback on labels to keep
+    ogo.message('')
+    ogo.message('Labels to keep:')
+    if keepOnlyLabels:
+        for idx,ids in enumerate(keepOnlyLabels):
+            ogo.message('!> {:3d} ({:s})'.format(keepOnlyLabels[idx],get_label_description(keepOnlyLabels[idx])))
+            if (keepOnlyLabels[idx]<0 or keepOnlyLabels[idx]>255):
+                ogo.message('ERROR: Labels out of range. Must be 0-255.')
+                ogo.message('       [Culprit is {:d}]'.format(keepOnlyLabels[idx]))
+                os.sys.exit()
+    else:
+        ogo.message('!> none defined')
+    ogo.message('')
+    
     # Read input
     if not os.path.isfile(input_filename):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_filename))
 
-    if input_filename.lower().endswith('.nii'):
-        reader = vtk.vtkNIFTIImageReader()
-    elif input_filename.lower().endswith('.nii.gz'):
-        reader = vtk.vtkNIFTIImageReader()
-    else:
-        os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(input_filename))
+    if not (input_filename.lower().endswith('.nii') or input_filename.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_filename))
+        
+    ogo.message('Reading image: ')
+    ogo.message('\"{}\"'.format(input_filename))
+    ct = sitk.ReadImage(input_filename, sitk.sitkUInt8)
+    ogo.message('')
+    
+    # Get all the available labels in the input image
+    labels = get_labels(ct)
+    n_labels = len(labels)
 
-    print()
-    ogo.message('Reading input image ' + input_filename)
-    reader.SetFileName(input_filename)
-    reader.Update()
+    ogo.message('Input image contains the following labels:')
+    for label in labels:
+        ogo.message('!> {:3d} ({:s})'.format(label,get_label_description(label)))
     
-    image = reader.GetOutput() # pointer to image
+    # Create a copy
+    #ct_base = sitk.Image(ct) # Do we need to make a deep copy
+    ct_base = ct<0
     
-    scalarType = image.GetScalarType()
-    ogo.message('Input image scalar type: {:s}'.format(image.GetScalarTypeAsString()))
-    
-    ogo.message('Input image labels:')
-    ogo.histogram(image,128)
+    # Remove all labels except the ones defined to keep
+    ogo.message('')
+    ogo.message('!> Keeping labels...')
+    if keepOnlyLabels:
+        for label in labels:
+            if label in keepOnlyLabels:
+                
+                bin_part = ct==label
+                mask = 1 - bin_part
+                ct_base = sitk.Mask(ct_base, mask)
+                ct_base = ct_base + label*bin_part
+                
+                ogo.message('!>   Passing label {} ({}) to output.'.format(label,get_label_description(label)))
+                
+    else: # pass all labels through if keepOnlyLabels not set
+        ct_base = ct
+        ogo.message('!>   Passing all labels to output.')
+        
+    # Replace labels
+    ogo.message('')
+    ogo.message('!> Changing labels...')
+    if inputLabels:
+        for idx,label in enumerate(inputLabels):
+            new_label = outputLabels[idx]
+            #print(idx,label,new_label)
+            if label in get_labels(ct_base):
+                bin_part = ct==label
+                mask = 1 - bin_part
+                ct_base = sitk.Mask(ct_base, mask)
+                ct_base = ct_base + new_label*bin_part
+                ogo.message('!>   Changing label {} ({}) to {} ({}) in output.'.format(label,get_label_description(label),new_label,get_label_description(new_label)))
+            else:
+                ogo.message('!>   Label {} ({}) not available.'.format(label,get_label_description(label)))
 
-    array = vtk_to_numpy(image.GetPointData().GetScalars())
+    # Write output
+    labels = get_labels(ct_base)
+    ogo.message('')
+    ogo.message('Output image contains the following labels:')
+    for label in labels:
+        ogo.message('!> {:3d} ({:s})'.format(label,get_label_description(label)))
     
-    # Replace each label by cycling through image data; one cycle per label
-    for idx,lab in enumerate(map_for_labels):
-        ogo.message('!> Replacing {:d} with {:d}'.format(inputLabels[idx],outputLabels[idx]))
-        count = np.count_nonzero(array == inputLabels[idx])
-        ogo.message('!> --> replaced {:d} labels'.format(count))
-        array[array == inputLabels[idx]] = outputLabels[idx]
-    
-    ogo.message('Output image labels:')
-    ogo.histogram(image,128)
-
-    # Create writer
-    if output_filename.lower().endswith('.nii'):
-        writer = vtk.vtkNIFTIImageWriter()
-    elif output_filename.lower().endswith('.nii.gz'):
-        writer = vtk.vtkNIFTIImageWriter()
-    else:
-        os.sys.exit('[ERROR] Cannot find writer for file \"{}\"'.format(output_filename))
-          
-    ogo.message('Saving output image ' + output_filename)
-    writer.SetInputData(image)
-    writer.SetFileName(output_filename)
-    writer.SetTimeDimension(reader.GetTimeDimension())
-    writer.SetTimeSpacing(reader.GetTimeSpacing())
-    writer.SetRescaleSlope(reader.GetRescaleSlope())
-    writer.SetRescaleIntercept(reader.GetRescaleIntercept())
-    writer.SetQFac(reader.GetQFac())
-    writer.SetQFormMatrix(reader.GetQFormMatrix())
-    writer.SetNIFTIHeader(reader.GetNIFTIHeader())
-    writer.Update()
-    ogo.message('Done ogoReplaceLabels!')
+    ogo.message('')
+    ogo.message('Writing output image:')
+    ogo.message('  {}'.format(output_filename))
+    sitk.WriteImage(ct_base, output_filename)            
     
 def main():
     # Setup description
     description='''
 Utility to read a segmented image and replace existing labels with new labels.
-It can be used to remove labels from an image (e.g., replace with background
-of 0) or to change a label. It will replace labels in the order they are 
-listed, so be cautious about overwriting labels.
 
-Valid input and output labels should be within 0 - 255 (inclusive)
+It can be used to remove all but the labels you want to keep (keepOnlyLabels)
+or to change a label (inputLabels/outputLabels). If changing labels then the
+number of inputLabels must equal the number of outputLabels.
+
+You can do both keep labels and change labels at the same time. If the labels
+you want to change are NOT in the list of labels you keep (default is to keep
+all) then it cannot be swapped. 
+
+Input labels must be between 0 and 255.
 '''
     epilog='''
 Example call: 
 ogoReplaceLabels input.nii.gz output.nii.gz --inputLabels 4 5 --outputLabels 0 7
+ogoReplaceLabels input.nii.gz output.nii.gz --inputLabels 4 5 --outputLabels 0 7 --keepOnlyLabels 1 2 3 4 5
+ogoReplaceLabels input.nii.gz output.nii.gz --keepOnlyLabels 1 2 3 4 5 6 7
 '''
 
     # Setup argument parsing
@@ -129,8 +184,8 @@ ogoReplaceLabels input.nii.gz output.nii.gz --inputLabels 4 5 --outputLabels 0 7
     )
     parser.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
     parser.add_argument('output_filename', help='Output image file (*.nii, *.nii.gz)')
-    parser.add_argument('--inputLabels', type=int, nargs='*', default=[0], metavar='ID', help='Target label input IDs; space separated (e.g. 1 2 3)')
-    parser.add_argument('--outputLabels', type=int, nargs='*', default=[0], metavar='ID', help='Target label output IDs; space separated (e.g. 4 5 6)')
+    parser.add_argument('--inputLabels', type=int, nargs='*', default=[], metavar='ID', help='Target label input IDs; space separated (e.g. 1 2 3)')
+    parser.add_argument('--outputLabels', type=int, nargs='*', default=[], metavar='ID', help='Target label output IDs; space separated (e.g. 4 5 6)')
     parser.add_argument('--keepOnlyLabels', type=int, nargs='*', default=[], metavar='ID', help='Labels to keep (others removed); (e.g. 7 8 9)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
 
