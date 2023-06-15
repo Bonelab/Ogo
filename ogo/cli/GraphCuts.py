@@ -335,6 +335,11 @@ Cite:
 Boykov Y, Funka-Lea G, 2006. Graph cuts and efficient N-D image segmentation. 
 Int J Comput Vision 70, 109-131. doi = 10.1007/s11263-006-7934-5 
 
+Besler BA, Michalski AS, Kuczynski MT, Abid A, Forkert ND, Boyd SK, 2021. Bone 
+and joint enhancement filtering: Application to proximal femur segmentation from 
+uncalibrated computed tomography datasets. Med Image Anal 67, 101887. 
+doi = 10.1016/j.media.2020.101887
+
 Example calls: 
 ogoGraphCuts sheetness image.nii.gz
 ogoGraphCuts periosteal image_MARK.nii.gz --sheet_image image_SHEET.nii.gz
