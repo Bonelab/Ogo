@@ -295,23 +295,38 @@ image. Second, a labelled image is fed into the algorithm to define the
 periosteal surfaces for each labelled bone. You must create the sheetness
 image before you can generate the periosteal surfaces.
 
-This python program is only a convenience tool for accessing the graph cuts
-software available here:
-https://gridcut.com/downloads.php
+This python program is only a convenience tool for accessing filtering 
+(Hessian) to create the sheetness file and then the graph cuts algorithm
+itself: https://gridcut.com/downloads.php
 
 It is necessary to install and compile the binaries for graph cuts before 
 this script will work. To learn more, read OGO_GRAPHCUTS_INSTALL.txt located
 in Ogo/ogo/util/graphcuts . If you try and execute ogoGraphCuts without 
 installing the binaries first you will be redirected OGO_GRAPHCUTS_INSTALL.txt
 
-sheetness – A filter to enhance structures using Hessian eigensystem-based 
-            measures in a multiscale framework. Minimum and maximum sigma and 
-            number of scales can be set. Output sheetness file has values that
-            range between -1 and 1. The trace_weight variable affects 
-            contrast significantly (more contrast with lower value). Set the 
-            threshold upper/lower to identify data over which parameters are 
-            optimized. The enhance bright fills the bone from inside to out 
-            (dark inverts the sheetness output).
+Some more details for each sub routine are:
+
+sheetness –  A filter to enhance structures using Hessian eigensystem-based 
+             measures in a multiscale framework. Minimum and maximum sigma and 
+             number of scales can be set. The output sheetness file has values 
+             that range between -1 and 1. The trace_weight variable affects 
+             contrast significantly (more contrast with lower value). Set the 
+             threshold upper/lower to identify data over which some parameters 
+             are optimized. The option enhance should be in bright mode for bone
+             (dark inverts the sheetness output).
+             
+             If applying sheetness for segmentation of soft tissues (not bone) you
+             may wish to pre-process your input CT image to window voxel intensities
+             in the soft tissue range using ogoImageIntensityWindowingFilter. 
+             Values that seem to work well are a window of -200 to 120 and output of
+             -400 to 1500. You can then use this sheetness filter, but select 
+             options of num_sigma 2, min_sigma 0.5, max_sigma 2.0, trace_weight 0.10.
+            
+periosteal - takes the sheetness image and a rough marking of the objects to be 
+             segmented and applies the grid cut algorithm (graph cuts) to produce
+             a segmented file. If segmentation is unsatisfactory, extend the rough
+             markings accordingly. The parameter gc_lambda affects geometric flow.
+
 '''
 
     epilog = '''
@@ -322,7 +337,7 @@ Int J Comput Vision 70, 109-131. doi = 10.1007/s11263-006-7934-5
 
 Example calls: 
 ogoGraphCuts sheetness image.nii.gz
-ogoGraphCuts periosteal image_MARK.nii.gz
+ogoGraphCuts periosteal image_MARK.nii.gz --sheet_image image_SHEET.nii.gz
 '''
 
     # Setup argument parsing
