@@ -28,11 +28,17 @@ Install
 
     # I would recommend you create a virtual environment
     #  using conda
-	conda create -n ogo -c numerics88 -c simpleitk -c conda-forge n88tools simpleitk dicom2nifti pbr nose six python=3
+	  conda create -n ogo -c numerics88 -c simpleitk -c conda-forge n88tools simpleitk dicom2nifti pbr nose six python=3
     
-	# Activate your conda environment, make sure you have conda installed on your system.
+	  # Activate your conda environment, make sure you have conda installed on your system.
     # Best way to install conda is through anaconda
     conda activate ogo
+
+    # Clone the repository onto your computer and change into the directory.
+    # .... with SSH:
+    git@github.com:Bonelab/Ogo.git
+    # ... or with HTTPS:
+    https://github.com/Bonelab/Ogo.git
     
     # Install in an 'editable' format 
     pip install -e .
@@ -154,8 +160,8 @@ with the :code:`ogo` environment activated.
      - allow either offscreen or interactive visualization of labels
    * - :code:`ogoMorphologicalOperation`
      - performs dilate, erode, opening, closing on labels
-   * - :code:`ogodcm2nii`
-     - convert DICOM files to NIfTI images
+   * - :code:`ogoDemonsRegistration`
+     - performs SimpleITK's Demons Registration on two .nii images using an atlas and atlas mask and creates a new mask for the fixed image
 
 Developer Notes
 ===============
