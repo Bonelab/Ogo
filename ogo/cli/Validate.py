@@ -451,8 +451,12 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     ogo.message('Done.')
 
 # +------------------------------------------------------------------------------+
-def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite, func):
+def repair(input_image, output_image, relabel_parts, threshold_by_min_volume, \
+           threshold_by_max_number_parts, min_volume, max_number_parts, \
+           skip_labels, overwrite, func):
 
+    an_action_was_defined = False # Changed to True if any action is defined.
+        
     # Check if output exists and should overwrite
     if os.path.isfile(output_image) and not overwrite:
         result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
@@ -477,22 +481,23 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
     ogo.message('Input image contains the following labels:')
     ogo.message('  [' + ', '.join('{:d}'.format(i) for i in labels) + ']')
 
-    # Prepare to go through labels and parts
+    # Set up SITK filters
     filt = sitk.LabelShapeStatisticsImageFilter()
     filt.Execute(ct)
-    n_labels = filt.GetNumberOfLabels()
-    labels = filt.GetLabels()
     
     conn = sitk.ConnectedComponentImageFilter()
     conn.SetFullyConnected(True)
     
-    if relabel_parts == [] and remove_by_volume == 0:
-        ogo.message('No operations requested. Suggest setting one of the following:')
-        ogo.message('  --relabel_parts')
-        ogo.message('  --remove_by_volume')
-        
+    stats = sitk.LabelIntensityStatisticsImageFilter()
+    
+    # Start with a copy of the original CT. We'll erase labels we don't want.
+    ct_base = sitk.Image(ct)
+    #ct_base = sitk.Image(ct)<0 # with all zeros
+    
+    # ---------------------------------------------------    
+    # Relabel parts
     if (relabel_parts):
-        ct_base = sitk.Image(ct) # Do we need to make a deep copy
+        an_action_was_defined = True
         
         if np.remainder(len(relabel_parts),3) != 0:
             os.sys.exit('[ERROR] Incorrect definition for --relabel_parts. Tuples of 3 are expected.')
@@ -505,34 +510,118 @@ def repair(input_image, output_image, relabel_parts, remove_by_volume, overwrite
             label = int(swap[0])
             part = int(swap[1])
             new_label = int(swap[2])
+            
+            if label not in labels:
+                ogo.message('[ERROR] The label {} is not in image.'.format(label))
+                os.sys.exit()
                         
             ct_thres = ct==label
             ct_conn = conn.Execute(ct,ct_thres)
             ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
-            
+                        
             filt.Execute(ct_conn_sorted)
             size = filt.GetPhysicalSize(part)
             
             ct_part = (ct_conn_sorted==part)
             
-            ogo.message('  label {:d} ({:s}), part {} ({:.1f} mm3) --> {} ({})'\
-                        .format(label,lb.labels_dict[label]['LABEL'],part,size,new_label,lb.labels_dict[new_label]['LABEL']))
+            try:
+                desc_label = lb.labels_dict[label]['LABEL']
+            except KeyError:
+                desc_label = 'unknown label'
+
+            try:
+                desc_new_label = lb.labels_dict[new_label]['LABEL']
+            except KeyError:
+                desc_new_label = 'unknown label'
+            
+            ogo.message('  label {:d} ({:s}), part {} ({:.1f} mm3) --> {} ({})'.format(\
+                           label, desc_label, part, size, new_label, desc_new_label))
             
             bin_part = ct_part>0
             mask = 1 - bin_part
             ct_base = sitk.Mask(ct_base, mask)
             ct_base = ct_base + new_label*bin_part
-        
-        ct_final = ct_base
-        
-    final_labels = get_labels(ct_final)
+
+    # ---------------------------------------------------    
+    # Threshold by volume or maximum number of parts
+    if threshold_by_min_volume or threshold_by_max_number_parts:
+        an_action_was_defined = True
+
+        if threshold_by_min_volume:
+            ogo.message('Thresholding by minimum volume {:.1f} mm3'.format(min_volume))
+            if min_volume < 0.0:
+                ogo.message('[ERROR] Minimum volume must be greater than zero.')
+                os.sys.exit()
+            
+        if threshold_by_max_number_parts:
+            ogo.message('Thresholding by maximum number of parts {:d}'.format(max_number_parts))
+            if max_number_parts < 1:
+                ogo.message('[ERROR] Maximum number of parts must be greater than zero.')
+                os.sys.exit()
+                
+        ogo.message('  {:>20s} {:>6s} {:>10s} {:>10s}'.format('LABEL','PART','VOL','STATUS'))
+        ogo.message('  {:>20s} {:>6s} {:>10s} {:>10s}'.format('#','#','mm3',' '))
+
+        for label in labels:
+            try:
+                desc = lb.labels_dict[label]['LABEL']
+            except KeyError:
+                desc = 'unknown label'
+            
+            if label in skip_labels:
+                ogo.message('  {:>15s}{:>5s} {:>6s} {:>10s} {:>10s}'.format('('+desc+')',str(label),'---','---','skip'))
+                
+            else:
+                  
+                ct_thres = ct_base==label
+                ct_conn = conn.Execute(ct_base,ct_thres)
+                ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
+                
+                stats.Execute(ct_conn_sorted,ct)
+                n_parts = stats.GetNumberOfLabels()
+                
+                for part in stats.GetLabels():
+                    keep=True
+                    size = stats.GetPhysicalSize(part)
+                    
+                    status = ''
+                    if threshold_by_min_volume:
+                        if size<min_volume:
+                            status = 'remove'
+                            keep=False
+                    if threshold_by_max_number_parts:
+                        if part>max_number_parts:
+                            status = 'remove'
+                            keep=False
+                            
+                    if not keep:
+                        ct_part = (ct_conn_sorted==part)
+                        bin_part = ct_part>0
+                        mask = 1 - bin_part
+                        ct_base = sitk.Mask(ct_base, mask)
+                        ct_base = ct_base + 0*bin_part # erase label
+                    
+                    if part==1:
+                        ogo.message('  {:>15s}{:>5s} {:6d} {:10.1f} {:>10s}'.format('('+desc+')',str(label),part,size,status))
+                    else:
+                        ogo.message('  {:>15s}{:>5s} {:6d} {:10.1f} {:>10s}'.format(' ',' ',part,size,status))
+                                            
+    # Exit if no actions were defined
+    if not an_action_was_defined:
+        ogo.message('[ERROR]: No actions were defined. At least one option must be defined:')
+        ogo.message('         --relabel_parts')
+        ogo.message('         --threshold_by_min_volume')
+        ogo.message('         --threshold_by_max_number_parts')
+        os.sys.exit()
+                
+    final_labels = get_labels(ct_base)
     ogo.message('Final image contains the following labels:')
     ogo.message('  [' + ', '.join('{:d}'.format(i) for i in final_labels) + ']')
-    
+        
     ogo.message('')
     ogo.message('Writing merged output image to file:')
     ogo.message('  {}'.format(output_image))
-    sitk.WriteImage(ct_final, output_image)            
+    sitk.WriteImage(ct_base, output_image)            
     
     # Command line
     cmd_line = ''
@@ -586,9 +675,13 @@ Validation is based on the anatomical constraints and checks that are tested:
 
 Repairs can be performed the following ways:
 
-- Label and part is defined and assigned a new label
-- Remove any \'parts\' of a given size (not implemented)
+- Label and part is defined and assigned a new label (relabel_parts)
+– Remove parts beyond the maximum number of parts (threshold_by_max_number_parts)
+- Remove any \'parts\' of a given volume (threshold_by_min_volume)
   
+– A list of labels excluded from repairs using volume or parts can be defined
+  (skip_labels)
+
 Notes on how this works:
 
 The validation cycles through the list of expected labels. For each label (e.g. 
@@ -633,7 +726,7 @@ ogoValidate repair image.nii.gz image_repaired.nii.gz \\
     parser_validate = subparsers.add_parser('validate')
     parser_validate.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_validate.add_argument('--report_file', metavar='FILE', help='Write validation report to file (*.txt)')
-    parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
+    parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10,34], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
     parser_validate.add_argument('--overwrite', action='store_true', help='Overwrite validation report without asking')
     parser_validate.set_defaults(func=validate)
 
@@ -642,7 +735,11 @@ ogoValidate repair image.nii.gz image_repaired.nii.gz \\
     parser_repair.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_repair.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
     parser_repair.add_argument('--relabel_parts', type=int, nargs='*', default=[], metavar='LABEL PART NEWLABEL', help='List of labels, parts, and new labels; space separated. Example shows relabelling L4 part 2 to  L3: (e.g. 7 2 8)')
-    parser_repair.add_argument('--remove_by_volume', type=float, nargs=1, default=0, metavar='VOL', help='Removes all parts by volumens threshold (default: %(default)s)')
+    parser_repair.add_argument('--threshold_by_min_volume', action='store_true', help='Boolean setting to remove all parts smaller than the minimum volume (mm3)')
+    parser_repair.add_argument('--threshold_by_max_number_parts', action='store_true', help='Boolean setting to remove all parts greater than maximum number of parts')
+    parser_repair.add_argument('--min_volume', type=float, default=20000.0, metavar='VOL', help='Set minimum volume threshold (default: %(default)s mm3)')
+    parser_repair.add_argument('--max_number_parts', type=int, default=1, metavar='N_PARTS', help='Set maximum number of parts (default: %(default)s)')
+    parser_repair.add_argument('--skip_labels', type=int, nargs='*', default=[], metavar='LABEL', help='List of labels excluded for repair (default: %(default)s)')
     parser_repair.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
     parser_repair.set_defaults(func=repair)
 
