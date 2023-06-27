@@ -13,9 +13,10 @@ import argparse
 import csv 
 import matplotlib.pyplot as plt
 from ogo.util.echo_arguments import echo_arguments
+from ogo.cli.ReplaceLabels import ReplaceLabels
 
 
-def DemonsRegistration(atlas_path, atlas_mask_path, new_image, output_image, output_graph, iterations, update_field, smooth_displacement):
+def DemonsRegistration(atlas_path, atlas_mask_path, new_image, output_image, output_graph, iterations, update_field, smooth_displacement, body_label, erosion_number):
     # read in the image
     moving_image = sitk.ReadImage(atlas_path)
     moving_mask = sitk.ReadImage(atlas_mask_path)
@@ -130,7 +131,6 @@ def DemonsRegistration(atlas_path, atlas_mask_path, new_image, output_image, out
     # apply transform to the mask
     transformed_mask = sitk.Resample(moving_mask, fixed_image, transformation, sitk.sitkNearestNeighbor, 0.0, moving_mask.GetPixelID())
 
-
     # plotting the metric at every iteration to see if it converged (optional)
     if output_graph:
         plt.figure()
@@ -140,8 +140,18 @@ def DemonsRegistration(atlas_path, atlas_mask_path, new_image, output_image, out
         plt.grid()
         plt.savefig(output_graph)
 
-    # saving the transformed image
-    sitk.WriteImage(transformed_mask, output_image)
+
+    if body_label:
+        array = sitk.GetArrayFromImage(transformed_mask)
+        array[array != body_label] = 0
+        body_mask_only = sitk.GetImageFromArray(array)
+        transformed_mask = sitk.BinaryErode(body_mask_only, [erosion_number, erosion_number, erosion_number])
+        sitk.WriteImage(transformed_mask, output_image)
+    else: 
+        #saving the transformed mask 
+        sitk.WriteImage(transformed_mask, output_image)
+
+
 
 def main():
     # Setup description
@@ -164,6 +174,7 @@ ogoDemonsRegistration raw_atlas.nii.gz atlas_mask.nii.gz new_image.nii.gz output
         description=description,
         epilog=epilog
     )
+
     parser.add_argument('atlas_path', help = "Full path to where atlas is located, raw atlas image is ARTININ_0009.")
     parser.add_argument('atlas_mask_path', help="Full path to where atlas  mask is located. Pedicles mask is located in ogo/dat.")
     parser.add_argument('new_image', help="Full path to the desired image is, i.e. image without a mask.")
@@ -172,6 +183,12 @@ ogoDemonsRegistration raw_atlas.nii.gz atlas_mask.nii.gz new_image.nii.gz output
     parser.add_argument('-i', '--iterations', type=int, default=100, help='Number of iterations to be performed during registration.')
     parser.add_argument('-uf', '--update_field', type=int, default=1, help="Set demons update field standard deviation value, default is 1")
     parser.add_argument('-sd', '--smooth_displacement', type=int, default=1, help="Set demons smooth displacement field standard deviations, default is 1.")
+    parser.add_argument('--body_label', type=int, default=171, 
+                        help="Label of the vertebral body to separtate the vertebral body from the pedicles. L1: 165, L2: 167, L3: 169, L4: 171, L5: 173, L6: 175")
+    parser.add_argument('-e', '--erosion_number', type=int, default=5, help="Amount to erode the mask by (if desired).")
+
+    
+
 
 
     # Parse and display
