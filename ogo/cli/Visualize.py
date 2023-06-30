@@ -268,7 +268,7 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
         renderWindowInteractor.Start()
 
     # Print image
-    if outfile is not 'None':
+    if outfile is not None:
         windowToImage = vtk.vtkWindowToImageFilter()
         windowToImage.SetInput(renderWindow)
         
