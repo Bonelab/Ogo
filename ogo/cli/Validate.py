@@ -546,7 +546,8 @@ def repair(input_image, output_image, relabel_parts, threshold_by_min_volume, \
     # Threshold by volume or maximum number of parts
     if threshold_by_min_volume or threshold_by_max_number_parts:
         an_action_was_defined = True
-
+        ogo.message('')
+        
         if threshold_by_min_volume:
             ogo.message('Thresholding by minimum volume {:.1f} mm3'.format(min_volume))
             if min_volume < 0.0:
@@ -625,7 +626,7 @@ def repair(input_image, output_image, relabel_parts, threshold_by_min_volume, \
     
     # Command line
     cmd_line = ''
-    cmd_line += '  {:>20s}\n'.format('___________________________________________________________________________Command line')
+    cmd_line += '  {:>20s}\n'.format('__________________________________________________________________Command line')
     cmd_line += '\n'
     cmd_line += '  {}\n'.format('ogoValidate validate \\')
     cmd_line += '    {} \n'.format(output_image)    
