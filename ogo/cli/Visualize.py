@@ -88,7 +88,7 @@ def getNIfTITransform(reader):
     
     return mat
     
-def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elevation, azimuth, flip, outfile, offscreen, overwrite, func):
+def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elevation, azimuth, flip, outfile, offscreen, pad, overwrite, func):
     
     # Check if output exists and should overwrite
     if outfile:
@@ -123,13 +123,14 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
     reader.SetFileName(input_filename)
     reader.Update()
     
+    ibounds = reader.GetOutput().GetBounds()
     mat = getNIfTITransform(reader)
-    
-    image = reader.GetOutput()
-    ibounds = image.GetBounds()
+
+    extent = reader.GetOutput().GetExtent()
+    ogo.message('  Extent: ' + ', '.join('{:d}'.format(i) for i in extent))
     
     ogo.message('Scanning for available labels:')
-    labels = getLabels(image)
+    labels = getLabels(reader.GetOutput())
 
     for idx,label in enumerate(labels):
         rgb = lb.labels_dict[label]['RGB']
@@ -171,6 +172,7 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
     # Create lists for VTK classes
     thres = []
     extract = []
+    padding = []
     gauss = []
     mcube = []
     actor = []
@@ -194,6 +196,7 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
         ogo.message('Processing label {} ({})'.format(label,lb.labels_dict[label]['LABEL']))
         thres.append(vtk.vtkImageThreshold())
         extract.append(vtk.vtkExtractVOI())
+        padding.append(vtk.vtkImageConstantPad())
         gauss.append(vtk.vtkImageGaussianSmooth())
         mcube.append(vtk.vtkImageMarchingCubes())
         mapper.append(vtk.vtkDataSetMapper())
@@ -211,7 +214,18 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
         extract[idx].SetVOI(voi)
         extract[idx].Update()
         
-        gauss[idx].SetInputConnection(extract[idx].GetOutputPort())
+        padding[idx].SetInputConnection(extract[idx].GetOutputPort())
+        padding[idx].SetConstant(0)
+        padding[idx].SetOutputWholeExtent(voi[0]-1,voi[1]+1,\
+                                          voi[2]-1,voi[3]+1,\
+                                          voi[4]-1,voi[5]+1)
+        padding[idx].Update()
+        #ogo.message('  Extent: ' + ', '.join('{:d}'.format(i) for i in padding[idx].GetOutput().GetExtent()))
+        
+        if pad:
+            gauss[idx].SetInputConnection(padding[idx].GetOutputPort())
+        else:
+            gauss[idx].SetInputConnection(extract[idx].GetOutputPort())
         gauss[idx].SetStandardDeviation(gaussian)
         gauss[idx].SetRadiusFactor(radius)
         gauss[idx].Update()
@@ -494,6 +508,7 @@ ogoVisualize vis2d RETRO_00053.nii.gz
     parser_vis3d.add_argument('--flip', action='store_true', help='Camera ViewUp flip (default: %(default)s)')
     parser_vis3d.add_argument('--outfile', default=None, metavar='FN', help='Output image file (*.tif) (default: %(default)s)')
     parser_vis3d.add_argument('--offscreen', action='store_true', help='Set to offscreen rendering (default: %(default)s)')
+    parser_vis3d.add_argument('--pad', action='store_true', help='Pad the image with zeros')
     parser_vis3d.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     parser_vis3d.set_defaults(func=vis3d)
 
