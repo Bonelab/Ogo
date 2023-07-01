@@ -142,10 +142,10 @@ def repair_NIfTI(infile, match, outfile, mode, overwrite=False):
 def main():
     # Setup description
     description='''
-A utility to repair NIfTI files. There are various modes of
+A utility to repair NIfTI files. There are different modes of
 operation:
 
-orthonormal
+orthonormal (default)
 
 A known issue with some NIfTI headers that make it incompatible 
 with SimpleITK. The typical error message is:
@@ -162,9 +162,11 @@ affine transforms.
 '''
     epilog = '''
 Example calls: 
-  ogoRepairNIfTI ./MODELS/RETRO_00037.nii --outfile \
-                 ./MODELS/RETRO_00037_FIXED.nii
-  ogoRepairNIfTI ./MODELS/RETRO_00037.nii.gz
+  ogoRepairNIfTI RETRO_00037.nii.gz
+  ogoRepairNIfTI RETRO_00037.nii --outfile RETRO_00037_FIXED.nii
+  ogoRepairNIfTI RETRO_00037.nii.gz --match RETRO_00037_SEG.nii.gz \
+                 --outfile RETRO_00037_FIXED.nii --mode affine
+  
 '''
 
     # Setup argument parsing
