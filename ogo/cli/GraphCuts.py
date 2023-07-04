@@ -22,7 +22,7 @@ import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
         
 # +------------------------------------------------------------------------------+
-def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
+def sheetness(input_image, sheet_image, path_binaries, enhance, \
               num_sigma, min_sigma, max_sigma, air_thres, metal_thres, trace_weight, \
               overwrite, func):
 
@@ -69,12 +69,17 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     if not (sheet_image.lower().endswith('.nii') or sheet_image.lower().endswith('.nii.gz')):
         os.sys.exit('[ERROR] Output sheet image must be type NIFTI file: \"{}\"'.format(sheet_image))
     
+    # Check trace_weight within allowable 
+    if trace_weight < 0 or trace_weight > 1:
+        ogo.message('Trace weight out of range: {}'.format(trace_weight))
+        os.sys.exit()
+        
     ogo.message('{}'.format('-------------- Files'))
     ogo.message('{:>7s}: {}'.format('input',input_image))
     ogo.message('{:>7s}: {}'.format('skin',skin_image))
     ogo.message('{:>7s}: {}'.format('sheet',sheet_image))
     ogo.message('{}'.format('--------- Parameters'))
-    ogo.message('{:>15s}: {:>12s}'.format('enhance_bright',str(enhance_bright)))
+    ogo.message('{:>15s}: {:>12s}'.format('enhance',str(enhance)))
     ogo.message('{:>15s}: {:12d}'.format('num_sigma',num_sigma))
     ogo.message('{:>15s}: {:12.2f}'.format('min_sigma',min_sigma))
     ogo.message('{:>15s}: {:12.2f}'.format('max_sigma',max_sigma))
@@ -85,15 +90,20 @@ def sheetness(input_image, sheet_image, path_binaries, enhance_bright, \
     ogo.message('  {}'.format(sheetness_binary_path))
     ogo.message('Starting analysis...')
 
+    if (enhance=='bright'):
+        enhance_mode=1
+    else:
+        enhance_mode=0
+            
     # Assemble the command for executing the Sheetness2 function
     cmd = [
-      sheetness_binary_path, input_image, skin_image, sheet_image, enhance_bright,
+      sheetness_binary_path, input_image, skin_image, sheet_image, enhance_mode,
       num_sigma, min_sigma, max_sigma, air_thres, metal_thres, trace_weight
     ]
     
     cmd = [str(x) for x in cmd]
     #ogo.message('  CMD: {}'.format(cmd))
-
+    
     res = subprocess.check_output(cmd)
     
     #ogo.message('Results: {}'.format(res))
@@ -285,14 +295,38 @@ image. Second, a labelled image is fed into the algorithm to define the
 periosteal surfaces for each labelled bone. You must create the sheetness
 image before you can generate the periosteal surfaces.
 
-This python program is only a convenience tool for accessing the graph cuts
-software available here:
-https://gridcut.com/downloads.php
+This python program is only a convenience tool for accessing filtering 
+(Hessian) to create the sheetness file and then the graph cuts algorithm
+itself: https://gridcut.com/downloads.php
 
 It is necessary to install and compile the binaries for graph cuts before 
 this script will work. To learn more, read OGO_GRAPHCUTS_INSTALL.txt located
 in Ogo/ogo/util/graphcuts . If you try and execute ogoGraphCuts without 
 installing the binaries first you will be redirected OGO_GRAPHCUTS_INSTALL.txt
+
+Some more details for each sub routine are:
+
+sheetness –  A filter to enhance structures using Hessian eigensystem-based 
+             measures in a multiscale framework. Minimum and maximum sigma and 
+             number of scales can be set. The output sheetness file has values 
+             that range between -1 and 1. The trace_weight variable affects 
+             contrast significantly (more contrast with lower value). Set the 
+             threshold upper/lower to identify data over which some parameters 
+             are optimized. The option enhance should be in bright mode for bone
+             (dark inverts the sheetness output).
+             
+             If applying sheetness for segmentation of soft tissues (not bone) you
+             may wish to pre-process your input CT image to window voxel intensities
+             in the soft tissue range using ogoImageIntensityWindowingFilter. 
+             Values that seem to work well are a window of -200 to 120 and output of
+             -400 to 1500. You can then use this sheetness filter, but select 
+             options of num_sigma 2, min_sigma 0.5, max_sigma 2.0, trace_weight 0.10.
+            
+periosteal - takes the sheetness image and a rough marking of the objects to be 
+             segmented and applies the grid cut algorithm (graph cuts) to produce
+             a segmented file. If segmentation is unsatisfactory, extend the rough
+             markings accordingly. The parameter gc_lambda affects geometric flow.
+
 '''
 
     epilog = '''
@@ -301,9 +335,14 @@ Cite:
 Boykov Y, Funka-Lea G, 2006. Graph cuts and efficient N-D image segmentation. 
 Int J Comput Vision 70, 109-131. doi = 10.1007/s11263-006-7934-5 
 
+Besler BA, Michalski AS, Kuczynski MT, Abid A, Forkert ND, Boyd SK, 2021. Bone 
+and joint enhancement filtering: Application to proximal femur segmentation from 
+uncalibrated computed tomography datasets. Med Image Anal 67, 101887. 
+doi = 10.1016/j.media.2020.101887
+
 Example calls: 
 ogoGraphCuts sheetness image.nii.gz
-ogoGraphCuts periosteal image_MARK.nii.gz
+ogoGraphCuts periosteal image_MARK.nii.gz --sheet_image image_SHEET.nii.gz
 '''
 
     # Setup argument parsing
@@ -320,13 +359,13 @@ ogoGraphCuts periosteal image_MARK.nii.gz
     parser_sheetness.add_argument('input_image', metavar='FILE IN', help='Input raw CT image file (*.nii, *.nii.gz)')
     parser_sheetness.add_argument('--sheet_image', metavar='FILE', help='Output sheetness image (*.nii, *.nii.gz) (default: input_image_SHEET.nii.gz)')
     parser_sheetness.add_argument('--path_binaries', metavar='PATH', default='/Users/', help='Start search path for graphcut binary (default: %(default)s)')
-    parser_sheetness.add_argument('--enhance_bright', action='store_false', help='Enhance bright objects (default: %(default)s)')
-    parser_sheetness.add_argument('--num_sigma', metavar='INT', type=int, default=2, help='How many sigmas to use for enhancing (default: %(default)s)')
-    parser_sheetness.add_argument('--min_sigma', metavar='FLOAT', type=float, default=0.5, help='How many sigmas to use for enhancing (default: %(default)s)')
-    parser_sheetness.add_argument('--max_sigma', metavar='FLOAT', type=float, default=1.0, help='How many sigmas to use for enhancing (default: %(default)s)')
+    parser_sheetness.add_argument('--enhance', default='bright', choices=['bright', 'dark'], help='Select enhancement mode (default: %(default)s)')
+    parser_sheetness.add_argument('--num_sigma', metavar='INT', type=int, default=2, help='Number of sigmas to test for enhancing in Hessian filter (default: %(default)s)')
+    parser_sheetness.add_argument('--min_sigma', metavar='FLOAT', type=float, default=0.5, help='Minimum sigma to test (default: %(default)s)')
+    parser_sheetness.add_argument('--max_sigma', metavar='FLOAT', type=float, default=1.0, help='Maximum sigma to test (default: %(default)s)')
     parser_sheetness.add_argument('--air_thres', metavar='FLOAT', type=float, default=-400.0, help='Threshold for determining air (default: %(default)s)')
     parser_sheetness.add_argument('--metal_thres', metavar='FLOAT', type=float, default=1200.0, help='Threshold for determining metal (default: %(default)s)')
-    parser_sheetness.add_argument('--trace_weight', metavar='FLOAT', type=float, default=0.05, help='Weight for reducing noise (default: %(default)s)')
+    parser_sheetness.add_argument('--trace_weight', metavar='FLOAT', type=float, default=0.05, help='Frobenius norm weight for reducing noise (default: %(default)s)')
     parser_sheetness.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking (default: %(default)s)')
     parser_sheetness.set_defaults(func=sheetness)
 
