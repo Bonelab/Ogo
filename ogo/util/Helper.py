@@ -31,6 +31,28 @@ import ogo.dat.OgoMasterLabels as lb
 start_time = time.time()
 
 
+def check_if_output_exists(filename,overwrite=False):
+    if filename: # only continues if not None
+        if os.path.isfile(filename) and not overwrite:
+            result = input('         File \"{}\" already exists. Overwrite? [y/n]: '.format(filename))
+            if result.lower() not in ['y', 'yes']:
+                message('[ERROR] Not overwriting \"{}\". Exiting...'.format(filename))
+                os.sys.exit()
+
+def check_if_file_exists(filename):
+    if not os.path.isfile(filename):
+        message('[ERROR] Input file \"{}\" does not exist. Exiting...'.format(filename))
+        os.sys.exit()
+
+def check_file_ending(filename,endings=['.nii','.nii.gz']):
+    result=False
+    for ending in endings:
+        #print('Checking ',ending)
+        if filename.lower().endswith(ending):
+            result=True
+    if not result:
+        message('[ERROR] File \"{}\" ending must be {}'.format(filename,endings))
+
 ##
 # Returns a dictionary of calibration phantoms for each phantom requested
 def get_phantom(phantom_type):
@@ -583,7 +605,6 @@ def combineImageData_SF(image, fh_pmma_id_pad, gt_pmma_id_pad, pmma_mat_id):
     final_image = final_thres.GetOutput()
 
     return final_image
-
 
 def combineImageData_VC(image, sup_pmma_id_pad, inf_pmma_id_pad, pmma_mat_id):
     """Combines the 3 image data together to get final image.

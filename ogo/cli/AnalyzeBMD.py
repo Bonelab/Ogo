@@ -29,40 +29,25 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
     # Master list of labels
     labelsDict = lb.labels_dict
 
-    # Check if output exists and should overwrite (if not None)
-    if output_filename:
-        if os.path.isfile(output_filename) and not overwrite:
-            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_filename))
-            if result.lower() not in ['y', 'yes']:
-                print('Not overwriting. Exiting...')
-                os.sys.exit()
+    # Check if output exists and should overwrite
+    ogo.check_if_output_exists(output_filename,overwrite)
 
     # Set up to read image and mask inputs
-    if not os.path.isfile(image_filename):
-        os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(image_filename))
-    if image_filename.lower().endswith('.nii'):
-        reader_image = vtk.vtkNIFTIImageReader()
-    elif image_filename.lower().endswith('.nii.gz'):
-        reader_image = vtk.vtkNIFTIImageReader()
-    else:
-        os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(image_filename))
+    ogo.check_if_file_exists(image_filename)
 
-    if not os.path.isfile(mask_filename):
-        os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(mask_filename))
-    if mask_filename.lower().endswith('.nii'):
-        reader_mask = vtk.vtkNIFTIImageReader()
-    elif mask_filename.lower().endswith('.nii.gz'):
-        reader_mask = vtk.vtkNIFTIImageReader()
-    else:
-        os.sys.exit('[ERROR] Cannot find reader for file \"{}\"'.format(mask_filename))
-
+    # Check endings
+    ogo.check_file_ending(image_filename)
+    ogo.check_file_ending(mask_filename)
+    
     # Read inputs
     if output_filename:
         ogo.message("Reading input calibrated image...")
+    reader_image = vtk.vtkNIFTIImageReader()
     reader_image.SetFileName(image_filename)
     reader_image.Update()
     if output_filename:
         ogo.message("Reading input mask image...")
+    reader_mask = vtk.vtkNIFTIImageReader()
     reader_mask.SetFileName(mask_filename)
     reader_mask.Update()
 
