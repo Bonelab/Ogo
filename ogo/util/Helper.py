@@ -31,7 +31,7 @@ import ogo.dat.OgoMasterLabels as lb
 start_time = time.time()
 
 
-def check_if_output_exists(filename,overwrite=False):
+def pass_check_if_output_exists(filename,overwrite=False):
     if filename: # only continues if not None
         if os.path.isfile(filename) and not overwrite:
             result = input('         File \"{}\" already exists. Overwrite? [y/n]: '.format(filename))
@@ -39,15 +39,14 @@ def check_if_output_exists(filename,overwrite=False):
                 message('[ERROR] Not overwriting \"{}\". Exiting...'.format(filename))
                 os.sys.exit()
 
-def check_if_file_exists(filename):
+def pass_check_if_file_exists(filename):
     if not os.path.isfile(filename):
         message('[ERROR] Input file \"{}\" does not exist. Exiting...'.format(filename))
         os.sys.exit()
 
-def check_file_ending(filename,endings=['.nii','.nii.gz']):
+def pass_check_file_ending(filename,endings=['.nii','.nii.gz']):
     result=False
     for ending in endings:
-        #print('Checking ',ending)
         if filename.lower().endswith(ending):
             result=True
     if not result:

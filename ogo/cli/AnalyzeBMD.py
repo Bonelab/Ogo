@@ -30,14 +30,14 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
     labelsDict = lb.labels_dict
 
     # Check if output exists and should overwrite
-    ogo.check_if_output_exists(output_filename,overwrite)
+    ogo.pass_check_if_output_exists(output_filename,overwrite)
 
     # Set up to read image and mask inputs
-    ogo.check_if_file_exists(image_filename)
+    ogo.pass_check_if_file_exists(image_filename)
 
     # Check endings
-    ogo.check_file_ending(image_filename)
-    ogo.check_file_ending(mask_filename)
+    ogo.pass_check_file_ending(image_filename)
+    ogo.pass_check_file_ending(mask_filename)
     
     # Read inputs
     if output_filename:
