@@ -171,14 +171,18 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         except KeyError:
             desc = 'unknown label'
         
+        QA_dict[label] = {}
+        QA_dict[label]['label_name'] = desc
+
         if label in labels:
             test_labels.append(label)
-            QA_dict[label] = {}
-            QA_dict[label]['label_name'] = desc
         else:
-            ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,desc))
-            expectedLabelsFound = False
-            finalQualityAssessment = False
+            if label != 34:
+                ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,desc))
+                expectedLabelsFound = False
+                finalQualityAssessment = False
+            else:
+                ogo.message('[NOTICE] Label {} ({}) was not found, but is not really expected.'.format(label,desc))
 
     if test_labels == []:
         os.sys.exit('[ERROR] None of the expected labels were found in image.')
@@ -194,74 +198,86 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     current_centroids = []
     
     # Process the identification of labels and their parts
-    for idx,label in enumerate(labels):
+    for idx,label in enumerate(expected_labels):
         try:
             desc = lb.labels_dict[label]['LABEL']
         except KeyError:
             desc = 'unknown label'
         ogo.message('  processing label {:>2d} ({})'.format(label,desc))
         
-        centroid = filt.GetCentroid(label)
-        current_centroids.append(centroid)
-        
-        ct_thres = ct==label
-        ct_conn = conn.Execute(ct,ct_thres)
-        ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
-        
-        stats.Execute(ct_conn_sorted,ct)
-        n_parts = stats.GetNumberOfLabels()
-        QA_dict[label]['n_parts'] = n_parts
-        QA_dict[label]['total_volume'] = 0
-        QA_dict[label]['errors'] = ''
-        QA_dict[label]['warnings'] = ''
-        QA_dict[label]['status'] = 'PASS'
-        
-        if (n_parts>1):
-            if special_cases(n_parts,label,stats):
-                QA_dict[label]['warnings'] += 'wSPEC ' # Sacrum and L5 are sometimes two parts
-                msg = '[WARNING] Label {:d} ({}) exception with {} parts ({:.1f} mm3)'.format(label,desc,n_parts,stats.GetPhysicalSize(2))
-                ogo.message(msg)
-                extra_msg += '  ' + msg + '\n'
-            else:
-                QA_dict[label]['errors'] += 'eFRAG ' # More than one part indicates the bone is fragmented
-                QA_dict[label]['status'] = 'FAIL'
+        if label not in labels: # although we expected this label, there is none in the image
+            QA_dict[label]['n_parts'] = 0
+            QA_dict[label]['total_volume'] = 0
+            QA_dict[label]['errors'] = ''
+            QA_dict[label]['warnings'] = ''
+            QA_dict[label]['status'] = 'PASS'
             
-        # Generate report data
-        report += '  {:>15s}{:>5s} '.format('('+desc+')',str(label))        
-        for part in stats.GetLabels(): # for each part of a given label
-            centroid = stats.GetCentroid(part)
-            bounding_box = stats.GetBoundingBox(part)
-            bb=[0]*3
-            bb[0] = bounding_box[0] + int(math.ceil(bounding_box[3]/2))
-            bb[1] = bounding_box[1] + int(math.ceil(bounding_box[4]/2))
-            bb[2] = bounding_box[2] + int(math.ceil(bounding_box[5]/2))
+            # Generate report data
+            report += '  {:>15s}{:>5s} '.format('('+desc+')',str(label))        
+            report += '{:>6s} {:>10s} {:>10s} ({:>5s},{:>5s},{:>5s})\n'.format('-','-','-','-','-','-')
             
-            QA_dict[label]['total_volume'] += stats.GetPhysicalSize(part)
+        else: # label is in the image
+            centroid = filt.GetCentroid(label)
+            current_centroids.append(centroid)
             
-            if part==1:
-                ref_centroid = centroid
-                report += '{:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2])
-            else:
-                distance_between_centroids = np.sqrt((ref_centroid[0] - centroid[0])**2 + (ref_centroid[1] - centroid[1])**2 + (ref_centroid[2] - centroid[2])**2)
-                report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
-                          .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2],distance_between_centroids)
+            ct_thres = ct==label
+            ct_conn = conn.Execute(ct,ct_thres)
+            ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
+            
+            stats.Execute(ct_conn_sorted,ct)
+            n_parts = stats.GetNumberOfLabels()
+            QA_dict[label]['n_parts'] = n_parts
+            QA_dict[label]['total_volume'] = 0
+            QA_dict[label]['errors'] = ''
+            QA_dict[label]['warnings'] = ''
+            QA_dict[label]['status'] = 'PASS'
+            
+            if (n_parts>1):
+                if special_cases(n_parts,label,stats):
+                    QA_dict[label]['warnings'] += 'wSPEC ' # Sacrum and L5 are sometimes two parts
+                    msg = '[WARNING] Label {:d} ({}) exception with {} parts ({:.1f} mm3)'.format(label,desc,n_parts,stats.GetPhysicalSize(2))
+                    ogo.message(msg)
+                    extra_msg += '  ' + msg + '\n'
+                else:
+                    QA_dict[label]['errors'] += 'eFRAG ' # More than one part indicates the bone is fragmented
+                    QA_dict[label]['status'] = 'FAIL'
+                
+            # Generate report data
+            report += '  {:>15s}{:>5s} '.format('('+desc+')',str(label))        
+            for part in stats.GetLabels(): # for each part of a given label
+                centroid = stats.GetCentroid(part)
+                bounding_box = stats.GetBoundingBox(part)
+                bb=[0]*3
+                bb[0] = bounding_box[0] + int(math.ceil(bounding_box[3]/2))
+                bb[1] = bounding_box[1] + int(math.ceil(bounding_box[4]/2))
+                bb[2] = bounding_box[2] + int(math.ceil(bounding_box[5]/2))
+                
+                QA_dict[label]['total_volume'] += stats.GetPhysicalSize(part)
+                
+                if part==1:
+                    ref_centroid = centroid
+                    report += '{:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2])
+                else:
+                    distance_between_centroids = np.sqrt((ref_centroid[0] - centroid[0])**2 + (ref_centroid[1] - centroid[1])**2 + (ref_centroid[2] - centroid[2])**2)
+                    report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
+                              .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2],distance_between_centroids)
+            
+            # Generate suggestion of new label for command line suggestion
+            if n_parts>1:
+                for part in stats.GetLabels():
+                    if part>1:
+                        new_label = label
+                        if label == 1:
+                            new_label = 2
+                        if label == 2:
+                            new_label = 1
+                        if label == 3:
+                            new_label = 4
+                        if label == 4:
+                            new_label = 3
+                        swap = [label,part,new_label]
+                        label_repair_list.append(swap)
 
-        # Generate suggestion of new label for command line suggestion
-        if n_parts>1:
-            for part in stats.GetLabels():
-                if part>1:
-                    new_label = label
-                    if label == 1:
-                        new_label = 2
-                    if label == 2:
-                        new_label = 1
-                    if label == 3:
-                        new_label = 4
-                    if label == 4:
-                        new_label = 3
-                    swap = [label,part,new_label]
-                    label_repair_list.append(swap)
-    
     # Quality checks -------------------------------------------------------------------
     # 1. Examining femur symmetry
     if ((1 in labels) and (2 in labels)):
@@ -365,7 +381,7 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('LABEL','NPARTS','TOTAL_VOL','STATUS','ERRORS and WARNINGS')
     report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('#','#','mm3','','')
     
-    for label in labels:
+    for label in expected_labels:
         
         desc = QA_dict[label]['label_name']
         n_parts = QA_dict[label]['n_parts']
@@ -374,11 +390,18 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         errors = QA_dict[label]['errors']
         status = QA_dict[label]['status']
         
-        report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:>10s} {:>23s}\n'.format('('+desc+')',str(label),n_parts,total_volume,status,warnings+errors)        
+        if n_parts == 0:
+            report += '  {:>15s}{:>5s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('('+desc+')',str(label),'-','-','-','-')        
+        else:
+            report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:>10s} {:>23s}\n'.format('('+desc+')',str(label),n_parts,total_volume,status,warnings+errors)                    
         
         line_hdr += '{},{},{},{},{},{},{},'.format('desc','label','n_parts','total_vol','warnings','errors','status')
         line_units += '{},{},{},{},{},{},{},'.format('[text]','[#]','[#]','[mm3]','[msg]','[msg]','[test]')
-        line_data += '{},{},{},{:.1f},{},{},{},'.format(desc,label,n_parts,total_volume,warnings,errors,status)
+        if n_parts == 0:
+            line_data += '{},{},{},{},{},{},{},'.format(desc,label,'','','','','')
+        else:
+            line_data += '{},{},{},{:.1f},{},{},{},'.format(desc,label,n_parts,total_volume,warnings,errors,status)
+            
         
         if status is 'FAIL':
             finalQualityAssessment = False
