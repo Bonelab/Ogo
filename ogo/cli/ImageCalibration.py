@@ -330,10 +330,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
             if (not filt.HasLabel(L4_label)):
                 os.sys.exit('[ERROR] No L4 found in image.')
             else:
-                bone = sitk.MaskImageFilter()
-                bone.SetMaskingValue(L4_label)
-                array = bone.Execute(ct, mask)
-
+                bone = sitk.BinaryThreshold(mask, L4_label, L4_label, 1, 0)
+                array = sitk.Mask(ct, bone)
                 [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()))
                 labels_data[label] = {'ID': value, 'mean': bone_mean, 'stdev': bone_std, 'count': bone_count,
                                       'marker': '(from L4)'}
@@ -401,6 +399,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
     den = sitk.Cast(den, ct.GetPixelID())
 
+
     ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
     imfilt = sitk.StatisticsImageFilter()
     imfilt.Execute(ct)
@@ -421,6 +420,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
 
     ogo.message('Writing result to ' + output_image)
     sitk.WriteImage(den, output_image)
+    
 
     if calib_file_name:
         ogo.message('Saving calibration parameters to file:')
