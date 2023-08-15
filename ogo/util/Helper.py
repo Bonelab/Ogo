@@ -45,12 +45,13 @@ def pass_check_if_file_exists(filename):
         os.sys.exit()
 
 def pass_check_file_ending(filename,endings=['.nii','.nii.gz']):
-    result=False
-    for ending in endings:
-        if filename.lower().endswith(ending):
-            result=True
-    if not result:
-        message('[ERROR] File \"{}\" ending must be {}'.format(filename,endings))
+    if filename: # only continues if not None
+        result=False
+        for ending in endings:
+            if filename.lower().endswith(ending):
+                result=True
+        if not result:
+            message('[ERROR] File \"{}\" ending must be {}'.format(filename,endings))
 
 ##
 # Returns a dictionary of calibration phantoms for each phantom requested

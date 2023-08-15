@@ -68,6 +68,23 @@ def expected_Procrustes():
      (  24.17049, -109.25177, 425.37350 )]
     return positions
     
+def expected_Procrustes_with_L6():
+    # Used RETRO_01455.nii.gz as reference
+    # Labels 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13
+    positions = \
+    [( -99.221,    -13.561,    93.314 ), \
+     ( 125.225,     -1.464,    85.120 ), \
+     ( -57.060,     -5.412,   176.046 ), \
+     (  92.237,     -1.380,   165.237 ), \
+     (  18.095,     40.348,   211.248 ), \
+     (  24.245,     -1.285,   277.174 ), \
+     (  25.745,      0.369,   311.009 ), \
+     (  24.853,      6.145,   344.486 ), \
+     (  24.297,     13.684,   376.100 ), \
+     (  24.441,     19.705,   406.925 ), \
+     (  21.298,      6.931,   246.802 )]
+    return positions
+
 def get_labels(ct):
     filt = sitk.LabelShapeStatisticsImageFilter()
     filt.Execute(ct)
