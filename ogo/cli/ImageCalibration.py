@@ -265,7 +265,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
 
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image, input_mask, output_image, calib_file_name, useLabels, useL4, overwrite, func):
+def internal(input_image, input_mask, output_image, arch_image, calib_file_name, useLabels, useL4, overwrite, func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -396,8 +396,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     ogo.message('Calibrating input file.')
     voxel_volume = np.prod(ct.GetSpacing())
     #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
-    den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-    den = sitk.Cast(den, ct.GetPixelID())
+    den, arch = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
+    
 
 
     ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
@@ -420,6 +420,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
 
     ogo.message('Writing result to ' + output_image)
     sitk.WriteImage(den, output_image)
+    sitk.WriteImage(arch, arch_image)
     
 
     if calib_file_name:
@@ -593,6 +594,7 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('input_mask', help='Input image mask file (*.nii, *.nii.gz)')
     parser_internal.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
+    parser_internal.add_argument('arch_image', help='Output image file (*.nii, *.nii.gz)')
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
