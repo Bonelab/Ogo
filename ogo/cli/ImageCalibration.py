@@ -569,6 +569,10 @@ def internal(input_image, input_mask, output_image, calib_file_name, MonteCarlo,
             else:
                 txt_file.write(' [not used]\n')
             txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
+            txt_file.write('  {:>27s} {}\n'.format('Fit:', calib._is_fit))
+            txt_file.write('  {:>27s} {:10.6f}\n'.format('Energy [keV]:', calib.effective_energy))
+            txt_file.write('  {:>27s} {:10.6f}\n'.format('Max R^2:', calib.max_r2))
+            txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
             txt_file.write('  {:>27s}\n'.format('Mass Attenuation [cm2/g]:'))
             txt_file.write('  {:>27s} {:8.3f}\n'.format('Adipose ', calib.adipose_mass_attenuation))
             txt_file.write('  {:>27s} {:8.3f}\n'.format('Air ', calib.air_mass_attenuation))

@@ -222,10 +222,7 @@ class InternalCalibration(StandardCalibration):
         # Set values
         self._effective_energy = self._interpolate_tables['adipose_table'].loc[max_index, 'Energy [keV]']  # noqa: E501
         self._max_r2 = max_r2
-        plt.plot(r_sqauures)
-        plt.show()
-        
-
+    
         self._adipose_mass_attenuation = self._interpolate_tables['adipose_table'].loc[
             max_index, 'Mass Attenuation [cm2/g]']  # noqa: E501
         self._air_mass_attenuation = self._interpolate_tables['air_table'].loc[
