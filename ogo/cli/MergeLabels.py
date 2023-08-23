@@ -12,7 +12,6 @@ import sys
 import time
 import math
 import vtk
-import vtkbone
 import numpy as np
 import SimpleITK as sitk
 import ogo.dat.OgoMasterLabels as lb
