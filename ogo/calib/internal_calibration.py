@@ -203,7 +203,7 @@ class InternalCalibration(StandardCalibration):
         max_index = -1
         max_r2 = -np.Inf
         r_sqauures = []
-        energies = []
+        
 
         for i in np.arange(1, n, 1):
             # Get the values at this energy level
