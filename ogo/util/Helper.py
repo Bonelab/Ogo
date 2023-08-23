@@ -1480,6 +1480,19 @@ def writeTXTfile(input_dict, fileName, output_directory):
         txt_file.write(str(key) + '\t' + str(value) + '\n')
     txt_file.close()
 
+def add_to_filename(filepath, suffix):
+    '''Will add a suffix to the end of a .nii.gz file or .nii file 
+    while maintaining the original path and file'''
+    directory, filename = os.path.split(filepath)
+    if filename.endswith(".nii.gz"):
+        filename = filename[:-7] + suffix
+    elif filename.endswith(".nii"):
+        filename = filename[:-4] + suffix
+
+    new_file_path = os.path.join(directory, filename)
+
+    return new_file_path
+
 # def writeN88Model(model, fileName, pathname):
 #     """Writes out a N88Model.
 #     The first argument is the model.
