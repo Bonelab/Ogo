@@ -547,7 +547,7 @@ two labels must be defined, and current valid labels are:
    94 Cortical Bone
    95 Skeletal Muscle
  
-Outputs include the calibrated density image and a text file that includes
+Outputs include the calibrated density image (voxel-specific K2HPO4 density in mg/cc) and a text file that includes
 the calibration parameters and results.
 
 Please cite:
