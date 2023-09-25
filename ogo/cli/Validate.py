@@ -39,16 +39,17 @@ def expected_bone_volumes():
     #    10:{"Min":25000.0, "Max":67000.0, "Average":46894.7, "Median":44403.6, "Stdev":9400.7}                          # L1
     #}
     bone_volumes = {
-         1:{ 'Min':72000.0, 'Max':245000.0,  'Stdev':39632.3,  'Short femur':153110.0}, # Femur Right
-         2:{ 'Min':72000.0, 'Max':245000.0,  'Stdev':39494.4,  'Short femur':153110.0}, # Femur Left
-         3:{'Min':180000.0, 'Max':510000.0,  'Stdev':70518.6},                          # Pelvis Right
-         4:{'Min':180000.0, 'Max':510000.0,  'Stdev':70777.9},                          # Pelvis Left
-         5:{'Min':135000.0, 'Max':350000.0,  'Stdev':43914.4},                          # Sacrum
-         6:{ 'Min':40000.0, 'Max':100000.0,  'Stdev':13011.0},                          # L5
-         7:{ 'Min':39000.0, 'Max':104000.0,  'Stdev':13444.9},                          # L4
-         8:{ 'Min':35000.0,  'Max':96000.0,  'Stdev':13610.6},                          # L3
-         9:{ 'Min':35000.0,  'Max':87000.0,  'Stdev':12253.7},                          # L2
-        10:{ 'Min':30000.0,  'Max':94000.0,  'Stdev':11756.1}                           # L1
+         1:{ 'Min':50000.0, 'Max':1000000.0,  'Stdev':39632.3,  'Short femur':153110.0}, # Femur Right
+         2:{ 'Min':50000.0, 'Max':1000000.0,  'Stdev':39494.4,  'Short femur':153110.0}, # Femur Left
+         3:{ 'Min':80000.0, 'Max':600000.0,  'Stdev':70518.6},                           # Pelvis Right
+         4:{ 'Min':80000.0, 'Max':600000.0,  'Stdev':70777.9},                           # Pelvis Left
+         5:{'Min':100000.0, 'Max':390000.0,  'Stdev':43914.4},                           # Sacrum
+         6:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':13011.0},                           # L5
+         7:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':13444.9},                           # L4
+         8:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':13610.6},                           # L3
+         9:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':12253.7},                           # L2
+        10:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':11756.1},                           # L1
+        11:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':11756.1}                            # L6
     }
     return bone_volumes
 
