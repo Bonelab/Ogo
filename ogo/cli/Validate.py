@@ -194,7 +194,7 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         if label in labels:
             test_labels.append(label)
         else:
-            if label != 34:
+            if label != 11:
                 ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,desc))
                 expectedLabelsFound = False
                 finalQualityAssessment = False
@@ -767,7 +767,7 @@ ogoValidate repair image.nii.gz image_repaired.nii.gz \\
     parser_validate = subparsers.add_parser('validate')
     parser_validate.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_validate.add_argument('--report_file', metavar='FILE', help='Write validation report to file (*.txt)')
-    parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10,34], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
+    parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10,11], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
     parser_validate.add_argument('--overwrite', action='store_true', help='Overwrite validation report without asking')
     parser_validate.set_defaults(func=validate)
 
