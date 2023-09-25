@@ -178,7 +178,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
     ogo.message('Calibrating CT file.')
     density = calibrator.predict(sitk.Cast(ct, sitk.sitkFloat64))
-    density = sitk.Cast(density, ct.GetPixelID())
+    
 
     # Check that the calibration results are within a reasonable range
     threshold_warning = 2  # percent
@@ -265,7 +265,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
 
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image, input_mask, output_image, calib_file_name, useLabels, useL4, overwrite, func):
+def internal(input_image, input_mask, output_image, calib_file_name, useLabels, useL4, output_arch_image, overwrite, func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -330,10 +330,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
             if (not filt.HasLabel(L4_label)):
                 os.sys.exit('[ERROR] No L4 found in image.')
             else:
-                bone = sitk.MaskImageFilter()
-                bone.SetMaskingValue(L4_label)
-                array = bone.Execute(ct, mask)
-
+                bone = sitk.BinaryThreshold(mask, L4_label, L4_label, 1, 0)
+                array = sitk.Mask(ct, bone)
                 [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()))
                 labels_data[label] = {'ID': value, 'mean': bone_mean, 'stdev': bone_std, 'count': bone_count,
                                       'marker': '(from L4)'}
@@ -398,8 +396,9 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     ogo.message('Calibrating input file.')
     voxel_volume = np.prod(ct.GetSpacing())
     #    ogo.message('Voxel_volume = {:.3f} mm^3'.format(voxel_volume))
-    den = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
-    den = sitk.Cast(den, ct.GetPixelID())
+    den, arch = calib.predict(sitk.Cast(ct, sitk.sitkFloat64), voxel_volume)
+    
+
 
     ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
     imfilt = sitk.StatisticsImageFilter()
@@ -419,8 +418,18 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     ogo.message('  {:>27s} {:8.1f}'.format('StdDev ', np.sqrt(imfilt.GetVariance())))
     ogo.message('  {:>27s} {:8s}'.format('---------------------------', '--------'))
 
-    ogo.message('Writing result to ' + output_image)
+    ogo.message('Writing calibrated image to ' + output_image)
     sitk.WriteImage(den, output_image)
+    
+    if output_arch_image:
+        #creating new file name 
+        suffix = f"_ARCH.nii.gz"
+        arch_image = ogo.add_to_filename(output_image, suffix)
+
+        ogo.message('Writing arch image to ' + arch_image)
+        sitk.WriteImage(arch, arch_image)
+
+
 
     if calib_file_name:
         ogo.message('Saving calibration parameters to file:')
@@ -538,7 +547,7 @@ two labels must be defined, and current valid labels are:
    94 Cortical Bone
    95 Skeletal Muscle
  
-Outputs include the calibrated density image and a text file that includes
+Outputs include the calibrated density image (voxel-specific K2HPO4 density in mg/cc) and a text file that includes
 the calibration parameters and results.
 
 Please cite:
@@ -598,6 +607,8 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
     parser_internal.add_argument('--useL4', action='store_true',
                                  help='Use when label 94 (cortical bone) is not available (it samples L4).')
+    parser_internal.add_argument('--output_arch_image', action='store_true',
+                                 help='Use when you would also like to output the Archimedian density image. Filename will be the same as the output_image but with "ARCH" added.')
     parser_internal.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     parser_internal.set_defaults(func=internal)
 

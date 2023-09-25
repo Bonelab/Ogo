@@ -119,7 +119,7 @@ class InternalCalibration(StandardCalibration):
         # Convert g to mg
         k2hpo4 = k2hpo4 / voxel_volume * 1000.0
 
-        return k2hpo4
+        return k2hpo4, arch
 
     def fit(self):
         """Override Calibration fit method.
