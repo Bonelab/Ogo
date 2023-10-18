@@ -21,6 +21,26 @@ Help build a fracture free future.
     :alt: Tests Status
 
 
+Overview
+========
+
+This repository contains command-line applications developed for performing bone health analysis from computed tomography images.
+
+It includes tools for segmentation, calibration, image manipulation, segmentation validation
+and quantitative analysis. It is expected that the data format is NIfTI, so DICOM files should
+be converted using a trusted tool (we recommend https://github.com/dgobbi/vtk-dicom). It is 
+also helpful to integrate this with the free finite element analysis FAIM tool, developed
+in the Bone Imaging Laboratory (https://bonelab.github.io/n88/faim.html).
+
+A key function of Ogo is quantitative calibration of CT data, including internal calibration,
+which was presented at the ASBMR in 2018 and published in 2020:
+
+- Michalski AS, Besler BA, Michalak GJ, Boyd SK, 2018 Feasibility of QCT internal density calibration for site-specific osteoporosis assessment. In American Society of Bone and Mineral Research Annual Meeting. Montreal, Canada. September 28 - October 1, 2018.
+- Michalski AS, Besler BA, Michalak GJ, Boyd SK, 2020 CT-based internal density calibration for opportunistic skeletal assessment using abdominal CT scans. Med Eng Phys 78, 55-63. doi = 10.1016/j.medengphy.2020.01.009 url = https://www.ncbi.nlm.nih.gov/pubmed/32059948.
+
+For further information about the Bone Imaging Laboratory see https://bonelab.ucalgary.ca. 
+Please contact us for further questions, comments or interest in contributing to this project.
+
 Install
 =======
 
