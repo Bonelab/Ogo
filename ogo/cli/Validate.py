@@ -453,6 +453,9 @@ def validate(input_image, report_file, yaml_file, expected_labels, overwrite, fu
     report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('#','#','mm3','','')
     
     testAreAllLabelsIntact=True
+    testIsRightFemurIntact=True
+    testIsLeftFemurIntact=True
+    testIsL1toL4Intact=True
     
     for label in expected_labels:
         
@@ -474,11 +477,16 @@ def validate(input_image, report_file, yaml_file, expected_labels, overwrite, fu
             line_data += '{},{},{},{},{},{},{},'.format(desc,label,'','','','','')
         else:
             line_data += '{},{},{},{:.1f},{},{},{},'.format(desc,label,n_parts,total_volume,warnings,errors,status)
-            
         
         if status is False:
             testAreAllLabelsIntact=False
             testDidOverallQualityAssessmentPass = False
+            if ((label >= 7) and (label <= 10)):
+                testIsL1toL4Intact=False
+            if label == 1:
+                testIsRightFemurIntact=False
+            if label == 2:
+                testIsLeftFemurIntact=False
             
     report += '\n'
     pa_string = 'Pass procrustes analysis ({:.3f} < {:.3f})'.format(disparity,sensitivity)
@@ -486,14 +494,20 @@ def validate(input_image, report_file, yaml_file, expected_labels, overwrite, fu
     report += '\n'
     report += '  {:>42s}? {:>5s}\n'.format('Pass all labels found',str(testWereExpectedLabelsFound))
     report += '\n'
+    report += '  {:>42s}? {:>5s}\n'.format('Pass right femur label intact',str(testIsRightFemurIntact))
+    report += '  {:>42s}? {:>5s}\n'.format('Pass left femur label intact',str(testIsLeftFemurIntact))
+    report += '  {:>42s}? {:>5s}\n'.format('Pass spine labels intact',str(testIsL1toL4Intact))
     report += '  {:>42s}? {:>5s}\n'.format('Pass all labels intact',str(testAreAllLabelsIntact))
     report += '\n'
     report += '  {:>42s}? {:>5s}\n'.format('Pass overall',str(testDidOverallQualityAssessmentPass))
     
-    line_hdr += '{},{},{},{},{}\n'.format('disparity','procrustes','labels_found','all_labels_intact','final')
-    line_units += '{},{},{},{},{}\n'.format('[1.0]','[test]','[test]','[test]','[test]')
+    line_hdr += '{},{},{},{},{}\n'.format('disparity','procrustes','labels_found','intact_right_femur','intact_left_femur','intact_spine','intact_all_labels','final')
+    line_units += '{},{},{},{},{}\n'.format('[1.0]','[test]','[test]','[test]','[test]','[test]','[test]','[test]')
     line_data += '{:.3f},{},{},{},{}\n'.format(disparity,str(testDidProcrustesAnalysisPass),\
                                                          str(testWereExpectedLabelsFound),\
+                                                         str(testIsRightFemurIntact),\
+                                                         str(testIsLeftFemurIntact),\
+                                                         str(testIsL1toL4Intact),\
                                                          str(testAreAllLabelsIntact),\
                                                          str(testDidOverallQualityAssessmentPass))
     
@@ -501,7 +515,10 @@ def validate(input_image, report_file, yaml_file, expected_labels, overwrite, fu
     info_dict['check']['labels']=QA_dict
     info_dict['check']['procrustes']={'n_expected': len(expected_centroids), 'n_current': len(current_centroids), 'disparity': float(disparity), 'sensitivity': sensitivity, 'status': testDidProcrustesAnalysisPass}
     info_dict['check']['all_found']={'n_labels': len(expected_labels), 'status': testWereExpectedLabelsFound}
-    info_dict['check']['all_labels_intact']={'status': testAreAllLabelsIntact}
+    info_dict['check']['intact_right_femur']={'status': testIsRightFemurIntact}
+    info_dict['check']['intact_left_femur']={'status': testIsLeftFemurIntact}
+    info_dict['check']['intact_spine']={'status': testIsL1toL4Intact}
+    info_dict['check']['intact_all_labels']={'status': testAreAllLabelsIntact}
     info_dict['check']['final']={'status': testDidOverallQualityAssessmentPass}
     
     report += '\n'
