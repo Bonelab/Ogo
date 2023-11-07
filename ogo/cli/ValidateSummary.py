@@ -25,66 +25,8 @@ import collections
 import pandas as pd
 import ogo.dat.OgoMasterLabels as lb
 
-# ============================================================================================================================
-#                Label         Pass       Volume      eMINVOL      eMAXVOL        eFRAG        eSYMM       wNOFEA        wSPEC
-#             name (N)        % (N)   mean (std)        % (N)        % (N)        % (N)        % (N)        % (N)        % (N)
-# -------------------- ------------ ------------ ------------ ------------ ------------ ------------ ------------ ------------
-#   Femur Right (3993)  87.3( 3486) 142.9( 38.8)   1.4(   56)   0.7(   27)   4.5(  179)   8.1(  324)  60.9( 2432)             
-#    Femur Left (3992)  91.2( 3640) 144.2( 39.1)   1.3(   51)   0.6(   24)   3.8(  153)   5.0(  199)  59.9( 2392)             
-#  Pelvis Right (3994)  82.5( 3294) 322.0( 69.1)   0.9(   36)   0.2(    7)  16.5(  660)   0.2(    9)                          
-#   Pelvis Left (3994)  82.9( 3312) 322.9( 69.6)   1.0(   38)   0.2(    9)  16.1(  642)   0.3(   11)                          
-#        Sacrum (3994)  73.3( 2926) 215.6( 41.6)   1.8(   71)   0.2(    8)  25.4( 1014)                             2.9(  114)
-#            L5 (3994)  64.6( 2579)  61.8( 14.3)   4.1(  162)   0.8(   33)  33.1( 1323)                             2.6(  104)
-#            L4 (3993)  63.7( 2543)  61.2( 16.2)   5.2(  206)   1.2(   47)  34.7( 1386)                                       
-#            L3 (3992)  66.5( 2655)  59.2( 16.2)   5.3(  213)   1.4(   56)  32.5( 1297)                                       
-#            L2 (3991)  70.5( 2814)  54.5( 13.7)   5.3(  210)   1.1(   42)  27.6( 1101)                                       
-#            L1 (3991)  62.9( 2509)  51.8( 12.4)   1.6(   65)   0.4(   15)  36.3( 1449)                                       
-#           T12 (1455)  50.7(  738)  25.0( 27.1)   0.0(    0)   0.0(    0)  49.3(  717)                                       
-# -------------------- ------------
-#    Procrustes (3994)  56.6( 2259)
-#  Labels Found (3994)  36.4( 1452)
-#         FINAL (3994)   0.0(    0)
-# ============================================================================================================================
-# Table caption:
-#   Pass rate is shown per bone for all the images.
-#   Pass rate of all bone segmentations is summarized as FINAL.
-#   Labels found means the image contained all expected labels.
-#   Procrustes analysis shows skeletons with unusual anatomy (e.g., L6 present).
-#   Errors for each bone include:
-#     eMINVOL –- exceeds min volume limit
-#     eMAXVOL –- exceeds max volume limit
-#     eFRAG   –- fragmented
-#   Warnings for each bone include:
-#     wSYMM   –- not symmetric
-#     wNOFEA  –- femur is cut off too much
-#     wSPEC   –- Pars defect for L5 or sacrum tip is disassociated
-
-
-# +------------------------------------------------------------------------------+
-# Writer
-def write(entry, deliminator, ofile):
-    if ofile is None:
-        output = os.sys.stdout
-    else:
-        if os.path.isfile(ofile):
-            output = open(ofile, 'a')
-        else:
-            output = open(ofile, 'w')
-            output.write(deliminator.join([str(x) for x in write.header]))
-            output.write(os.linesep)
-
-    output.write(deliminator.join([str(x) for x in entry]))
-    output.write(os.linesep)
-
-    if output is not os.sys.stdout:
-        output.close()
-
-# +------------------------------------------------------------------------------+
-#def ValidateSummary(input_file, output_file, overwrite):
 def ValidateSummary(input_files,seek_label_pass,seek_label_fail,seek_procrustes_pass,seek_procrustes_fail):
 
-    verbose = False
-    
     summary_dict = {}
     
     test_result_dict = {
@@ -400,9 +342,9 @@ a criteria:
     epilog = '''
 Example call: 
      
-ValidateSummary RETRO_000*.yaml
-ValidateSummary RETRO_000*.yaml --seek_label_pass 7 8 9 10
-ValidateSummary RETRO_000*.yaml --seek_procrustes_pass
+ogoValidateSummary RETRO_000*.yaml
+ogoValidateSummary RETRO_000*.yaml --seek_label_pass 7 8 9 10
+ogoValidateSummary RETRO_000*.yaml --seek_procrustes_pass
 
 '''
 
