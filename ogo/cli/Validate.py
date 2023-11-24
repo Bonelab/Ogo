@@ -13,51 +13,39 @@ import os
 import sys
 import vtk
 import math
+import yaml
 import numpy as np
 import SimpleITK as sitk
 from scipy.spatial import procrustes
 from datetime import date
+from datetime import datetime
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 import ogo.dat.OgoMasterLabels as lb
 
 def expected_bone_volumes():
-    # These values were measured from the original OSSAI training dataset (N=48 scans)
-    # Units are mm3 (volume)
-    # The key is the label (i.e. Label 1 = Femur Right)
-    #bone_volumes = {
-    #    1:{ "Min":60000.0,"Max":234000.0,"Average":130199.1,"Median":126812.6,"Stdev":35547.6,"Short femur":153110.5},  # Femur Right
-    #    2:{ "Min":60000.0,"Max":234000.0,"Average":129570.3,"Median":129159.9,"Stdev":35733.7,"Short femur":153110.5},  # Femur Left
-    #    3:{"Min":190000.0,"Max":445000.0,"Average":299810.6,"Median":286991.3,"Stdev":57451.5},                         # Pelvis Right
-    #    4:{"Min":190000.0,"Max":445000.0,"Average":299357.7,"Median":286474.2,"Stdev":57216.2},                         # Pelvis Left
-    #    5:{"Min":115000.0,"Max":293000.0,"Average":201960.4,"Median":196278.1,"Stdev":37622.3},                         # Sacrum
-    #    6:{ "Min":33000.0, "Max":81000.0, "Average":57426.2, "Median":56607.2,"Stdev":10746.2},                         # L5
-    #    7:{ "Min":32000.0, "Max":79000.0, "Average":56711.1, "Median":54537.4,"Stdev":10553.1},                         # L4
-    #    8:{ "Min":32000.0, "Max":79000.0, "Average":56511.7, "Median":53262.7,"Stdev":10773.7},                         # L3
-    #    9:{ "Min":27000.0, "Max":72000.0, "Average":51534.4, "Median":49481.8, "Stdev":9992.9},                         # L2
-    #    10:{"Min":25000.0, "Max":67000.0, "Average":46894.7, "Median":44403.6, "Stdev":9400.7}                          # L1
-    #}
     bone_volumes = {
-         1:{ 'Min':72000.0, 'Max':245000.0,  'Stdev':39632.3,  'Short femur':153110.0}, # Femur Right
-         2:{ 'Min':72000.0, 'Max':245000.0,  'Stdev':39494.4,  'Short femur':153110.0}, # Femur Left
-         3:{'Min':180000.0, 'Max':510000.0,  'Stdev':70518.6},                          # Pelvis Right
-         4:{'Min':180000.0, 'Max':510000.0,  'Stdev':70777.9},                          # Pelvis Left
-         5:{'Min':135000.0, 'Max':350000.0,  'Stdev':43914.4},                          # Sacrum
-         6:{ 'Min':40000.0, 'Max':100000.0,  'Stdev':13011.0},                          # L5
-         7:{ 'Min':39000.0, 'Max':104000.0,  'Stdev':13444.9},                          # L4
-         8:{ 'Min':35000.0,  'Max':96000.0,  'Stdev':13610.6},                          # L3
-         9:{ 'Min':35000.0,  'Max':87000.0,  'Stdev':12253.7},                          # L2
-        10:{ 'Min':30000.0,  'Max':94000.0,  'Stdev':11756.1}                           # L1
+         1:{ 'Min':50000.0, 'Max':1000000.0,  'Stdev':39632.3,  'Short femur':153110.0}, # Femur Right
+         2:{ 'Min':50000.0, 'Max':1000000.0,  'Stdev':39494.4,  'Short femur':153110.0}, # Femur Left
+         3:{ 'Min':80000.0, 'Max':600000.0,  'Stdev':70518.6},                           # Pelvis Right
+         4:{ 'Min':80000.0, 'Max':600000.0,  'Stdev':70777.9},                           # Pelvis Left
+         5:{'Min':100000.0, 'Max':390000.0,  'Stdev':43914.4},                           # Sacrum
+         6:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':13011.0},                           # L5
+         7:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':13444.9},                           # L4
+         8:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':13610.6},                           # L3
+         9:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':12253.7},                           # L2
+        10:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':11756.1},                           # L1
+        11:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':11756.1}                            # L6
     }
     return bone_volumes
 
 def expected_Procrustes():
-    # Used RETRO_00071.nii.gz as reference
+    # Used RETRO_00071.nii.gz as reference (top of femurs)
     # Labels 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
     positions = \
-    [( -85.02785, -142.38381, 137.95209 ), \
-     ( 134.24816, -147.52873, 138.20155 ), \
+    [( -85.02785, -142.38381, 190.00000 ), \
+     ( 134.24816, -147.52873, 190.00000 ), \
      ( -47.02655, -129.48297, 208.27110 ), \
      (  97.00727, -133.80435, 211.17284 ), \
      (  26.25469,  -84.00061, 237.57798 ), \
@@ -68,6 +56,31 @@ def expected_Procrustes():
      (  24.17049, -109.25177, 425.37350 )]
     return positions
     
+def expected_Procrustes_with_L6():
+    # Used RETRO_01455.nii.gz as reference (top of femurs)
+    # Labels 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+    positions = \
+    [( -99.221,    -13.561,    147.75 ), \
+     ( 125.225,     -1.464,    135.88 ), \
+     ( -57.060,     -5.412,   176.046 ), \
+     (  92.237,     -1.380,   165.237 ), \
+     (  18.095,     40.348,   211.248 ), \
+     (  24.245,     -1.285,   277.174 ), \
+     (  25.745,      0.369,   311.009 ), \
+     (  24.853,      6.145,   344.486 ), \
+     (  24.297,     13.684,   376.100 ), \
+     (  24.441,     19.705,   406.925 ), \
+     (  21.298,      6.931,   246.802 )]
+    return positions
+
+def print_centroids(centroids):
+    print('      centroids: {}'.format(len(centroids)))
+    for c in centroids:
+        #phys = [x - y for x, y in zip(c, origin)]
+        #pos = [x / y for x, y in zip(phys, el_size_mm)]
+        print('      [' + ', '.join('{:8.2f}'.format(i) for i in c) + ']')
+        #print('      [' + ', '.join('{:8.2f}'.format(i) for i in c) + '], ['+ ', '.join('{:8d}'.format(int(i)) for i in pos) + ']')
+
 def get_labels(ct):
     filt = sitk.LabelShapeStatisticsImageFilter()
     filt.Execute(ct)
@@ -107,15 +120,37 @@ def special_cases(n_parts,label,stats):
         return False
 
 # +------------------------------------------------------------------------------+
-def validate(input_image, report_file, expected_labels, overwrite, func):
+def validate(input_image, report_file, yaml_file, expected_labels, overwrite, func):
         
     # Quality assurance dictionary
     QA_dict = {}
-
+    
+    # Collection information into dictionary for YAML file
+    info_dict = {}
+    info_dict['runtime']={}
+    info_dict['runtime']['date']=str(date.today())
+    info_dict['runtime']['time']=datetime.now().strftime("%H:%M:%S")
+    info_dict['runtime']['script']=os.path.splitext(os.path.basename(sys.argv[0]))[0]
+    info_dict['runtime']['version']=script_version
+    info_dict['input_parameters']={}
+    info_dict['input_parameters']['input_image']= input_image
+    info_dict['input_parameters']['report_file']= report_file
+    info_dict['input_parameters']['yaml_file']= yaml_file
+    info_dict['input_parameters']['expected_labels']= expected_labels
+    info_dict['input_parameters']['overwrite']= overwrite
+    
     # Check if output exists and should overwrite
     if not report_file is None:
         if os.path.isfile(report_file) and not overwrite:
             result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(report_file))
+            if result.lower() not in ['y', 'yes']:
+                ogo.message('Not overwriting. Exiting...')
+                os.sys.exit()
+
+    # Check if output exists and should overwrite
+    if not yaml_file is None:
+        if os.path.isfile(yaml_file) and not overwrite:
+            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(yaml_file))
             if result.lower() not in ['y', 'yes']:
                 ogo.message('Not overwriting. Exiting...')
                 os.sys.exit()
@@ -131,6 +166,9 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     ogo.message('\"{}\"'.format(input_image))
     ct = sitk.ReadImage(input_image, sitk.sitkUInt8)
     
+    el_size_mm = ct.GetSpacing()
+    origin = ct.GetOrigin()
+
     # Create base filename (and some extra information)
     basename = os.path.basename(input_image)
     name, ext = os.path.splitext(input_image)
@@ -148,14 +186,22 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     report += '  {:>20s} {:s}\n'.format('creation date:', str(date.today()))
     report += '\n'
     
+    info_dict['fileinfo']={}
+    info_dict['fileinfo']['basename']=basename
+    info_dict['fileinfo']['name']=name
+    info_dict['fileinfo']['extension']=ext
+    info_dict['fileinfo']['dir']=dirname
+    
     extra_msg = ''
           
     # Gather all labels in image and determine number of parts each label is broken into
     filt = sitk.LabelShapeStatisticsImageFilter() # Used to get labels in image
     filt.Execute(ct)
+    
     n_labels = filt.GetNumberOfLabels()
     labels = filt.GetLabels()
-    label_repair_list = [] # list of (label, part, new_label)
+    hasL6 = filt.HasLabel(11)
+    label_repair_list = [] # list of [label, part, new_label]
     
     conn = sitk.ConnectedComponentImageFilter()
     conn.SetFullyConnected(True)
@@ -163,27 +209,33 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     
     # Check if expected labels are in image
     test_labels = []
-    expectedLabelsFound = True
-    finalQualityAssessment = True
+    testWereExpectedLabelsFound = True
+    testDidOverallQualityAssessmentPass = True
     for label in expected_labels:
         try:
             desc = lb.labels_dict[label]['LABEL']
         except KeyError:
             desc = 'unknown label'
         
+        QA_dict[label] = {}
+        QA_dict[label]['name'] = desc
+        QA_dict[label]['label'] = label
+
         if label in labels:
             test_labels.append(label)
-            QA_dict[label] = {}
-            QA_dict[label]['label_name'] = desc
         else:
-            ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,desc))
-            expectedLabelsFound = False
-            finalQualityAssessment = False
+            if label != 11:
+                ogo.message('[WARNING] Expected label {} ({}) was not found in image.'.format(label,desc))
+                testWereExpectedLabelsFound = False
+                testDidOverallQualityAssessmentPass = False
+            else: # we have a soft constraint on L6
+                ogo.message('[NOTICE] Label {} ({}) was not found, but is not really expected.'.format(label,desc))
 
     if test_labels == []:
         os.sys.exit('[ERROR] None of the expected labels were found in image.')
+        
     labels = test_labels
-    
+
     ogo.message('Examine each label to determine number of parts and volume.')
     
     report += '  {:>20s}\n'.format('_______________________________________________________________________Report')
@@ -194,89 +246,123 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     current_centroids = []
     
     # Process the identification of labels and their parts
-    for idx,label in enumerate(labels):
+    for idx,label in enumerate(expected_labels):
         try:
             desc = lb.labels_dict[label]['LABEL']
         except KeyError:
             desc = 'unknown label'
         ogo.message('  processing label {:>2d} ({})'.format(label,desc))
         
-        centroid = filt.GetCentroid(label)
-        current_centroids.append(centroid)
-        
-        ct_thres = ct==label
-        ct_conn = conn.Execute(ct,ct_thres)
-        ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
-        
-        stats.Execute(ct_conn_sorted,ct)
-        n_parts = stats.GetNumberOfLabels()
-        QA_dict[label]['n_parts'] = n_parts
-        QA_dict[label]['total_volume'] = 0
-        QA_dict[label]['errors'] = ''
-        QA_dict[label]['warnings'] = ''
-        QA_dict[label]['status'] = 'PASS'
-        
-        if (n_parts>1):
-            if special_cases(n_parts,label,stats):
-                QA_dict[label]['warnings'] += 'wSPEC ' # Sacrum and L5 are sometimes two parts
-                msg = '[WARNING] Label {:d} ({}) exception with {} parts ({:.1f} mm3)'.format(label,desc,n_parts,stats.GetPhysicalSize(2))
-                ogo.message(msg)
-                extra_msg += '  ' + msg + '\n'
-            else:
-                QA_dict[label]['errors'] += 'eFRAG ' # More than one part indicates the bone is fragmented
-                QA_dict[label]['status'] = 'FAIL'
+        if label not in labels: # although we expected this label, there is none in the image (e.g. missing vertebrae, femurs, etc)
+            QA_dict[label]['n_parts'] = 0
+            QA_dict[label]['total_volume'] = 0
+            QA_dict[label]['errors'] = ''
+            QA_dict[label]['warnings'] = ''
+            QA_dict[label]['status'] = True
             
-        # Generate report data
-        report += '  {:>15s}{:>5s} '.format('('+desc+')',str(label))        
-        for part in stats.GetLabels(): # for each part of a given label
-            centroid = stats.GetCentroid(part)
-            bounding_box = stats.GetBoundingBox(part)
-            bb=[0]*3
-            bb[0] = bounding_box[0] + int(math.ceil(bounding_box[3]/2))
-            bb[1] = bounding_box[1] + int(math.ceil(bounding_box[4]/2))
-            bb[2] = bounding_box[2] + int(math.ceil(bounding_box[5]/2))
+            # Generate report data
+            report += '  {:>15s}{:>5s} '.format('('+desc+')',str(label))        
+            report += '{:>6s} {:>10s} {:>10s} ({:>5s},{:>5s},{:>5s})\n'.format('-','-','-','-','-','-')
             
-            QA_dict[label]['total_volume'] += stats.GetPhysicalSize(part)
-            
-            if part==1:
-                ref_centroid = centroid
-                report += '{:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2])
-            else:
-                distance_between_centroids = np.sqrt((ref_centroid[0] - centroid[0])**2 + (ref_centroid[1] - centroid[1])**2 + (ref_centroid[2] - centroid[2])**2)
-                report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
-                          .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2],distance_between_centroids)
+        else: # label is in the image
 
-        # Generate suggestion of new label for command line suggestion
-        if n_parts>1:
-            for part in stats.GetLabels():
-                if part>1:
-                    new_label = label
-                    if label == 1:
-                        new_label = 2
-                    if label == 2:
-                        new_label = 1
-                    if label == 3:
-                        new_label = 4
-                    if label == 4:
-                        new_label = 3
-                    swap = [label,part,new_label]
-                    label_repair_list.append(swap)
-    
+            centroid = filt.GetCentroid(label)
+            
+            if label==1 or label==2: # For left and right femur, we take the top Z value instead of centroid for use with Procrustes
+                bounding_box = filt.GetBoundingBox(label)
+                height = (bounding_box[2]+bounding_box[5])*el_size_mm[2]+origin[2]
+                lst = list(centroid) # to change a tuple we convert to list, edit, then change back
+                lst[2] = height
+                centroid = tuple(lst)
+                
+                #pos = [x / y for x, y in zip(centroid, el_size_mm)]
+                #print('.  el_size_mm [' + ', '.join('{:8.2f}'.format(i) for i in el_size_mm) + ']')
+                #print('.    centroid [' + ', '.join('{:8.2f}'.format(i) for i in centroid) + ']')
+                #print('          pos [' + ', '.join('{:8d}'.format(int(i)) for i in pos) + ']')
+                #print(' bounding_box [' + ', '.join('{:8d}'.format(int(i)) for i in bounding_box) + ']')
+                
+            current_centroids.append(centroid) # current_centroids is used for Procrustes
+            
+            # We are accelerating calculations by pulling an ROI for each label
+            roi_bounding_box = filt.GetBoundingBox(label) # x_start, y_start, z_start, x_size, y_size, z_size
+            start = (roi_bounding_box[0],roi_bounding_box[1],roi_bounding_box[2])
+            size = (roi_bounding_box[3],roi_bounding_box[4],roi_bounding_box[5])
+            roi_bounding_box_start = (start[0],start[1],start[2],0,0,0)
+            ct_roi = sitk.RegionOfInterest(ct,size,start)
+            
+            ct_thres = ct_roi==label 
+            ct_conn = conn.Execute(ct_roi,ct_thres) 
+            ct_conn_sorted = sitk.RelabelComponent(ct_conn, sortByObjectSize=True) # could use minimumObjectSize
+            stats.Execute(ct_conn_sorted,ct_roi)
+            
+            n_parts = stats.GetNumberOfLabels()
+            QA_dict[label]['n_parts'] = n_parts
+            QA_dict[label]['total_volume'] = 0
+            QA_dict[label]['errors'] = ''
+            QA_dict[label]['warnings'] = ''
+            QA_dict[label]['status'] = True
+            
+            # Set some warning or error codes if necessary
+            if (n_parts>1):
+                if special_cases(n_parts,label,stats):
+                    QA_dict[label]['warnings'] += 'wSPEC ' # Sacrum and L5 are sometimes two parts
+                    msg = '[WARNING] Label {:d} ({}) exception with {} parts ({:.1f} mm3)'.format(label,desc,n_parts,stats.GetPhysicalSize(2))
+                    ogo.message(msg)
+                    extra_msg += '  ' + msg + '\n'
+                else:
+                    QA_dict[label]['errors'] += 'eFRAG ' # More than one part indicates the bone is fragmented
+                    QA_dict[label]['status'] = False
+                
+            # Generate report data
+            report += '  {:>15s}{:>5s} '.format('('+desc+')',str(label))        
+            for part in stats.GetLabels(): # for each part of a given label
+                centroid = stats.GetCentroid(part)
+                bounding_box = stats.GetBoundingBox(part)
+                bounding_box = tuple(map(sum, zip(bounding_box,(start[0],start[1],start[2],0,0,0)))) # We add the original start to the start of the part
+                bb=[0]*3
+                bb[0] = bounding_box[0] + int(math.ceil(bounding_box[3]/2))
+                bb[1] = bounding_box[1] + int(math.ceil(bounding_box[4]/2))
+                bb[2] = bounding_box[2] + int(math.ceil(bounding_box[5]/2))
+                
+                QA_dict[label]['total_volume'] += stats.GetPhysicalSize(part)
+                
+                if part==1:
+                    ref_centroid = centroid
+                    report += '{:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d})\n'.format(part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2])
+                else:
+                    distance_between_centroids = np.sqrt((ref_centroid[0] - centroid[0])**2 + (ref_centroid[1] - centroid[1])**2 + (ref_centroid[2] - centroid[2])**2)
+                    report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:10d} ({:5d},{:5d},{:5d}) {:6.1f}\n'\
+                              .format('','',part,stats.GetPhysicalSize(part),stats.GetNumberOfPixels(part),bb[0],bb[1],bb[2],distance_between_centroids)
+            
+            # Generate suggestion of new label for command line suggestion
+            if n_parts>1:
+                for part in stats.GetLabels():
+                    if part>1:
+                        new_label = label
+                        if label == 1:
+                            new_label = 2
+                        if label == 2:
+                            new_label = 1
+                        if label == 3:
+                            new_label = 4
+                        if label == 4:
+                            new_label = 3
+                        swap = [label,part,new_label]
+                        label_repair_list.append(swap)
+
     # Quality checks -------------------------------------------------------------------
     # 1. Examining femur symmetry
     if ((1 in labels) and (2 in labels)):
         ogo.message('Examining femur symmetry.')
         percent_femur = 10.0
         if is_smaller(filt,percent_femur,1,2): # Is the right femur smaller than left femur?
-            QA_dict[1]['status'] = 'FAIL'
-            QA_dict[1]['errors'] += 'eSYMM '
-            msg = '[ERROR] Right femur is more than {}% smaller than left femur.'.format(percent_femur)
+            QA_dict[1]['warnings'] += 'wSYMM '
+            msg = '[WARNING] Right femur is more than {}% smaller than left femur.'.format(percent_femur)
             ogo.message(msg)
             extra_msg += '  ' + msg + '\n'
         if is_smaller(filt,percent_femur,2,1):
-            QA_dict[2]['status'] = 'FAIL'
-            QA_dict[2]['errors'] += 'eSYMM '
-            msg = '[ERROR] Left femur is more than {}% smaller than right femur.'.format(percent_femur)
+            QA_dict[2]['warnings'] += 'wSYMM '
+            msg = '[WARNING] Left femur is more than {}% smaller than right femur.'.format(percent_femur)
             ogo.message(msg)
             extra_msg += '  ' + msg + '\n'
     
@@ -285,15 +371,13 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         ogo.message('Examining pelvis symmetry.')
         percent_pelvis = 10.0
         if is_smaller(filt,percent_pelvis,3,4): # Is the right pelvis smaller than left pelvis?
-            QA_dict[3]['status'] = 'FAIL'
-            QA_dict[3]['errors'] += 'eSYMM '
-            msg = '[ERROR] Right pelvis is more than {}% smaller than left pelvis.'.format(percent_pelvis)
+            QA_dict[3]['warnings'] += 'wSYMM '
+            msg = '[WARNING] Right pelvis is more than {}% smaller than left pelvis.'.format(percent_pelvis)
             ogo.message(msg)
             extra_msg += '  ' + msg + '\n'
         if is_smaller(filt,percent_pelvis,4,3):
-            QA_dict[4]['status'] = 'FAIL'
-            QA_dict[4]['errors'] += 'eSYMM '
-            msg = '[ERROR] Left pelvis is more than {}% smaller than right pelvis.'.format(percent_pelvis)
+            QA_dict[4]['warnings'] += 'wSYMM '
+            msg = '[WARNING] Left pelvis is more than {}% smaller than right pelvis.'.format(percent_pelvis)
             ogo.message(msg)
             extra_msg += '  ' + msg + '\n'
     
@@ -312,14 +396,14 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
             
             if volume < min_volume:
                 QA_dict[label]['errors'] += 'eMINVOL '
-                QA_dict[label]['status'] = 'FAIL'
+                QA_dict[label]['status'] = False
                 msg = '[ERROR] Label {:d} ({}) volume is below minimum ({} mm3).'.format(label,desc,min_volume)
                 ogo.message(msg)
                 extra_msg += '  ' + msg + '\n'
             
             if volume > max_volume:
                 QA_dict[label]['errors'] += 'eMAXVOL '
-                QA_dict[label]['status'] = 'FAIL'
+                QA_dict[label]['status'] = False
                 msg = '[ERROR] Label {:d} ({}) volume is above maximum ({} mm3).'.format(label,desc,max_volume)
                 ogo.message(msg)
                 extra_msg += '  ' + msg + '\n'
@@ -335,25 +419,28 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     
     # 4. Check relative positions by Procrustes analysis
     ogo.message('Examining bone positions by Procrustes analysis.')
-    procrustesAnalysisResult = True
+    testDidProcrustesAnalysisPass = True
     sensitivity = 0.008 # adjust with smaller number to make more sensitive
-    expected_centroids = expected_Procrustes()
+    if hasL6:
+        expected_centroids = expected_Procrustes_with_L6()
+    else:
+        expected_centroids = expected_Procrustes()
 
+    #print('Expected:')
+    #print_centroids(expected_centroids)
+    #print('Current:')
+    #print_centroids(current_centroids)
+    
+    disparity = 1.0
+    
     if len(current_centroids)==len(expected_centroids):
         mtx1, mtx2, disparity = procrustes(expected_centroids, current_centroids)
         if disparity > sensitivity:
-            msg = '[ERROR] Procrustes analysis detects position mismatch ({:.3f} > {:.3f}).'.format(disparity,sensitivity)
+            msg = '[WARNING] Procrustes analysis detects position mismatch ({:.3f} > {:.3f}).'.format(disparity,sensitivity)
             ogo.message(msg)
             extra_msg += '  ' + msg + '\n'
-            procrustesAnalysisResult = False
-            finalQualityAssessment = False
-    else:
-        disparity = 1.0 # total fail
-        procrustesAnalysisResult = False
-        finalQualityAssessment = False
-        msg = '[WARNING] Procrustes analysis expected {} centroids ({} centroids found).'.format(len(expected_centroids),len(current_centroids))
-        ogo.message(msg)
-        extra_msg += '  ' + msg + '\n'
+            testDidProcrustesAnalysisPass = False
+            testDidOverallQualityAssessmentPass = False
 
     line_hdr =   'line_{},{},'.format('hdr','name')
     line_units = 'line_{},{},'.format('units','[text]')
@@ -365,41 +452,75 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
     report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('LABEL','NPARTS','TOTAL_VOL','STATUS','ERRORS and WARNINGS')
     report += '  {:>20s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('#','#','mm3','','')
     
-    for label in labels:
+    testAreAllLabelsIntact=True
+    testIsRightFemurIntact=True
+    testIsLeftFemurIntact=True
+    testIsL1toL4Intact=True
+    
+    for label in expected_labels:
         
-        desc = QA_dict[label]['label_name']
+        desc = QA_dict[label]['name']
         n_parts = QA_dict[label]['n_parts']
         total_volume = QA_dict[label]['total_volume']
         warnings = QA_dict[label]['warnings']
         errors = QA_dict[label]['errors']
         status = QA_dict[label]['status']
         
-        report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:>10s} {:>23s}\n'.format('('+desc+')',str(label),n_parts,total_volume,status,warnings+errors)        
+        if n_parts == 0:
+            report += '  {:>15s}{:>5s} {:>6s} {:>10s} {:>10s} {:>23s}\n'.format('('+desc+')',str(label),'-','-','-','-')        
+        else:
+            report += '  {:>15s}{:>5s} {:6d} {:10.1f} {:>10s} {:>23s}\n'.format('('+desc+')',str(label),n_parts,total_volume,str(status),warnings+errors)                    
         
         line_hdr += '{},{},{},{},{},{},{},'.format('desc','label','n_parts','total_vol','warnings','errors','status')
         line_units += '{},{},{},{},{},{},{},'.format('[text]','[#]','[#]','[mm3]','[msg]','[msg]','[test]')
-        line_data += '{},{},{},{:.1f},{},{},{},'.format(desc,label,n_parts,total_volume,warnings,errors,status)
+        if n_parts == 0:
+            line_data += '{},{},{},{},{},{},{},'.format(desc,label,'','','','','')
+        else:
+            line_data += '{},{},{},{:.1f},{},{},{},'.format(desc,label,n_parts,total_volume,warnings,errors,status)
         
-        if status is 'FAIL':
-            finalQualityAssessment = False
+        if status is False:
+            testAreAllLabelsIntact=False
+            testDidOverallQualityAssessmentPass = False
+            if ((label >= 7) and (label <= 10)):
+                testIsL1toL4Intact=False
+            if label == 1:
+                testIsRightFemurIntact=False
+            if label == 2:
+                testIsLeftFemurIntact=False
             
     report += '\n'
-    pa_string = 'Procrustes analysis ({:.3f} < {:.3f})'.format(disparity,sensitivity)
-    report += '  {:>42s}: {:>5s}\n'.format(pa_string,'PASS' if procrustesAnalysisResult else 'FAIL')
+    pa_string = 'Pass procrustes analysis ({:.3f} < {:.3f})'.format(disparity,sensitivity)
+    report += '  {:>42s}? {:>5s}\n'.format(pa_string,str(testDidProcrustesAnalysisPass))
     report += '\n'
-    report += '  {:>42s}: {:>5s}\n'.format('All labels found','PASS' if expectedLabelsFound else 'FAIL')
+    report += '  {:>42s}? {:>5s}\n'.format('Pass all labels found',str(testWereExpectedLabelsFound))
     report += '\n'
-    report += '  {:>42s}: {:>5s}\n'.format('Final assessment','PASS' if finalQualityAssessment else 'FAIL')
+    report += '  {:>42s}? {:>5s}\n'.format('Pass right femur label intact',str(testIsRightFemurIntact))
+    report += '  {:>42s}? {:>5s}\n'.format('Pass left femur label intact',str(testIsLeftFemurIntact))
+    report += '  {:>42s}? {:>5s}\n'.format('Pass spine labels intact',str(testIsL1toL4Intact))
+    report += '  {:>42s}? {:>5s}\n'.format('Pass all labels intact',str(testAreAllLabelsIntact))
+    report += '\n'
+    report += '  {:>42s}? {:>5s}\n'.format('Pass overall',str(testDidOverallQualityAssessmentPass))
     
-    line_hdr += '{},{},{},{}\n'.format('disparity','procrustes','labels_found','final')
-    line_units += '{},{},{},{}\n'.format('[1.0]','[test]','[test]','[test]')
-    line_data += '{:.3f},{},{},{}\n'.format(disparity,'PASS' if procrustesAnalysisResult else 'FAIL',\
-                                                  'PASS' if expectedLabelsFound else 'FAIL',\
-                                                  'PASS' if finalQualityAssessment else 'FAIL')
+    line_hdr += '{},{},{},{},{}\n'.format('disparity','procrustes','labels_found','intact_right_femur','intact_left_femur','intact_spine','intact_all_labels','final')
+    line_units += '{},{},{},{},{}\n'.format('[1.0]','[test]','[test]','[test]','[test]','[test]','[test]','[test]')
+    line_data += '{:.3f},{},{},{},{}\n'.format(disparity,str(testDidProcrustesAnalysisPass),\
+                                                         str(testWereExpectedLabelsFound),\
+                                                         str(testIsRightFemurIntact),\
+                                                         str(testIsLeftFemurIntact),\
+                                                         str(testIsL1toL4Intact),\
+                                                         str(testAreAllLabelsIntact),\
+                                                         str(testDidOverallQualityAssessmentPass))
     
-    #report += '\n'
-    #report += '  Additional error or warning information:\n'
-    #report += extra_msg
+    info_dict['check']={}
+    info_dict['check']['labels']=QA_dict
+    info_dict['check']['procrustes']={'n_expected': len(expected_centroids), 'n_current': len(current_centroids), 'disparity': float(disparity), 'sensitivity': sensitivity, 'status': testDidProcrustesAnalysisPass}
+    info_dict['check']['all_found']={'n_labels': len(expected_labels), 'status': testWereExpectedLabelsFound}
+    info_dict['check']['intact_right_femur']={'status': testIsRightFemurIntact}
+    info_dict['check']['intact_left_femur']={'status': testIsLeftFemurIntact}
+    info_dict['check']['intact_spine']={'status': testIsL1toL4Intact}
+    info_dict['check']['intact_all_labels']={'status': testAreAllLabelsIntact}
+    info_dict['check']['final']={'status': testDidOverallQualityAssessmentPass}
+    
     report += '\n'
     report += '  Legend for errors and warnings:\n'
     report += '    eFRAG   – Error due to multiple connected components resulting in fragments\n'
@@ -433,6 +554,12 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         else:
             cmd_line += '\n'
              
+    if yaml_file:
+        ogo.message('Saving Quality Assurance report to file:')
+        ogo.message('      \"{}\"'.format(yaml_file))
+        with open(yaml_file, 'w') as file:
+            documents = yaml.dump(info_dict, file, sort_keys=False)
+            
     if report_file:
         ogo.message('Saving report to file:')
         ogo.message('      \"{}\"'.format(report_file))
@@ -441,12 +568,12 @@ def validate(input_image, report_file, expected_labels, overwrite, func):
         txt_file.write(cmd_line)
         txt_file.write(grep_lines)
         txt_file.close()
-    else:
-        ogo.message('Printing report')
-        print('\n')
-        print(report)
-        if label_repair_list != []:
-            print(cmd_line)
+
+    ogo.message('Printing report')
+    print('\n')
+    print(report)
+    if label_repair_list != []:
+        print(cmd_line)
     
     ogo.message('Done.')
 
@@ -658,8 +785,8 @@ directed to use Graph Cuts. See ogoGraphCuts to learn more.
 
 Definitions:
 
-Label – a value between 1 and 255 that identifies the type of tissue.
-Part – component labelling identifies each unconnected part for a label
+Label – a value up to 255 that identifies the type of tissue.
+Part – for each label it is represented by unconnected parts.
 
 Validation is based on the anatomical constraints and checks that are tested:
   
@@ -669,8 +796,8 @@ Validation is based on the anatomical constraints and checks that are tested:
 - The left and right femur are the same volume (within a given tolerance)
 - The left and right pelvis are the same volume (within a given tolerance)
 - Each bone is within the expected min/max volume range that is pre-defined
-  A future implementation may refine the size limits relative to a reference
-  bone, such as the sacrum. Large skeletons have large bones, small skeletons...
+  (A future implementation may refine the size limits relative to a reference
+  bone, such as the sacrum. Large skeletons have large bones, small skeletons...)
 - The position of each bone relative to other bones is appropriate as 
   assessed by a Procrustes analysis
 
@@ -693,10 +820,16 @@ entire bone (e.g. a portion of Left Femur is labelled something else, like Right
 Femur). Without visualizing the results of segmentation, this is difficult to 
 detect. However, typically the volume of that bone label will be smaller than
 normal, which is then used to identify that something is wrong. Furthermore, if
-you are looking at a bone that has a symmetric pair (femur, pelvis), then an 
-error is detected if their volumes are different more than a given threshold.
+you are looking at a bone that has a symmetric pair (femur, pelvis), then a 
+warning is applied if their volumes are different more than a given threshold.
 Interestingly, the sacrum and L5 sometimes seem to be separated into two parts,
 which is unusual but not impossible.
+
+The YAML file output during validation captures the results of all tests performed
+so that subsequent analysis of large datasets can (a) summarize the quality checks,
+(b) identify which parts of a segmentation are valid, or (c) combine multiple 
+model outputs from the same skeleton to capture the bones that have met the
+quality checks.
 
 '''
 
@@ -727,7 +860,8 @@ ogoValidate repair image.nii.gz image_repaired.nii.gz \\
     parser_validate = subparsers.add_parser('validate')
     parser_validate.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
     parser_validate.add_argument('--report_file', metavar='FILE', help='Write validation report to file (*.txt)')
-    parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10,34], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
+    parser_validate.add_argument('--yaml_file', metavar='FILE', help='Write quality assurance (QA) outputs (*.yaml)')
+    parser_validate.add_argument('--expected_labels', type=int, nargs='*', default=[1,2,3,4,5,6,7,8,9,10,11], metavar='LABEL', help='List of labels expected in image (default: %(default)s)')
     parser_validate.add_argument('--overwrite', action='store_true', help='Overwrite validation report without asking')
     parser_validate.set_defaults(func=validate)
 

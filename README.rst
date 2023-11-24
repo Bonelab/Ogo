@@ -48,7 +48,7 @@ Install
 
     # I would recommend you create a virtual environment
     #  using conda
-	conda create -n ogo -c numerics88 -c simpleitk -c conda-forge n88tools simpleitk pbr nose six python=3
+	conda create -n ogo -c numerics88 -c simpleitk -c conda-forge n88tools simpleitk pbr nibabel nose six python=3
     
 	# Activate your conda environment, make sure you have conda installed on your system.
     # Best way to install conda is through anaconda
@@ -154,28 +154,38 @@ with the :code:`ogo` environment activated.
      - utility to crop an image
    * - :code:`ogoImageExam`
      - utility to examine the header, histogram and dimensions of a NIfTI image
+   * - :code:`ogoImageIntensityWindowingFilter`
+     - applies a linear scale to the intensity levels of a NIfTI image
+   * - :code:`ogoImageThreshold`
+     - utility threshold a NIfTI image
+   * - :code:`ogoIntensityProjection`
+     - create a 2D projection of 3D computed tomography data
    * - :code:`ogoIsotropicResampling`
      - resample a 3D computed tomography datasets to new dimensions
    * - :code:`ogoMergeLabels`
      - combine labels from multiple images into a single image; useful for working with TotalSegmentator
+   * - :code:`ogoMorphologicalOperation`
+     - performs dilate, erode, opening, closing on labels
    * - :code:`ogoPrintLabels`
      - output the labels used for bones and other tissues
    * - :code:`ogoProcrustes`
      - determine whether two datasets have similar bone anatomy as per Procrustes
    * - :code:`ogoReadPickle`
-     - read pickle files used in machine learning
-   * - :code:`ogoRepairNifti`
+     - read pickle files used in machine learning (deprecated)
+   * - :code:`ogoRepairNIfTI`
      - fix instances of corrupted NIfTI files
    * - :code:`ogoReplaceLabels`
      - replace labels in an image with a new label or erase a label
    * - :code:`ogoValidate`
      - can validate accuracy of labels from machine learning and has basic repair functions
+   * - :code:`ogoValidateSummary`
+     - provides a summary of validation results from ogoValidate
+   * - :code:`ogoValidateSelectBest`
+     - a utility to identify best validation from multiple results output from ogoValidate
    * - :code:`ogoVisualize`
-     - allow either offscreen or interactive visualization of labels
-   * - :code:`ogoMorphologicalOperation`
-     - performs dilate, erode, opening, closing on labels
+     - interactive visualization tool or offscreen rendering in 2D or 3D
    * - :code:`ogodcm2nii`
-     - convert DICOM files to NIfTI images
+     - convert DICOM files to NIfTI images (deprecated)
 
 Developer Notes
 ===============

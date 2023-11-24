@@ -31,6 +31,28 @@ import ogo.dat.OgoMasterLabels as lb
 start_time = time.time()
 
 
+def pass_check_if_output_exists(filename,overwrite=False):
+    if filename: # only continues if not None
+        if os.path.isfile(filename) and not overwrite:
+            result = input('         File \"{}\" already exists. Overwrite? [y/n]: '.format(filename))
+            if result.lower() not in ['y', 'yes']:
+                message('[ERROR] Not overwriting \"{}\". Exiting...'.format(filename))
+                os.sys.exit()
+
+def pass_check_if_file_exists(filename):
+    if not os.path.isfile(filename):
+        message('[ERROR] Input file \"{}\" does not exist. Exiting...'.format(filename))
+        os.sys.exit()
+
+def pass_check_file_ending(filename,endings=['.nii','.nii.gz']):
+    if filename: # only continues if not None
+        result=False
+        for ending in endings:
+            if filename.lower().endswith(ending):
+                result=True
+        if not result:
+            message('[ERROR] File \"{}\" ending must be {}'.format(filename,endings))
+
 ##
 # Returns a dictionary of calibration phantoms for each phantom requested
 def get_phantom(phantom_type):
@@ -267,6 +289,31 @@ def aix(infile, image):
     print('!> Total memory size          {:.1f} {: <10}'.format(size, names[i]))
     print(guard)
 
+def aix_nifti(infile, image):
+    guard = '!-------------------------------------------------------------------------------'
+    phys_dim = [x * y for x, y in zip(image.GetSize(), image.GetSpacing())]
+    position = [math.floor(x / y) for x, y in zip(image.GetOrigin(), image.GetSpacing())]
+    size = os.path.getsize(infile)  # gets size of file; used to calculate K,M,G bytes
+    names = ['Bytes', 'KBytes', 'MBytes', 'GBytes']
+    n_image_voxels = image.GetSize()[0]*image.GetSize()[1]*image.GetSize()[2]
+    voxel_volume = image.GetSpacing()[0] * image.GetSpacing()[1] * image.GetSpacing()[2]
+    i = 0
+    while int(size) > 1024 and i < len(names):
+        i += 1
+        size = size / 2.0 ** 10
+
+    # Print header
+    print(guard)
+    print('!>')
+    print('!> dim                            {:>8}  {:>8}  {:>8}'.format(*image.GetSize()))
+    print('!> off                            {:>8}  {:>8}  {:>8}'.format('-', '-', '-'))
+    print('!> pos                            {:>8}  {:>8}  {:>8}'.format(*position))
+    print('!> element size in mm             {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*image.GetSpacing()))
+    print('!> phys dim in mm                 {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*phys_dim))
+    print('!>')
+    print('!> Type of data               {}'.format(image.GetPixelIDTypeAsString()))
+    print('!> Total memory size          {:.1f} {: <10}'.format(size, names[i]))
+    print(guard)
 
 def infoNIFTI(reader):
     guard = '!-------------------------------------------------------------------------------'
@@ -583,7 +630,6 @@ def combineImageData_SF(image, fh_pmma_id_pad, gt_pmma_id_pad, pmma_mat_id):
     final_image = final_thres.GetOutput()
 
     return final_image
-
 
 def combineImageData_VC(image, sup_pmma_id_pad, inf_pmma_id_pad, pmma_mat_id):
     """Combines the 3 image data together to get final image.

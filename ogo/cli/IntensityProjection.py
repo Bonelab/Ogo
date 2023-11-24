@@ -14,9 +14,11 @@ import sys
 import vtk
 import math
 import numpy as np
+import yaml
 import SimpleITK as sitk
 from scipy.spatial import procrustes
 from datetime import date
+from datetime import datetime
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
@@ -28,21 +30,110 @@ def get_labels(ct):
     labels = filt.GetLabels()
     return labels
 
+# This function is from https://github.com/rock-learning/pytransform3d/blob/7589e083a50597a75b12d745ebacaa7cc056cfbd/pytransform3d/rotations.py#L302
+def matrix_from_axis_angle(a):
+    """ Compute rotation matrix from axis-angle.
+    This is called exponential map or Rodrigues' formula.
+    Parameters
+    ----------
+    a : array-like, shape (4,)
+        Axis of rotation and rotation angle: (x, y, z, angle)
+    Returns
+    -------
+    R : array-like, shape (3, 3)
+        Rotation matrix
+    """
+    ux, uy, uz, theta = a
+    c = np.cos(theta)
+    s = np.sin(theta)
+    ci = 1.0 - c
+    R = np.array([[ci * ux * ux + c,
+                   ci * ux * uy - uz * s,
+                   ci * ux * uz + uy * s],
+                  [ci * uy * ux + uz * s,
+                   ci * uy * uy + c,
+                   ci * uy * uz - ux * s],
+                  [ci * uz * ux - uy * s,
+                   ci * uz * uy + ux * s,
+                   ci * uz * uz + c],
+                  ])
+
+    # This is equivalent to
+    # R = (np.eye(3) * np.cos(theta) +
+    #      (1.0 - np.cos(theta)) * a[:3, np.newaxis].dot(a[np.newaxis, :3]) +
+    #      cross_product_matrix(a[:3]) * np.sin(theta))
+
+    return R
+
+
+def resample(image, transform, interpolator):
+    """
+    This function resamples (updates) an image using a specified transform
+    :param image: The sitk image we are trying to transform
+    :param transform: An sitk transform (ex. resizing, rotation, etc.
+    :return: The transformed sitk image
+    """
+    reference_image = image
+    default_value = 0
+    return sitk.Resample(image, reference_image, transform,
+                         interpolator, default_value)
+
+
+def get_center(img):
+    """
+    This function returns the physical center point of a 3d sitk image
+    :param img: The sitk image we are trying to find the center of
+    :return: The physical center point of the image
+    """
+    width, height, depth = img.GetSize()
+    return img.TransformIndexToPhysicalPoint((int(np.ceil(width/2)),
+                                              int(np.ceil(height/2)),
+                                              int(np.ceil(depth/2))))
+
+
+def rotation3d(image, theta_z, interpolator, show=False):
+    """
+    This function rotates an image across each of the x, y, z axes by theta_x, theta_y, and theta_z degrees
+    respectively
+    :param image: An sitk MRI image
+    :param theta_x: The amount of degrees the user wants the image rotated around the x axis
+    :param theta_y: The amount of degrees the user wants the image rotated around the y axis
+    :param theta_z: The amount of degrees the user wants the image rotated around the z axis
+    :param interpolator: Type of interpolation (sitk.sitkNearestNeighbor, sitk.sitkLinear, sitk.sitkBSpline)
+    :param show: Boolean, whether or not the user wants to see the result of the rotation
+    :return: The rotated image
+    """
+    theta_z = np.deg2rad(theta_z)
+    euler_transform = sitk.Euler3DTransform()
+    image_center = get_center(image)
+    euler_transform.SetCenter(image_center)
+
+    direction = image.GetDirection()
+    axis_angle = (direction[2], direction[5], direction[8], theta_z)
+    np_rot_mat = matrix_from_axis_angle(axis_angle)
+    euler_transform.SetMatrix(np_rot_mat.flatten().tolist())
+    resampled_image = resample(image, euler_transform, interpolator)
+    if show:
+        print(euler_transform.GetMatrix())
+        slice_num = int(input("Enter the index of the slice you would like to see"))
+        plt.imshow(sitk.GetArrayFromImage(resampled_image)[slice_num])
+        plt.show()
+    return resampled_image
+    
 # +------------------------------------------------------------------------------+
-def IntensityProjection(input_image, mask_image, output_image, selection, projection_type, rotation, print_projected_masks, report_file, overwrite):
+def IntensityProjection(input_image, output_image, mask_image, mask_image_2d, yaml_file, selection, projection_type, rotation, overwrite):
 
     # Check if output image exists and should overwrite
-    if output_image:
-        if os.path.isfile(output_image) and not overwrite:
-            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
-            if result.lower() not in ['y', 'yes']:
-                ogo.message('Not overwriting. Exiting...')
-                os.sys.exit()
+    if os.path.isfile(output_image) and not overwrite:
+        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
+        if result.lower() not in ['y', 'yes']:
+            ogo.message('Not overwriting. Exiting...')
+            os.sys.exit()
 
     # Check if output report exists and should overwrite
-    if report_file:
-        if os.path.isfile(report_file) and not overwrite:
-            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(report_file))
+    if not yaml_file is None:
+        if os.path.isfile(yaml_file) and not overwrite:
+            result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(yaml_file))
             if result.lower() not in ['y', 'yes']:
                 ogo.message('Not overwriting. Exiting...')
                 os.sys.exit()
@@ -52,11 +143,15 @@ def IntensityProjection(input_image, mask_image, output_image, selection, projec
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_image))
 
     if not (input_image.lower().endswith('.nii') or input_image.lower().endswith('.nii.gz')):
-        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_image))
+        os.sys.exit('[ERROR] Input must be type NIfTI file: \"{}\"'.format(input_image))
     
-    ogo.message('Reading image: ')
-    ogo.message('\"{}\"'.format(input_image))
+    ogo.message('Reading input image: ')
+    ogo.message('  {}'.format(input_image))
     ct = sitk.ReadImage(input_image, sitk.sitkInt16) # Read in raw CT data as 16-bit signed integer
+    ogo.aix_nifti(input_image,ct)
+    ogo.message('[WARNING] By forcing input image to Int16 some round-off error occurs.')
+    ogo.message('          We could read in the CT without casting and then use')
+    ogo.message('          ct.GetPixelID() to use the correct image type throughout.')
     
     # Set the type of projection
     ogo.message('Setting projection type to: [{}]'.format(projection_type))
@@ -75,27 +170,17 @@ def IntensityProjection(input_image, mask_image, output_image, selection, projec
     else:
         os.sys.exit('[ERROR] Unknown projection type: {}'.format(projection_type))
     
-    # Set up transform
-    rotation_center = (0, 0, 0)
-    axis = (0,0,1) # Z-axis
-    angle = np.pi * rotation / 180.
-    translation = (0,0,0)
-    scale_factor = 1.0
-    similarity = sitk.Similarity3DTransform(scale_factor, axis, angle, translation, rotation_center)
-
-    transform = sitk.AffineTransform(3)
-    transform.SetMatrix(similarity.GetMatrix())
-    transform.SetTranslation(similarity.GetTranslation())
-    transform.SetCenter(similarity.GetCenter())
-    
     # Remove negative values (e.g. air) from CT image
     ogo.message('Removing negative values in input CT image.')
     ct_no_zeros = sitk.Cast(ct>0, sitk.sitkInt16)
     ct = ct * ct_no_zeros
     
+    interpolator = sitk.sitkLinear # options are sitk.sitkBSpline, sitk.sitkLinear
+    
     # Transform the image and then create the projection
     ogo.message('Applying transform of Z-axis rotation of {:.2f} degrees.'.format(rotation)) 
-    ct_transformed = sitk.Resample(ct, transform, sitk.sitkBSpline) # sitk.sitkBSpline, sitk.sitkNearestNeighbor, sitk.sitkLinear
+    ct_transformed = rotation3d(ct, rotation, interpolator, False) 
+
     ogo.message('Performing intensity projection.')
     ct_projection = projectionFilt.Execute(ct_transformed)
     
@@ -104,49 +189,44 @@ def IntensityProjection(input_image, mask_image, output_image, selection, projec
     projected_voxel_height = ct_projection.GetSpacing()[0]
     projected_voxel_volume = ct_projection.GetSpacing()[0] * ct_projection.GetSpacing()[1] * ct_projection.GetSpacing()[2]
     
-    line_hdr =   'line_{},{},'.format('hdr','filename')
-    line_units = 'line_{},{},'.format('units','[text]')
-    line_data =  'line_{},{},'.format('data',os.path.basename(input_image))
-    
-    # Start the report
-    report = ''
-    report += '  {:>20s}\n'.format('_______________________________________________________________________Report')
-    report += '  {:>20s} {:s}\n'.format('input image',input_image)
-    report += '  {:>20s} {:s}\n'.format('output image',output_image if output_image else 'None')
-    report += '  {:>20s} {:s}\n'.format('mask image',mask_image if mask_image else 'None')
-    report += '\n'
-    report += '  {:>20s} {:>38s}\n'.format('input image','------------------------------------')
-    report += '  {:>20s} '.format('dim:') + ' '.join('{:12d}'.format(i) for i in ct.GetSize()) + '\n'
-    report += '  {:>20s} '.format('el_size_mm:') + ' '.join('{:12.4f}'.format(i) for i in ct.GetSpacing()) + '\n'
-    report += '  {:>20s} {:12.4f} [mm3]\n'.format('voxel volume:',voxel_volume)
-    report += '  {:>20s} {:>38s}\n'.format('pixel type:',ct.GetPixelIDTypeAsString())
-    
-    if output_image:
-        report += '\n'
-        report += '  {:>20s} {:>38s}\n'.format('projection image','------------------------------------')
-        report += '  {:>20s} '.format('dim:') + ' '.join('{:12d}'.format(i) for i in ct_projection.GetSize()) + '\n'
-        report += '  {:>20s} '.format('el_size_mm:') + ' '.join('{:12.4f}'.format(i) for i in ct_projection.GetSpacing()) + '\n'
-        report += '  {:>20s} {:12.4f} [mm2]\n'.format('voxel area:',projected_voxel_area)
-        report += '  {:>20s} {:12.4f} [mm3]\n'.format('voxel volume:',projected_voxel_volume)
-    report += '\n'
-    report += '  {:>20s} {:s}\n'.format('projection type:',str(projection_type))
-    report += '  {:>20s} {:.1f} [deg]\n'.format('Z-axis rotation:',rotation)
-    
-    line_hdr += '{},{},{},{},{},{},{},{},'.format('dim_x','dim_y','dim_z','el_size_mm_x','el_size_mm_y','el_size_mm_z','projection_type','rotation')
-    line_units += '{},{},{},{},{},{},{},{},'.format('[#]','[#]','[#]','[mm]','[mm]','[mm]','[-]','[deg]')
-    line_data += '{},{},{},{:.4f},{:.4f},{:.4f},{},{:.1f},'.format(ct.GetSize()[0],ct.GetSize()[1],ct.GetSize()[2],ct.GetSpacing()[0],ct.GetSpacing()[1],ct.GetSpacing()[2],str(projection_type),rotation)
-        
+    # Collection information into dictionary for YAML file
+    info_dict = {}
+    info_dict['runtime']={}
+    info_dict['runtime']['time']=datetime.now().strftime("%H:%M:%S")
+    info_dict['runtime']['script']=os.path.splitext(os.path.basename(sys.argv[0]))[0]
+    info_dict['runtime']['version']=script_version
+    info_dict['input_parameters']={}
+    info_dict['input_parameters']['input_image']=input_image
+    info_dict['input_parameters']['mask_image']=mask_image
+    info_dict['input_parameters']['output_image']=output_image
+    info_dict['input_parameters']['mask_image_2d']=mask_image_2d
+    info_dict['input_parameters']['yaml_file']=yaml_file
+    info_dict['input_parameters']['selection']=list(selection)
+    info_dict['input_parameters']['projection_type']=projection_type
+    info_dict['input_parameters']['rotation']=rotation
+    info_dict['input_parameters']['overwrite']=overwrite
+    info_dict['input_image']={}
+    info_dict['input_image']['dim']=list(ct.GetSize())
+    info_dict['input_image']['el_size_mm']=list(ct.GetSpacing())
+    info_dict['input_image']['pixel_type']=ct.GetPixelIDTypeAsString()
+    info_dict['output_image']={}
+    info_dict['output_image']['dim']=list(ct_projection.GetSize())
+    info_dict['output_image']['el_size_mm']=list(ct_projection.GetSpacing())
+    info_dict['output_image']['pixel_type']=ct_projection.GetPixelIDTypeAsString()
+    info_dict['output_image']['interpolator']=interpolator
+            
     # If a mask is provided perform an analysis
     if mask_image:
-        
+     
         # Read mask
         if not os.path.isfile(mask_image):
             os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(mask_image))
         if not (mask_image.lower().endswith('.nii') or mask_image.lower().endswith('.nii.gz')):
-            os.sys.exit('[ERROR] Mask must be type NIFTI file: \"{}\"'.format(mask_image))
+            os.sys.exit('[ERROR] Mask must be type NIfTI file: \"{}\"'.format(mask_image))
         ogo.message('Reading mask: ')
-        ogo.message('\"{}\"'.format(mask_image))
+        ogo.message('  {}'.format(mask_image))
         ct_mask = sitk.ReadImage(mask_image, sitk.sitkUInt8)
+        ogo.aix_nifti(mask_image,ct_mask)
         
         labels = get_labels(ct_mask)
         ogo.message('Mask image contains the following labels:')
@@ -161,27 +241,26 @@ def IntensityProjection(input_image, mask_image, output_image, selection, projec
         ogo.message('Projections will be calculated for the following labels:')
         ogo.message('  [' + ', '.join('{:d}'.format(i) for i in selection) + ']')
         
-        # Establish base name for temporary mask files
-        temp_base_name, ext = os.path.splitext(mask_image)
-        if 'gz' in ext:
-            temp_base_name = os.path.splitext(temp_base_name)[0]  # Manages files with double extension
-            ext = '.nii' + ext
-        
-        mask_transformed = sitk.Resample(ct_mask, transform, sitk.sitkNearestNeighbor)
+        # Check if mask_image_2d image exists and should overwrite
+        if not mask_image_2d is None:
+            if os.path.isfile(mask_image_2d) and not overwrite:
+                result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(mask_image_2d))
+                if result.lower() not in ['y', 'yes']:
+                    ogo.message('Not overwriting. Exiting...')
+                    os.sys.exit()
+            if not (mask_image_2d.lower().endswith('.nii') or mask_image_2d.lower().endswith('.nii.gz')):
+                os.sys.exit('[ERROR] Mask 2D image must be type NIfTI file: \"{}\"'.format(mask_image_2d))
+            
+        mask_transformed = rotation3d(ct_mask, rotation, sitk.sitkNearestNeighbor, False)
         
         maskProjectionFilt = sitk.BinaryProjectionImageFilter() # Special projection for labels
         
         stats = sitk.LabelIntensityStatisticsImageFilter()
         
-        # Add to the report if using a mask
-        report += '  {:>20s}\n'.format('________________________________________________________________BMD Analaysis')
-        report += '\n'
-        report += '  {:>20s}'.format('labels available: ') + ','.join('{:d}'.format(i) for i in labels) + '\n'
-        report += '  {:>20s}'.format('labels used: ') + ','.join('{:d}'.format(i) for i in selection) + '\n'
-        report += '\n'
-        report += '  {:>20s} {:>10s} {:>10s} {:>10s} {:>10s} {:>10s}\n'.format('ROI','aBMD','vBMD','MASS','AREA','VOLUME')
-        report += '  {:>20s} {:>10s} {:>10s} {:>10s} {:>10s} {:>10s}\n'.format('--','[g/cm2]','[mg/cm3]','[grams]','[cm2]','[cm3]')
-        
+        info_dict['analysis']={}
+        info_dict['analysis']['labels_available']=list(labels)
+        info_dict['analysis']['labels_used']=list(selection)
+                
         seg_2d = maskProjectionFilt.Execute(mask_transformed)
         seg_2d = seg_2d<0 # reset to all zeros
         seg_3d = mask_transformed<0 # reset to all zeros
@@ -224,20 +303,19 @@ def IntensityProjection(input_image, mask_image, output_image, selection, projec
             this_label_3d = sitk.Mask(mask, mask_3d)
             seg_3d = seg_3d + label*(this_label_3d>0)
             
-            report += '  {:>15s}{:>5s} {:10.3f} {:10.1f} {:10.2f} {:10.2f} {:10.1f}\n'.format('('+desc+')',str(label),bmd_2d,bmd_3d,bmc_3d,area_2d,volume_3d)
-            
-            line_hdr += '{},{},{},{},{},{},{},'.format('ROI','label','aBMD','vBMD','Mass','Area','Volume')
-            line_units += '{},{},{},{},{},{},{},'.format('[text]','[#]','[g/cm2]','[mg/cm3]','[grams]','[cm2]','[cm3]')
-            line_data += '{},{},{:.3f},{:.1f},{:.2f},{:.2f},{:.1f},'.format(desc,label,bmd_2d,bmd_3d,bmc_3d,area_2d,volume_3d)
-                
-            if print_projected_masks:
-                temp_name = temp_base_name + '_TEMP_2D_' + '{:.0f}_'.format(rotation) + desc.replace(' ','') + '.nii.gz'
-                sitk.WriteImage(mask_projection, temp_name)
-            
+            info_dict['analysis'][label]={}
+            info_dict['analysis'][label]['desc'] = desc
+            info_dict['analysis'][label]['label'] = label
+            info_dict['analysis'][label]['bmd_2d'] = bmd_2d
+            info_dict['analysis'][label]['bmd_3d'] = bmd_3d
+            info_dict['analysis'][label]['bmc_3d'] = bmc_3d
+            info_dict['analysis'][label]['area_2d'] = area_2d
+            info_dict['analysis'][label]['volume_3d'] = volume_3d
+                     
         # Write projection of all bones
-        if print_projected_masks:
-            temp_name = temp_base_name + '_TEMP_2D_' + '{:.0f}_'.format(rotation) + 'all' + '.nii.gz'
-            sitk.WriteImage(seg_2d, temp_name)
+        if not mask_image_2d is None:
+            #temp_name = temp_base_name + '_2D_' + '{:.0f}'.format(rotation) + '.nii.gz'
+            sitk.WriteImage(seg_2d, mask_image_2d)
         
         # Integral calculations
         seg_2d = seg_2d>0 # Set all labels to 1
@@ -255,20 +333,17 @@ def IntensityProjection(input_image, mask_image, output_image, selection, projec
         bmc_3d = bmd_3d * volume_3d / 1000.0 # g --> from mg
                 
         # Finalize report on mask
-        report += '  {:>15s}{:>5s} {:10.3f} {:10.1f} {:10.2f} {:10.2f} {:10.1f}\n'.format('(Integral)','--',bmd_2d,bmd_3d,bmc_3d,area_2d,volume_3d)
-        
-        line_hdr += '{},{},{},{},{},{},{},'.format('ROI','label','aBMD','vBMD','Mass','Area','Volume')
-        line_units += '{},{},{},{},{},{},{}'.format('[text]','[#]','[g/cm2]','[mg/cm3]','[grams]','[cm2]','[cm3]')
-        line_data += '{},{},{:.3f},{:.1f},{:.2f},{:.2f},{:.1f}'.format('Integral','--',bmd_2d,bmd_3d,bmc_3d,area_2d,volume_3d)
-        
-        if report_file:
-            report += '  {:>20s}\n'.format('_____________________________________________________Summary Results for GREP')
-            report += line_hdr + '\n'
-            report += line_units + '\n'
-            report += line_data + '\n'
-        
+        info_dict['analysis']['integral']={}
+        info_dict['analysis']['integral']['desc'] = 'Integral'
+        info_dict['analysis']['integral']['label'] = 0
+        info_dict['analysis']['integral']['bmd_2d'] = bmd_2d
+        info_dict['analysis']['integral']['bmd_3d'] = bmd_3d
+        info_dict['analysis']['integral']['bmc_3d'] = bmc_3d
+        info_dict['analysis']['integral']['area_2d'] = area_2d
+        info_dict['analysis']['integral']['volume_3d'] = volume_3d
+             
     else:
-        ogo.message('No mask for quantitative analysis provided.')
+     ogo.message('No mask for quantitative analysis provided.')
     
     if output_image:
         ogo.message('Writing projection file:')
@@ -277,21 +352,15 @@ def IntensityProjection(input_image, mask_image, output_image, selection, projec
     else:
         ogo.message('No output projection image written to file.')            
     
-    report += '\n'
-    report += 'WARNING! The quantitative outputs have not been fully checked.\n'
-    report += '         There may be errors in density, mass and volume/area.\n'
+    info_dict['message']={}
+    info_dict['message']['warning']='The quantitative outputs have not been fully checked. There may be errors in density, mass and volume/area.'
     
-    if report_file:
+    if yaml_file:
         ogo.message('Saving report to file:')
-        ogo.message('  {}'.format(report_file))
-        txt_file = open(report_file, "w")
-        txt_file.write(report)
-        txt_file.close()
-    else:
-        ogo.message('Printing report.')
-        print('\n')
-        print(report)
-    
+        ogo.message('  {}'.format(yaml_file))
+        with open(yaml_file, 'w') as file:
+            documents = yaml.dump(info_dict, file, sort_keys=False)
+        
     ogo.message('Done.')
     
     
@@ -303,7 +372,8 @@ in degrees around the Z-axis. A typical A-P scan uses a rotation angle of 90
 degrees.
 
 If a label mask is supplied that identifies the bones, then aBMD and vBMD and
-associated measures of area, volume and bone mass are calculated.
+associated measures of area, volume and bone mass are calculated. It is 
+optional to output the projected 2D mask.
 
 Negative values in the CT scan (e.g. air) are removed before calculating the
 projected BMC and aBMD measurements.
@@ -312,7 +382,7 @@ projected BMC and aBMD measurements.
     epilog = '''
 Example call: 
      
-ogoIntensityProjection image.nii.gz --mask_image mask.nii.gz --rotation 92
+ogoIntensityProjection image.nii.gz image_2d.nii.gz --mask_image mask.nii.gz --rotation 45
 
 '''
 
@@ -324,12 +394,16 @@ ogoIntensityProjection image.nii.gz --mask_image mask.nii.gz --rotation 92
         epilog=epilog
     )
 
-    parser.add_argument('input_image', 
+    parser.add_argument('input_image',  metavar='NIfTI', 
                                         help='Input image file (*.nii, *.nii.gz)')
-    parser.add_argument('--output_image', default=None, metavar='NIfTI', 
-                                        help='Output image file (*.nii.gz, default: %(default)s)')
+    parser.add_argument('output_image', metavar='NIfTI', 
+                                        help='Output image file (*.nii, *.nii.gz)')
     parser.add_argument('--mask_image', default=None, metavar='NIfTI', 
                                         help='Bone labels (*.nii.gz, default: %(default)s)')
+    parser.add_argument('--mask_image_2d', default=None, metavar='NIfTI', 
+                                        help='Print the 2d projected mask (*.nii.gz, default: %(default)s)')
+    parser.add_argument('--yaml_file', default=None, metavar='FILE', 
+                                        help='Write report to file (*.yaml, default: %(default)s)')
     parser.add_argument('--selection', type=int, nargs='*', default=[], metavar='LABEL', 
                                         help='List of mask labels to use (default: all)')
     parser.add_argument('--projection_type', default='sum', 
@@ -337,10 +411,6 @@ ogoIntensityProjection image.nii.gz --mask_image mask.nii.gz --rotation 92
                                         help='Select type of projection (default: %(default)s)')
     parser.add_argument('--rotation', type=float, default=90.0, metavar='ANGLE',
                                         help='Rotation in degrees about Z axis (default: %(default)s deg)')
-    parser.add_argument('--print_projected_masks', action='store_true', 
-                                        help='Print the 2d projected masks as TEMP files (*.nii.gz)')
-    parser.add_argument('--report_file', default=None, metavar='CSV', 
-                                        help='Write validation report to file (*.csv, default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', 
                                         help='Overwrite output file without asking')
 
