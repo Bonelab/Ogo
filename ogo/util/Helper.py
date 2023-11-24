@@ -289,6 +289,31 @@ def aix(infile, image):
     print('!> Total memory size          {:.1f} {: <10}'.format(size, names[i]))
     print(guard)
 
+def aix_nifti(infile, image):
+    guard = '!-------------------------------------------------------------------------------'
+    phys_dim = [x * y for x, y in zip(image.GetSize(), image.GetSpacing())]
+    position = [math.floor(x / y) for x, y in zip(image.GetOrigin(), image.GetSpacing())]
+    size = os.path.getsize(infile)  # gets size of file; used to calculate K,M,G bytes
+    names = ['Bytes', 'KBytes', 'MBytes', 'GBytes']
+    n_image_voxels = image.GetSize()[0]*image.GetSize()[1]*image.GetSize()[2]
+    voxel_volume = image.GetSpacing()[0] * image.GetSpacing()[1] * image.GetSpacing()[2]
+    i = 0
+    while int(size) > 1024 and i < len(names):
+        i += 1
+        size = size / 2.0 ** 10
+
+    # Print header
+    print(guard)
+    print('!>')
+    print('!> dim                            {:>8}  {:>8}  {:>8}'.format(*image.GetSize()))
+    print('!> off                            {:>8}  {:>8}  {:>8}'.format('-', '-', '-'))
+    print('!> pos                            {:>8}  {:>8}  {:>8}'.format(*position))
+    print('!> element size in mm             {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*image.GetSpacing()))
+    print('!> phys dim in mm                 {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*phys_dim))
+    print('!>')
+    print('!> Type of data               {}'.format(image.GetPixelIDTypeAsString()))
+    print('!> Total memory size          {:.1f} {: <10}'.format(size, names[i]))
+    print(guard)
 
 def infoNIFTI(reader):
     guard = '!-------------------------------------------------------------------------------'
