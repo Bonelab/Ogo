@@ -88,6 +88,25 @@ def getNIfTITransform(reader):
     
     return mat
     
+def get_lookup_table():
+    lut = vtk.vtkLookupTable()
+    lut.SetNumberOfTableValues(256)
+    lut.Build()
+    #lut.SetRange(0,255)
+    for idx in range(255):
+        if lb.labels_dict.get(idx):
+            vis = lb.labels_dict[idx]['VIS']
+            rgb = lb.labels_dict[idx]['RGB']
+            red = rgb[0]/255
+            gre = rgb[1]/255
+            blu = rgb[2]/255
+            #print('{:3d} {:6.3f} {:6.3f} {:6.3f} {:6.1f}'.format(idx, red, gre, blu, vis))
+            lut.SetTableValue(idx, red, gre, blu, vis)
+        else:
+            #print(idx)
+            lut.SetTableValue(idx, 0, 0, 0, 0)
+    return lut
+    
 def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elevation, azimuth, flip, outfile, offscreen, pad, overwrite, func):
     
     # Check if output exists and should overwrite
@@ -279,7 +298,7 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
     
     ogo.message('Done.')
     
-def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, slice_percent, offscreen, overwrite, func):
+def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_orientation, slice_percent, offscreen, overwrite, func):
     
     # Check if output exists and should overwrite
     if outfile:
@@ -352,6 +371,41 @@ def vis2d(input_filename, outfile, window, level, nThreads, image_orientation, s
     renderer = vtk.vtkRenderer()
     renderer.AddActor(inputSlice)
 
+    # Read mask
+    if not mask_image is None:
+        if not os.path.isfile(mask_image):
+            os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(mask_image))
+        
+        if not (mask_image.lower().endswith('.nii') or mask_image.lower().endswith('.nii.gz')):
+            os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(mask_image))
+        
+        ogo.message('Reading input mask image ' + mask_image)
+        mask_reader = vtk.vtkNIFTIImageReader()
+        mask_reader.SetFileName(mask_image)
+        mask_reader.Update()
+        
+        lut = get_lookup_table()
+        
+        mask_inputMapper = vtk.vtkOpenGLImageSliceMapper()
+        mask_inputMapper.SetInputConnection(mask_reader.GetOutputPort())
+        mask_inputMapper.SliceAtFocalPointOn()
+        mask_inputMapper.SliceFacesCameraOn()
+        mask_inputMapper.BorderOn()
+        mask_inputMapper.SetNumberOfThreads(nThreads)
+        mask_inputMapper.StreamingOn()
+        
+        mask_imageProperty = vtk.vtkImageProperty()
+        mask_imageProperty.SetInterpolationTypeToNearest()
+        mask_imageProperty.SetLookupTable(lut)
+        mask_imageProperty.SetOpacity(0.5)
+
+        mask_inputSlice = vtk.vtkImageSlice()
+        mask_inputSlice.SetMapper(mask_inputMapper)
+        mask_inputSlice.SetProperty(mask_imageProperty)
+        mask_inputSlice.SetUserMatrix(mat)
+        
+        renderer.AddActor(mask_inputSlice)
+        
     renderWindow = vtk.vtkRenderWindow()
     renderWindow.SetSize(2048,2048)
     renderWindow.AddRenderer(renderer)
@@ -515,6 +569,8 @@ ogoVisualize vis2d RETRO_00053.nii.gz
     # 2d visualization
     parser_vis2d = subparsers.add_parser('vis2d')
     parser_vis2d.add_argument('input_filename', help='Input image file (*.nii, *.nii.gz)')
+    parser_vis2d.add_argument('--mask_image', default=None, metavar='NIfTI', 
+                                        help='Superimpose a mask (*.nii.gz, default: %(default)s)')
     parser_vis2d.add_argument('--window', type=float, default=0.0, metavar='WINDOW',help='Initial window. For <=0, computed from dynamic range (default: %(default)s)')
     parser_vis2d.add_argument('--level', type=float, default=0.0, metavar='LEVEL',help='Initial level. For <=0, computed from dynamic range (default: %(default)s)')
     parser_vis2d.add_argument('--nThreads', type=int, default=1, metavar='THREAD',help='Number of threads (default: %(default)s)')
