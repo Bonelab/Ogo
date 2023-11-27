@@ -25,290 +25,264 @@ import collections
 import pandas as pd
 import ogo.dat.OgoMasterLabels as lb
 
-def ValidateSelectBest(input_files,output_file,overwrite):
-
-    best_dict = {}
-
-    pass_final = []
-    pass_intact_all_labels = []
-    pass_intact_spine = []
-    pass_intact_right_femur = []
-    pass_intact_left_femur = []
-    pass_procrustes = []
-    
-    # Check if output exists and should overwrite
-    ogo.pass_check_if_output_exists(output_file,overwrite)
-
-    # Set up to read image and mask inputs
-    ogo.pass_check_if_file_exists(input_files[0])
-
-    # Check endings
-    ogo.pass_check_file_ending(input_files[0],['.yaml'])
-    ogo.pass_check_file_ending(output_file,['.nii.gz'])
-    
-    # Read input
-    idx=0
+def check_dimensions_match(input_files):
     for idx,f in enumerate(input_files):
-        ogo.message('Reading {}'.format(f))
         with open(f, 'r') as file:
             result_dict = yaml.safe_load(file)
-        
-        check_dict = result_dict.get('check')
-        if not check_dict:
-            ogo.message('[ERROR] No \'check\' dictionary key in {}.'.format(f))
-            os.sys.exit()
-        
-        fileinfo_dict = result_dict.get('fileinfo')
-        source_basename = fileinfo_dict['basename']
+        fname = result_dict['input_parameters']['input_image']
+        ct = sitk.ReadImage(fname, sitk.sitkUInt8)
+        dim = ct.GetSize()
+        ogo.message('  {}: {}'.format(f,dim))
+        if idx==0:
+            dim_base = ct.GetSize()
+            fname_base = fname
+        else:
+            dim = ct.GetSize()
+            if dim != dim_base:
+                ogo.message('[ERROR] Input images do not have the same dimensions.')
+                os.sys.exit()
 
-        input_parameters_dict = result_dict.get('input_parameters')
-        source_input_image = input_parameters_dict['input_image']
-        
-        if check_dict['final']['status']:
-            pass_final.append(source_input_image)
+def is_finished(mydict):
+    finished = True
+    for k,v in mydict.items():
+        if v['found'] == False:
+            finished = False
+    #print('Finished = {}'.format(finished))
+    return finished
 
-        if check_dict['intact_all_labels']['status']:
-            pass_intact_all_labels.append(source_input_image)
-        
-        if check_dict['intact_spine']['status']:
-            pass_intact_spine.append(source_input_image)
-        
-        if check_dict['intact_left_femur']['status']:
-            pass_intact_left_femur.append(source_input_image)
-
-        if check_dict['intact_right_femur']['status']:
-            pass_intact_right_femur.append(source_input_image)
-
-        if check_dict['procrustes']['status']:
-            pass_procrustes.append(source_input_image)
-        
-        labels_dict = check_dict.get('labels')
-        for label_key, label_value in labels_dict.items():
-            if best_dict.get(label_key) is None:
-                best_dict[label_key] = {}
-                best_dict[label_key]['label_name'] = label_value['name']
-                best_dict[label_key]['label_label'] = label_value['label']
-                best_dict[label_key]['label_status'] = False
-                best_dict[label_key]['label_source'] = ''
-                best_dict[label_key]['label_input_image'] = ''
+def sort_input_files_by_procrustes(input_files):
+    tmp_dict={}
+    new_input_files=[]
+    for f in input_files:
+        with open(f, 'r') as file:
+            result_dict = yaml.safe_load(file)
+            check_dict = result_dict.get('check')
+            tmp_dict[f]=check_dict['procrustes']['disparity']
             
-            if best_dict[label_key]['label_status'] is False: # ensures we use first good label encountered
-                if label_value['status'] and label_value['n_parts']>0:
-                    best_dict[label_key]['label_status'] = True
-                    best_dict[label_key]['label_source'] = source_basename
-                    best_dict[label_key]['label_input_image'] = source_input_image
-                
-    ogo.message('Passed Final:')
-    for entry in pass_final:
-        ogo.message('  {}'.format(entry))
-    ogo.message('Passed Intact All Labels:')
-    for entry in pass_intact_all_labels:
-        ogo.message('  {}'.format(entry))
-    ogo.message('Passed Intact Spine:')
-    for entry in pass_intact_spine:
-        ogo.message('  {}'.format(entry))
-    ogo.message('Passed Intact Right Femur:')
-    for entry in pass_intact_right_femur:
-        ogo.message('  {}'.format(entry))
-    ogo.message('Passed Intact Left Femur:')
-    for entry in pass_intact_left_femur:
-        ogo.message('  {}'.format(entry))
-    ogo.message('Passed Procrustes:')
-    for entry in pass_procrustes:
-        ogo.message('  {}'.format(entry))
-        
-    ogo.message('Frankenstein Possibility:')
-    for k,v in best_dict.items():
-        print('{:>20s} {:5d} {} {:s}'.format(v['label_name'],v['label_label'],v['label_status'],v['label_source']))
+    sorted_dict = dict(sorted(tmp_dict.items(), key=lambda item: item[1]))
     
-    exit()
+    for k,v in sorted_dict.items():
+        new_input_files.append(k)
+    return new_input_files
+    
+def ValidateSelectBest(input_files,output_file,list_of,status_false,frankenstein,overwrite):
 
-    # Assemble output image
-    if output_file:
-        ogo.message('Assembling output image')
+    best_dict = {
+        1: {'desc': lb.labels_dict[1]['LABEL'], 'source': '', 'found': False},
+        2: {'desc': lb.labels_dict[2]['LABEL'], 'source': '', 'found': False},
+        3: {'desc': lb.labels_dict[3]['LABEL'], 'source': '', 'found': False},
+        4: {'desc': lb.labels_dict[4]['LABEL'], 'source': '', 'found': False},
+        5: {'desc': lb.labels_dict[5]['LABEL'], 'source': '', 'found': False},
+        6: {'desc': lb.labels_dict[6]['LABEL'], 'source': '', 'found': False},
+        7: {'desc': lb.labels_dict[7]['LABEL'], 'source': '', 'found': False},
+        8: {'desc': lb.labels_dict[8]['LABEL'], 'source': '', 'found': False},
+        9: {'desc': lb.labels_dict[9]['LABEL'], 'source': '', 'found': False},
+       10: {'desc': lb.labels_dict[10]['LABEL'],'source': '', 'found': False},
+       11: {'desc': lb.labels_dict[11]['LABEL'],'source': '', 'found': False}
+       }
     
-        ct_base = None
+    results_list = []
+    
+    # Set up to read image and mask inputs
+    for ifile in input_files:
+        ogo.pass_check_if_file_exists(ifile)
+        ogo.pass_check_file_ending(ifile,['.yaml'])
+    
+    # We find lists of files with status as requested
+    if not frankenstein:
+        ogo.message('Reading {} input files.'.format(len(input_files)))
+        say_snip=True
         
+        for idx,f in enumerate(input_files):
+            if (idx<10 or idx==len(input_files)-1):
+                ogo.message('Reading {}'.format(f))
+            elif say_snip:
+                ogo.message(' ...<snip>... ')
+                say_snip=False
+                
+            with open(f, 'r') as file:
+                result_dict = yaml.safe_load(file)
+        
+            check_dict = result_dict.get('check')
+            labels_dict = check_dict.get('labels')
+            input_parameters_dict = result_dict.get('input_parameters')
+            
+            # If a specific bone label, or 
+            if 'label' in list_of:
+                label = int(list_of.replace('label_',''))
+                if labels_dict[label]['status'] == status_false:
+                    results_list.append({'file': input_parameters_dict['input_image'], 'yaml': f})
+            
+            # If a general label like 'intact_spine', etc
+            else:
+                if check_dict[list_of]['status'] == status_false:
+                    results_list.append({'file': input_parameters_dict['input_image'], 'yaml': f})
+                    #if list_of == 'procrustes':
+                    #    print('{:9s}{} --> {:8.6f}'.format('','procrustes',check_dict[list_of]['disparity']))
+                    
+        ogo.message('')
+        ogo.message('Looking for a list of \'{}\' with status \'{}\'.'.format(list_of,status_false))
+        
+        n_found = len(results_list)
+        n_total = len(input_files)
+        ogo.message('  found {} of {}: {:.3f}%'.format(n_found,n_total,n_found/n_total*100.0))
+        ogo.message('')
+        if results_list:
+            ogo.message('List output:')
+            for elements in results_list:
+                print('{:9s}{} --> {}'.format('',elements['file'],elements['yaml']))
+                
+    # Frankenstein method starts here
+    if frankenstein:
+        
+        # We start with the lowest procrustes score as it is most likely the best
+        input_files = sort_input_files_by_procrustes(input_files)
+        
+        # First pass to find 'intact_left_femur', intact_right_femur', 'intact_spine', 'final'
+        for f in input_files:
+            
+            ogo.message('Reading {}'.format(f))
+            with open(f, 'r') as file:
+                result_dict = yaml.safe_load(file)
+            
+            check_dict = result_dict.get('check')
+            labels_dict = check_dict.get('labels')
+            input_parameters_dict = result_dict.get('input_parameters')
+            
+            ogo.message('  procrustes = {:8.6f}'.format(check_dict['procrustes']['disparity']))
+
+            if check_dict['final']['status']:
+                best_dict[1]['source']  = f
+                best_dict[2]['source']  = f
+                best_dict[3]['source']  = f
+                best_dict[4]['source']  = f
+                best_dict[5]['source']  = f
+                best_dict[6]['source']  = f
+                best_dict[7]['source']  = f
+                best_dict[8]['source']  = f
+                best_dict[9]['source']  = f
+                best_dict[10]['source'] = f
+                best_dict[11]['source'] = f
+                
+                best_dict[1]['found']  = True
+                best_dict[2]['found']  = True
+                best_dict[3]['found']  = True
+                best_dict[4]['found']  = True
+                best_dict[5]['found']  = True
+                best_dict[6]['found']  = True
+                best_dict[7]['found']  = True
+                best_dict[8]['found']  = True
+                best_dict[9]['found']  = True
+                best_dict[10]['found'] = True
+                best_dict[11]['found'] = True
+                ogo.message('  --> taking \'{}\' labels from {}'.format('all',f))
+            
+            if is_finished(best_dict):
+                break
+            
+            if check_dict['intact_spine']['status'] \
+                    and not best_dict[7]['found'] \
+                    and not best_dict[8]['found'] \
+                    and not best_dict[9]['found'] \
+                    and not best_dict[10]['found']:
+                best_dict[7]['source']  = f
+                best_dict[8]['source']  = f
+                best_dict[9]['source']  = f
+                best_dict[10]['source'] = f
+                best_dict[7]['found']  = True
+                best_dict[8]['found']  = True
+                best_dict[9]['found']  = True
+                best_dict[10]['found'] = True
+                ogo.message('  --> taking \'{}\' labels from {}'.format('intact_spine',f))
+            
+            if check_dict['intact_right_femur']['status'] and not best_dict[1]['found']:
+                best_dict[1]['source']  = f
+                best_dict[1]['found']  = True
+                ogo.message('  --> taking \'{}\' label from {}'.format('intact_right_femur',f))
+                
+            if check_dict['intact_left_femur']['status'] and not best_dict[2]['found']:
+                best_dict[2]['source']  = f
+                best_dict[2]['found']  = True
+                ogo.message('  --> taking \'{}\' label from {}'.format('intact_left_femur',f))
+        
+            # Go bone by bone now
+            for k,v in best_dict.items():
+                if labels_dict[k]['status'] and not best_dict[k]['found']:
+                    if k==11:
+                        if labels_dict[k]['n_parts']==1:
+                            best_dict[k]['source'] = f
+                            best_dict[k]['found'] = True
+                            ogo.message('  --> taking \'{}\' ({}) from {}'.format(best_dict[k]['desc'],k,f))
+                    else:
+                        best_dict[k]['source'] = f
+                        best_dict[k]['found'] = True
+                        ogo.message('  --> taking \'{}\' ({}) from {}'.format(best_dict[k]['desc'],k,f))
+    
+        ogo.message('')
+        ogo.message('Frankenstein result:')
         for k,v in best_dict.items():
-            ct_name = v['label_input_image']
-            ct = sitk.ReadImage(ct_name, sitk.sitkUInt8)
-            
-            if ct_base is None:
-                ct_base = ct<0
-                
-            if v['label_status']:
-                
-                label = v['label_label']
-                ogo.message('  Gathering label {} from {}'.format(label,ct_name))
-                bin_part = ct==label
-                mask = 1 - bin_part
-                ct_base = sitk.Mask(ct_base, mask)
-                ct_base = ct_base + label*bin_part
-                
-    exit()
-    # Calculate percentages, means and stdev
-    for label_key, label_value in labels_dict.items():
-        if summary_dict[label_key]['eFRAG_num']>0:
-            summary_dict[label_key]['eFRAG_percent'] = 100.0 * summary_dict[label_key]['eFRAG_num'] / summary_dict[label_key]['label_num']
-        if summary_dict[label_key]['eMINVOL_num']>0:
-            summary_dict[label_key]['eMINVOL_percent'] = 100.0 * summary_dict[label_key]['eMINVOL_num'] / summary_dict[label_key]['label_num']
-        if summary_dict[label_key]['eMAXVOL_num']>0:
-            summary_dict[label_key]['eMAXVOL_percent'] = 100.0 * summary_dict[label_key]['eMAXVOL_num'] / summary_dict[label_key]['label_num']
-        if summary_dict[label_key]['wNOFEA_num']>0:
-            summary_dict[label_key]['wNOFEA_percent'] = 100.0 * summary_dict[label_key]['wNOFEA_num'] / summary_dict[label_key]['label_num']
-        if summary_dict[label_key]['wSPEC_num']>0:
-            summary_dict[label_key]['wSPEC_percent'] = 100.0 * summary_dict[label_key]['wSPEC_num'] / summary_dict[label_key]['label_num']
-        if summary_dict[label_key]['wSYMM_num']>0:
-            summary_dict[label_key]['wSYMM_percent'] = 100.0 * summary_dict[label_key]['wSYMM_num'] / summary_dict[label_key]['label_num']
+            print('{:>20s}: {:s}'.format(v['desc'],v['source']))
+        ogo.message('')
         
-        if summary_dict[label_key]['pass_num']>0:
-            summary_dict[label_key]['pass_percent'] = 100.0 * summary_dict[label_key]['pass_num'] / summary_dict[label_key]['label_num']
+        # Assemble output image
+        if output_file:
+            
+            # Check if output exists and should overwrite
+            ogo.pass_check_if_output_exists(output_file,overwrite)
+            ogo.pass_check_file_ending(output_file,['.nii.gz'])
 
-        summary_dict[label_key]['volume_mean'] = np.mean(summary_dict[label_key]['volume_sum'])
-        summary_dict[label_key]['volume_stdev'] = np.std(summary_dict[label_key]['volume_sum'])
-        summary_dict[label_key]['volume_sum'].clear()
+            ogo.message('Assembling output image')
+            ogo.message('Checking that input images have the same dimensions')
+            check_dimensions_match(input_files)
+            ogo.message('    --> pass')
+            ogo.message('')
+            
+            ct_base = None
+            
+            # Cycle through the input files
+            for f in input_files:
+                ct_file_opened = False
+                for k,v in best_dict.items():
+                    if v['source']==f: # if this input file will contribute
+                        if not ct_file_opened:
+                            with open(f, 'r') as file:
+                                result_dict = yaml.safe_load(file)
+                            ct_name = result_dict.get('input_parameters')['input_image']
+                            ct = sitk.ReadImage(ct_name, sitk.sitkUInt8)
+                            ct_file_opened = True
+                        if ct_base is None:
+                            ct_base = ct<0
+                        if v['found']:
+                            label = k
+                            ogo.message('  gathering label {} ({}) from {}'.format(v['desc'],label,ct_name))
+                            #print('yep: ' + f + ct_name)
+                            bin_part = ct==label
+                            mask = 1 - bin_part
+                            ct_base = sitk.Mask(ct_base, mask)
+                            ct_base = ct_base + label*bin_part
+            
+            ogo.message('')
+            ogo.message('Writing output file:')
+            ogo.message('  {}'.format(output_file))
+            sitk.WriteImage(ct_base, output_file)            
+            
+        else:
+            ogo.message('No output file defined, so no output written.')
         
-        test_result_dict['procrustes_percent'] = 100.0 * test_result_dict['procrustes_num'] / test_result_dict['total']        
-        test_result_dict['all_found_percent'] = 100.0 * test_result_dict['all_found_num'] / test_result_dict['total']        
-        test_result_dict['intact_femur_percent'] = 100.0 * test_result_dict['intact_femur_num'] / test_result_dict['total']
-        test_result_dict['intact_spine_percent'] = 100.0 * test_result_dict['intact_spine_num'] / test_result_dict['total']        
-        test_result_dict['intact_any_spine_percent'] = 100.0 * test_result_dict['intact_any_spine_num'] / test_result_dict['total']        
-        test_result_dict['intact_all_labels_percent'] = 100.0 * test_result_dict['intact_all_labels_num'] / test_result_dict['total']        
-        test_result_dict['final_percent'] = 100.0 * test_result_dict['final_num'] / test_result_dict['total']        
-               
-    ogo.message('Read {} files.'.format(idx))
-    
-    # Print successful and unsuccessful labels
-    if lst_label_pass:
-        ogo.message('Files containing successful labels '+' '.join('{:d}'.format(i) for i in seek_label_pass))
-        ogo.message('  {:d} files'.format(len(lst_label_pass)))
-        for fname in lst_label_pass:
-            ogo.message ('  {}'.format(fname))
-    if lst_label_fail:
-        ogo.message('Files containing unsuccessful labels '+' '.join('{:d}'.format(i) for i in seek_label_fail))
-        ogo.message('  {:d} files'.format(len(lst_label_fail)))
-        for fname in lst_label_fail:
-            ogo.message ('  {}'.format(fname))
-    if seek_procrustes_pass:
-        ogo.message('Files passing Procrustes result')
-        ogo.message('  {:d} files'.format(len(lst_procrustes_pass)))
-        for fname in lst_procrustes_pass:
-            ogo.message ('  {} {:7.5f}'.format(fname[0],fname[1]))
-    if seek_procrustes_fail:
-        ogo.message('Files failing Procrustes result')
-        ogo.message('  {:d} files'.format(len(lst_procrustes_fail)))
-        for fname in lst_procrustes_fail:
-            ogo.message ('  {} {:7.5f}'.format(fname[0],fname[1]))
-    
-    # Print to screen
-    print('{:=>20s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}'.format(\
-          '','','','','','','','',''))
-    print('{:>20s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s}'.format(\
-          'Label','Pass','Volume','eMINVOL','eMAXVOL','eFRAG','wSYMM','wNOFEA','wSPEC'))
-    print('{:>20s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s}'.format(\
-          '(N)','%   (N)','mean (std)','%   (N)','%   (N)','%   (N)','%   (N)','%   (N)','%   (N)'))
-    print('{:->20s} {:->12s} {:->12s} {:->12s} {:->12s} {:->12s} {:->12s} {:->12s} {:->12s}'.format(\
-          '-','-','-','-','-','-','-','-','-'))
-          
-    for label_key, label_value in labels_dict.items():
-        if label_key in list(lb.labels_dict.keys()):
-            
-            str_label = '{:s} {:4d}'.format(summary_dict[label_key]['label_name'].replace(" ", "_"),summary_dict[label_key]['label_num'])
-            str_status = '{:5.1f} {:5d}'.format(summary_dict[label_key]['pass_percent'],summary_dict[label_key]['pass_num'])
-            str_volume = '{:5.1f} {:5.1f}'.format(summary_dict[label_key]['volume_mean']/1000.0,summary_dict[label_key]['volume_stdev']/1000.0)
-            str_eMINVOL = '{:5.1f} {:5d}'.format(summary_dict[label_key]['eMINVOL_percent'],summary_dict[label_key]['eMINVOL_num'])
-            str_eMAXVOL = '{:5.1f} {:5d}'.format(summary_dict[label_key]['eMAXVOL_percent'],summary_dict[label_key]['eMAXVOL_num'])
-            str_eFRAG = '{:5.1f} {:5d}'.format(summary_dict[label_key]['eFRAG_percent'],summary_dict[label_key]['eFRAG_num'])
-
-            if label_key>=1 and label_key<=4:
-                str_wSYMM = '{:5.1f} {:5d}'.format(summary_dict[label_key]['wSYMM_percent'],summary_dict[label_key]['wSYMM_num'])
-            else:
-                str_wSYMM = '{:>5s} {:>5s}'.format('-','-')
-            
-            if label_key>=1 and label_key<=2:                                        
-                str_wNOFEA = '{:5.1f} {:5d}'.format(summary_dict[label_key]['wNOFEA_percent'],summary_dict[label_key]['wNOFEA_num'])
-            else:
-                str_wNOFEA = '{:>5s} {:>5s}'.format('-','-')
-            
-            if label_key>=5 and label_key<=6:                                                    
-                str_wSPEC = '{:5.1f} {:5d}'.format(summary_dict[label_key]['wSPEC_percent'],summary_dict[label_key]['wSPEC_num'])
-            else:
-                str_wSPEC = '{:>5s} {:>5s}'.format('-','-')
-            
-            print('{:>20s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s} {:>12s}'.format(\
-                  str_label,\
-                  str_status,\
-                  str_volume,\
-                  str_eMINVOL,\
-                  str_eMAXVOL,\
-                  str_eFRAG,\
-                  str_wSYMM,\
-                  str_wNOFEA,\
-                  str_wSPEC))
-            
-
-    print('{:->20s} {:->12s}'.format(\
-          '-','-'))
-          
-    str_label = '{:s} {:>4d}'.format('Procrustes',test_result_dict['total'])
-    str_status = '{:5.1f} {:5d}'.format(test_result_dict['procrustes_percent'],test_result_dict['procrustes_num'])
-    print('{:>20s}  {:>10s}'.format(str_label,str_status))
-
-    str_label = '{:s} {:>4d}'.format('All_Found',test_result_dict['total'])
-    str_status = '{:5.1f} {:5d}'.format(test_result_dict['all_found_percent'],test_result_dict['all_found_num'])
-    print('{:>20s}  {:>10s}'.format(str_label,str_status))
-    
-    str_label = '{:s} {:>4d}'.format('Intact_Femur',test_result_dict['total'])
-    str_status = '{:5.1f} {:5d}'.format(test_result_dict['intact_femur_percent'],test_result_dict['intact_femur_num'])
-    print('{:>20s}  {:>10s}'.format(str_label,str_status))
-
-    str_label = '{:s} {:>4d}'.format('Spine_all',test_result_dict['total'])
-    str_status = '{:5.1f} {:5d}'.format(test_result_dict['intact_spine_percent'],test_result_dict['intact_spine_num'])
-    print('{:>20s}  {:>10s}'.format(str_label,str_status))
-    
-    str_label = '{:s} {:>4d}'.format('Spine_any',test_result_dict['total'])
-    str_status = '{:5.1f} {:5d}'.format(test_result_dict['intact_any_spine_percent'],test_result_dict['intact_any_spine_num'])
-    print('{:>20s}  {:>10s}'.format(str_label,str_status))
-    
-    str_label = '{:s} {:>4d}'.format('All',test_result_dict['total'])
-    str_status = '{:5.1f} {:5d}'.format(test_result_dict['intact_all_labels_percent'],test_result_dict['intact_all_labels_num'])
-    print('{:>20s}  {:>10s}'.format(str_label,str_status))
-    
-    str_label = '{:s} {:>4d}'.format('FINAL',test_result_dict['total'])
-    str_status = '{:5.1f} {:5d}'.format(test_result_dict['final_percent'],test_result_dict['final_num'])
-    print('{:>20s}  {:>10s}'.format(str_label,str_status))
-                
-    print('{:=>20s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}={:=>12s}'.format(\
-          '','','','','','','','',''))
-
-    print('Table caption:')
-    print('  Procrustes analysis shows skeletons with unusual anatomic alignment (with or without L6).')
-    print('  All found means all expected labels were in the image.')
-    print('  Intact tests are positive if the bone(s) do not contain eFRAG error:')
-    print('    Femur refers to left femur OR right femur.')
-    print('    All spine refers to L1, L2, L3, AND L4.')
-    print('    Any spine refers to L1, L2, L3, OR L4.')
-    print('    All refers to all expected bone(s).')
-    print('  Errors for each bone include:')
-    print('    eMINVOL –- exceeds min volume limit')
-    print('    eMAXVOL –- exceeds max volume limit')
-    print('    eFRAG   –- fragmented')
-    print('  Warnings for each bone include:')
-    print('    wSYMM   –- not symmetric')
-    print('    wNOFEA  –- femur is cut off too much')
-    print('    wSPEC   –- Pars defect for L5 or sacrum tip is disassociated')
+    ogo.message('Done.')
      
 def main():
     # Setup description
     description = '''
     
-Reads in a list of YAML files representing inference of the same inference but 
-conducted with different ML models. It selects the combination of inferences 
-so that the Frankenstein segmentation is the best possible combination.
+Reads in a list of YAML files representing inference of the same CT dataset but 
+using different ML models. It can be used to perform a number of tasks:
 
-Typically you would have more than one model to perform inference. For example, 
-you may have three YAML files for the same skeleton. This will output the best 
-inference result possible. 
+1. Generate a list of model names based on a criteria (e.g. final status is pass, 
+   intact_spine status is pass, intact_right_femur is pass, etc)
+
+2. Create a new inference result by a Frankenstein of multiple inferences.
+   This can be done by explicit instructions or automatically.
              
 '''
 
@@ -328,8 +302,11 @@ ogoValidateSelectBest RETRO_00196_model1.yaml RETRO_00196_model2.yaml --output R
     )
 
     parser.add_argument('input_files', nargs='+', metavar='YAML', help='Input YAML files (*.yaml)')
-
-    parser.add_argument('--output_file', default=None, metavar='YAML',help='Best result (*.yaml, default: %(default)s)')
+    parser.add_argument('--output_file', default=None, metavar='NIfTI',help='Best result (*.nii.gz, default: %(default)s)')
+    parser.add_argument('--list_of', default='final', choices=['procrustes', 'all_found', 'intact_right_femur', 'intact_left_femur', 'intact_spine', 'intact_all_labels', 'final', 'label_1', 'label_2', 'label_3', 'label_4', 'label_5', 'label_6', 'label_7', 'label_8', 'label_9', 'label_10', 'label_11'],
+                                help='Create a list (default: %(default)s)')
+    parser.add_argument('--status_false', action='store_false',help='List conditions when status is false')
+    parser.add_argument('--frankenstein', action='store_true',help='Assemble inference with best labels (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true',help='Overwrite output file without asking')
 
     # Parse and display
