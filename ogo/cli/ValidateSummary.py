@@ -180,9 +180,13 @@ def ValidateSummary(input_files,seek_label_pass,seek_label_fail,seek_procrustes_
         
         if summary_dict[label_key]['pass_num']>0:
             summary_dict[label_key]['pass_percent'] = 100.0 * summary_dict[label_key]['pass_num'] / summary_dict[label_key]['label_num']
-
-        summary_dict[label_key]['volume_mean'] = np.mean(summary_dict[label_key]['volume_sum'])
-        summary_dict[label_key]['volume_stdev'] = np.std(summary_dict[label_key]['volume_sum'])
+        
+        if summary_dict[label_key]['volume_sum']:
+            summary_dict[label_key]['volume_mean'] = np.mean(summary_dict[label_key]['volume_sum'])
+            summary_dict[label_key]['volume_stdev'] = np.std(summary_dict[label_key]['volume_sum'])
+        else:
+            summary_dict[label_key]['volume_mean'] = 0.0
+            summary_dict[label_key]['volume_stdev'] = 0.0
         summary_dict[label_key]['volume_sum'].clear()
         
         test_result_dict['procrustes_percent'] = 100.0 * test_result_dict['procrustes_num'] / test_result_dict['total']        
@@ -192,7 +196,7 @@ def ValidateSummary(input_files,seek_label_pass,seek_label_fail,seek_procrustes_
         test_result_dict['intact_any_spine_percent'] = 100.0 * test_result_dict['intact_any_spine_num'] / test_result_dict['total']        
         test_result_dict['intact_all_labels_percent'] = 100.0 * test_result_dict['intact_all_labels_num'] / test_result_dict['total']        
         test_result_dict['final_percent'] = 100.0 * test_result_dict['final_num'] / test_result_dict['total']        
-               
+                   
     ogo.message('Read {} files.'.format(idx))
     
     # Print successful and unsuccessful labels
