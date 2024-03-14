@@ -38,7 +38,7 @@ from ogo.util.write_txt import write_txt
 
 
 # PHANTOM CALIBARATION ------------------------------------------------------------------
-def phantom(input_image, input_mask, output_image, calib_file_name, async_image, phantom, overwrite, func):
+def phantom(input_image, input_mask, output_image, calib_file_name, MonteCarlo, async_image, phantom, overwrite, func):
     ogo.message('Starting phantom based calibration.')
 
     # Check if output exists and should overwrite
@@ -180,7 +180,8 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
     ogo.message('Calibrating CT file.')
     density = calibrator.predict(sitk.Cast(ct, sitk.sitkFloat64))
-    uncertainty = calibrator.montecarlo_predict(sitk.Cast(ct, sitk.sitkFloat64))
+    if MonteCarlo:
+        uncertainty = calibrator.montecarlo_predict(sitk.Cast(ct, sitk.sitkFloat64))
 
     # Check that the calibration results are within a reasonable range
     threshold_warning = 2  # percent
@@ -204,14 +205,15 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
     ogo.message('      \"{}\"'.format(output_image))
     sitk.WriteImage(density, output_image)
     
-    #creating new file name 
-    error_suffix = f"_error.nii.gz"
-    output_image_error = ogo.add_to_filename(output_image, error_suffix)
+    if MonteCarlo:
+        #creating new file name 
+        error_suffix = f"_error.nii.gz"
+        output_image_error = ogo.add_to_filename(output_image, error_suffix)
 
-    #writing out calibrated error image
-    ogo.message('Writing calibrated error output image to file:')
-    ogo.message('      \"{}\"'.format(output_image))
-    sitk.WriteImage(uncertainty, output_image_error)
+        #writing out calibrated error image
+        ogo.message('Writing calibrated error output image to file:')
+        ogo.message('      \"{}\"'.format(output_image))
+        sitk.WriteImage(uncertainty, output_image_error)
 
     # Write text file
     if calib_file_name:
@@ -748,6 +750,7 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_phantom.add_argument('input_mask',
                                 help='Image mask of rods for input image or asynchronous image (*.nii, *.nii.gz)')
     parser_phantom.add_argument('output_image', help='Output image file (*.nii, *.nii.gz)')
+    parser_phantom.add_argument('--MonteCarlo', type =int, help='Use when user wants to run a Monte Carlo simulation on calibration. Value is how many iterations that Monte Carlo should do')
     parser_phantom.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_phantom.add_argument('--async_image', default='', metavar='IMAGE',
                                 help='Asynchronous image of phantom (*.nii, *.nii.gz)')
