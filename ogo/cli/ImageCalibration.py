@@ -230,10 +230,12 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
         txt_file.write('  {:>27s} {:12.6f}\n'.format('Intercept:', calibrator.intercept))
         txt_file.write('  {:>27s} {:12.6f}\n'.format('R^2:', calibrator.r_value ** 2))
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
-        txt_file.write('  {:>27s}\n'.format('Density [HU]:'))
-        # txt_file.write('  {:>27s} {:8.3f}'.format('Adipose ',calib.adipose_hu))
+        txt_file.write('  {:>27s}\n'.format('Density Mean [HU]:'))
         for idx, label in enumerate(label_list):
             txt_file.write('  {:45s} = {:8.3f}\n'.format(lb.labels_dict[label]['LABEL'], filt.GetMean(int(label))))
+        txt_file.write('  {:>27s}\n'.format('Density StdDev [HU]:'))
+        for idx, label in enumerate(label_list):
+            txt_file.write('  {:45s} = {:8.3f}\n'.format(lb.labels_dict[label]['LABEL'], np.sqrt(filt.GetVariance(int(label)))))
         txt_file.write('  {:>27s} {:8s}\n'.format('---------------------------', '--------'))
         txt_file.write('Phantom:\n')
         txt_file.write('  {:>14s} = {:s}\n'.format('name', phantom_dict['name']))
