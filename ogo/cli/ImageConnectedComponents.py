@@ -150,6 +150,7 @@ def ImageConnectedComponent(input_image, output_image, keep_parts, target_label,
         ogo.message('No list of parts to keep is defined.')
         ogo.message('No output image filename is defined.')
         ogo.message('Done.')
+        exit()
         
     label = target_label
     
