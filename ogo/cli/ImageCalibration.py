@@ -24,7 +24,7 @@ import SimpleITK as sitk
 from scipy import stats
 from datetime import date
 from collections import OrderedDict
-from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+
 
 import ogo.dat.MassAttenuationTables as mat
 import ogo.dat.OgoMasterLabels as lb
