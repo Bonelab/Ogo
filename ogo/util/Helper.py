@@ -23,7 +23,7 @@ from scipy import stats
 import scipy.interpolate as interp
 import SimpleITK as sitk
 import vtk
-import vtkbone
+#import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
 import ogo.dat.OgoMasterLabels as lb
@@ -342,7 +342,7 @@ def applyMask(imageData, maskData):
     return mask.GetOutput()
 
 
-def applyTestBase(mesh, material_table):
+#def applyTestBase(mesh, material_table):
     """Constructs to the FEM object.
     The first argument is the Image Mesh.
     The second argument is the material table.
@@ -975,25 +975,25 @@ def greaterTrochanterPMMA(greater_trochanter_model_bounds, spacing, origin, inva
     return gt_pmma_id_pad.GetOutput()
 
 
-def Image2Mesh(vtk_image):
-    """Mesh image data to hexahedral elements."""
-    mesher = vtkbone.vtkboneImageToMesh()
-    mesher.SetInputData(vtk_image)
-    mesher.Update()
-    message("Generated %d hexahedrons" % mesher.GetOutput().GetNumberOfCells())
-    message("Generated %d nodes" % mesher.GetOutput().GetNumberOfPoints())
-    return mesher.GetOutput()
+#def Image2Mesh(vtk_image):
+#    """Mesh image data to hexahedral elements."""
+#    mesher = vtkbone.vtkboneImageToMesh()
+#    mesher.SetInputData(vtk_image)
+#    mesher.Update()
+#    message("Generated %d hexahedrons" % mesher.GetOutput().GetNumberOfCells())
+#   message("Generated %d nodes" % mesher.GetOutput().GetNumberOfPoints())
+#    return mesher.GetOutput()
 
 
 def imageConnectivity(vtk_image):
-    """Performd image connectivity filter"""
-    conn = vtkbone.vtkboneImageConnectivityFilter()
-    conn.SetInputData(vtk_image)
-    conn.Update()
-    return conn.GetOutput()
+#    """Performd image connectivity filter"""
+#    conn = vtkbone.vtkboneImageConnectivityFilter()
+#    conn.SetInputData(vtk_image)
+#    conn.Update()
+#    return conn.GetOutput()
 
 
-def imageResample(vtk_image, isotropic_voxel_size):
+#def imageResample(vtk_image, isotropic_voxel_size):
     """Resample the input vtk image to isotropic voxel size as specified.
     The first argument is the input vtk Image Data.
     The second argument is the isotropic output voxel size.
@@ -1185,7 +1185,7 @@ def maskThreshold(imageData, threshold_value):
     return thres.GetOutput()
 
 
-def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):
+#def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):
     """Defines the material table for the FE model.
     The first argument is the hexahedral mesh.
     The second argument is the bone poissons ratio.

@@ -209,7 +209,7 @@ class InternalCalibration(StandardCalibration):
 
         n = len(self._interpolate_tables['adipose_table'])
         max_index = -1
-        max_r2 = -np.Inf
+        max_r2 = -np.inf
 
         for i in np.arange(1, n, 1):
             # Get the values at this energy level
