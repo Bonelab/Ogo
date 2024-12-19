@@ -431,8 +431,9 @@ def get_cortical_bone(array):
         sample_count = len(rslt)
 
     # Method 3: If the image has implants in it, then there will be artificially inflated cortical bone voxels from streaking (i.e., > 2200). 
-    # This method makes an effort to exclude them by only isolating the voxels in the bone that are most likely cortical bone (1000-1400 HU)
-    # ... anything higher than 1400 is likely due to image artifact and probably isn't cortical bone. 
+    # This method makes an effort to exclude them by only isolating the voxels in the bone that are most likely cortical bone (1000-1500 HU)
+    # ... anything higher than 1500 is likely due to image artifact and probably isn't cortical bone. 
+    # Disclaimer: this is arbitrary threshold chosen based off experience (aka I usually never see true cortical bone under 1000 and over 1500)... might need to be adjusted
     if (True): 
         voxel_mask = (array >= 1000) & (array <= 1500)
         filtered_voxels = array[voxel_mask]
