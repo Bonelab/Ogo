@@ -419,16 +419,26 @@ def get_cortical_bone(array):
         sample_mean = rslt
 
     # Method 2: Top voxels
-    if (True):
+    if (False):
         sorted_index_array = np.argsort(array)
         sorted_array = array[sorted_index_array]
         n = 899  # number of top voxels
-        offset = 50  # voxels above offset in calculation
+        offset = 2000  # voxels above offset in calculation
         rslt = sorted_array[-n - offset: -offset]
 
         sample_mean = np.mean(rslt)
         sample_std = np.std(rslt)
         sample_count = len(rslt)
+
+    # Method 3: If the image has implants in it, then there will be artificially inflated cortical bone voxels from streaking (i.e., > 2200). 
+    # This method makes an effort to exclude them by only isolating the voxels in the bone that are most likely cortical bone (1000-1400 HU)
+    # ... anything higher than 1400 is likely due to image artifact and probably isn't cortical bone. 
+    if (True): 
+        voxel_mask = (array >= 1000) & (array <= 1500)
+        filtered_voxels = array[voxel_mask]
+        sample_mean = np.mean(filtered_voxels)
+        sample_std = np.std(filtered_voxels)
+        sample_count = len(filtered_voxels) 
 
     return [sample_mean, sample_std, sample_count]
 

@@ -327,16 +327,41 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                               'count': filt.GetCount(value), 'marker': ''}
 
         if (useL4 and label in 'Cortical Bone'):
-            ogo.message('Calculating \"{}\" ({}) from L4'.format(label, value))
-            L4_label = 7
-            if (not filt.HasLabel(L4_label)):
-                os.sys.exit('[ERROR] No L4 found in image.')
+            if (useL4 == 'left'):
+                ogo.message('Calculating \"{}\" ({}) from left humerus (label 67)'.format(label, value))
+                humerus_left_label = 67
+                if (not filt.HasLabel(humerus_left_label)):
+                    os.sys.exit('[ERROR] No left humerus found in image.')
+                else:
+                    bone = sitk.BinaryThreshold(mask, humerus_left_label, humerus_left_label, 1, 0)
+                    array = sitk.Mask(ct, bone)
+                    [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()))
+                    labels_data[label] = {'ID': value, 'mean': bone_mean, 'stdev': bone_std, 'count': bone_count,
+                                        'marker': '(from left humerus)'}
+            
+            elif (useL4 == 'right'):
+                ogo.message('Calculating \"{}\" ({}) from right humerus (label 66)'.format(label, value))
+                humerus_right_label = 66
+                if (not filt.HasLabel(humerus_right_label)):
+                    os.sys.exit('[ERROR] No left humerus found in image.')
+                else:
+                    bone = sitk.BinaryThreshold(mask, humerus_right_label, humerus_right_label, 1, 0)
+                    array = sitk.Mask(ct, bone)
+                    [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()))
+                    labels_data[label] = {'ID': value, 'mean': bone_mean, 'stdev': bone_std, 'count': bone_count,
+                                        'marker': '(from left humerus)'}
+
             else:
-                bone = sitk.BinaryThreshold(mask, L4_label, L4_label, 1, 0)
-                array = sitk.Mask(ct, bone)
-                [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()))
-                labels_data[label] = {'ID': value, 'mean': bone_mean, 'stdev': bone_std, 'count': bone_count,
-                                      'marker': '(from L4)'}
+                ogo.message('Calculating \"{}\" ({}) from L4'.format(label, value))
+                L4_label = 7
+                if (not filt.HasLabel(L4_label)):
+                    os.sys.exit('[ERROR] No L4 found in image.')
+                else:
+                    bone = sitk.BinaryThreshold(mask, L4_label, L4_label, 1, 0)
+                    array = sitk.Mask(ct, bone)
+                    [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()))
+                    labels_data[label] = {'ID': value, 'mean': bone_mean, 'stdev': bone_std, 'count': bone_count,
+                                        'marker': '(from L4)'}
 
     # Print the values for each label
     ogo.message('  {:>22s} {:>8s} {:>8s} {:>8s}'.format(' ', 'Mean', 'StdDev', '#Voxels'))
@@ -607,8 +632,8 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
-    parser_internal.add_argument('--useL4', action='store_true',
-                                 help='Use when label 94 (cortical bone) is not available (it samples L4).')
+    parser_internal.add_argument('--useL4', choices=['left', 'right'], default=None,
+                                 help='Specify "left" or "right" to sample either the left or right humerous. Leave blank if you just want to sample from L4.')
     parser_internal.add_argument('--output_arch_image', action='store_true',
                                  help='Use when you would also like to output the Archimedian density image. Filename will be the same as the output_image but with "ARCH" added.')
     parser_internal.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
