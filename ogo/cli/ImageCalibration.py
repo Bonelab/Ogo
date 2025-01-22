@@ -347,6 +347,49 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                                                                   labels_data[label]['count'], labels_data[label][
                                                                       'marker']))  # Report mean, SD, # voxels
 
+    # Create checks for internal calibration HU values
+    expected_adipose = -100
+    expected_air = -1000
+    expected_blood = 20
+    expected_muscle = 30
+    expected_cortical_bone = 1200
+    
+    if (expected_adipose - 20) < labels_data['Adipose']['mean'] < (expected_adipose + 20):
+        pass
+    else: 
+        ogo.message('ERROR: Adipose ROI outside of expected range.')
+        ogo.message('Please check ROI for correct segmentation. Exiting...')
+        os.sys.exit()
+
+    if (expected_air - 20) < labels_data['Air']['mean'] < (expected_air + 20):
+        pass
+    else: 
+        ogo.message('ERROR: Air ROI outside of expected range.')
+        ogo.message('Please check ROI for correct segmentation. Exiting...')
+        os.sys.exit()
+
+    if (expected_blood - 40) < labels_data['Blood']['mean'] < (expected_blood + 40):
+        pass
+    else:
+        ogo.message('ERROR: Blood ROI outside of expected range.')
+        ogo.message('Please check ROI for correct segmentation. Exiting...')
+        os.sys.exit()
+
+    if (expected_muscle - 25) < labels_data['Skeletal Muscle']['mean'] < (expected_muscle + 40):
+        pass
+    else:
+        ogo.message('ERROR: Skeletal Muscle ROI outside of expected range.')
+        ogo.message('Please check ROI for correct segmentation. Exiting...')
+        os.sys.exit()
+    
+    if (expected_cortical_bone - 200) < labels_data['Cortical Bone']['mean'] < (expected_cortical_bone + 250):
+        pass
+    else:
+        ogo.message('ERROR: Cortical Bone ROI outside of expected range.')
+        ogo.message('Please check ROI for correct segmentation. Exiting...')
+        os.sys.exit()
+
+    
     # Finalize the labels to be used (user may select subset)
     labelList = []
     if (useLabels):  # User explicitly defines which labels to use
@@ -370,6 +413,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                     '[ERROR] Invalid HU for {} ({}). Explicitly define labels to use \nor define --useL4.'.format(label,
                                                                                                                   value))
     ogo.message('')
+
 
     # Perform the internal calibration fit
     ogo.message('Computing calibration parameters.')

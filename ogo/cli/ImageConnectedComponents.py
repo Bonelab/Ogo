@@ -234,7 +234,7 @@ ogoImageConnectedComponent mask.nii.gz
         epilog=epilog
     )
     parser.add_argument('input_image', help='Input image file (*.nii, *.nii.gz)')
-    parser.add_argument('--output_image', metavar='FILE', default=None, help='Output image file (*.nii, *.nii.gz)')
+    parser.add_argument('output_image', metavar='FILE', help='Output image file (*.nii, *.nii.gz)')
     parser.add_argument('--target_label', type=int, default=1, metavar='LABEL', help='Label for connected component analysis (default: %(default)s)')
     parser.add_argument('--keep_parts', type=int, nargs='*', default=[], metavar='LABEL', help='Part numbers to keep (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output image without asking')
