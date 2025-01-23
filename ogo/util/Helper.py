@@ -236,8 +236,10 @@ def histogram(image, nbins):
     print('!>  ')
     print(line_format_header.format('ImageValue', 'Percent', '#Voxels'))
 
+    ids = []
+      
     for idx in range(number_bins):
-
+            
         if (level_4):
             image_value = idx + data_type_minimum
             number_voxels = image_histogram[idx]
@@ -279,6 +281,11 @@ def histogram(image, nbins):
                 bin_edge = int(((idx + 1) * bin_width) + data_minimum)
                 print(line_format_bin_edge.format(bin_edge, '-----', '-----'))
 
+        if number_voxels>0:
+            ids.append(image_value)
+        else:
+            ids.append(0)
+        
         total_percent += percent_number_voxels
         total_voxels += number_voxels
 
@@ -289,8 +296,9 @@ def histogram(image, nbins):
         print('!> WARNING: Not all voxels in the image were included in the histogram.')
         print('!>          Image voxel count     = {}.'.format(len(array)))
         print('!>          Histogram voxel count = {}.'.format(total_voxels))
-
-
+    print('!> labels: ' + ','.join('{}'.format(i) for i in ids))
+    print(guard)
+    
 def aix(infile, image):
     guard = '!-------------------------------------------------------------------------------'
     phys_dim = [x * y for x, y in zip(image.GetDimensions(), image.GetSpacing())]
@@ -490,7 +498,7 @@ def find_executable(executable, path=None):
     if os.name == 'os2':
         (base, ext) = os.path.splitext(executable)
         # executable files on OS/2 can have an arbitrary extension, but
-        # .exe is automatically appended if no dot is present in the name
+        # .exe is automatically appended if no dot is nonzero in the name
         if not ext:
             executable = executable + ".exe"
     elif sys.platform == 'win32':
