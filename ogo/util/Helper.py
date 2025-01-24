@@ -23,13 +23,34 @@ from scipy import stats
 import scipy.interpolate as interp
 import SimpleITK as sitk
 import vtk
-#import vtkbone
+import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
 import ogo.dat.OgoMasterLabels as lb
 
 start_time = time.time()
 
+def combineImageData(image1, image2):
+    """
+    Combines two 3D images (NumPy arrays) by overlaying image2 on image1.
+    If both images have non-zero values in overlapping regions, image2 takes precedence.
+
+    Parameters:
+    - image1: ndarray
+        First 3D image (base image).
+    - image2: ndarray
+        Second 3D image to overlay on image1.
+
+    Returns:
+    - combined_image: ndarray
+        Combined 3D image.
+    """
+    if image1.shape != image2.shape:
+        raise ValueError("Images must have the same shape to combine.")
+
+    # Overlay image2 on image1, prioritizing non-zero values from image2
+    combined_image = np.where(image2 > 0, image2, image1)
+    return combined_image
 
 def pass_check_if_output_exists(filename,overwrite=False):
     if filename: # only continues if not None
@@ -342,7 +363,7 @@ def applyMask(imageData, maskData):
     return mask.GetOutput()
 
 
-#def applyTestBase(mesh, material_table):
+def applyTestBase(mesh, material_table):
     """Constructs to the FEM object.
     The first argument is the Image Mesh.
     The second argument is the material table.
@@ -975,25 +996,25 @@ def greaterTrochanterPMMA(greater_trochanter_model_bounds, spacing, origin, inva
     return gt_pmma_id_pad.GetOutput()
 
 
-#def Image2Mesh(vtk_image):
-#    """Mesh image data to hexahedral elements."""
-#    mesher = vtkbone.vtkboneImageToMesh()
-#    mesher.SetInputData(vtk_image)
-#    mesher.Update()
-#    message("Generated %d hexahedrons" % mesher.GetOutput().GetNumberOfCells())
-#   message("Generated %d nodes" % mesher.GetOutput().GetNumberOfPoints())
-#    return mesher.GetOutput()
+def Image2Mesh(vtk_image):
+    """Mesh image data to hexahedral elements."""
+    mesher = vtkbone.vtkboneImageToMesh()
+    mesher.SetInputData(vtk_image)
+    mesher.Update()
+    message("Generated %d hexahedrons" % mesher.GetOutput().GetNumberOfCells())
+    message("Generated %d nodes" % mesher.GetOutput().GetNumberOfPoints())
+    return mesher.GetOutput()
 
 
 def imageConnectivity(vtk_image):
-#    """Performd image connectivity filter"""
-#    conn = vtkbone.vtkboneImageConnectivityFilter()
-#    conn.SetInputData(vtk_image)
-#    conn.Update()
-#    return conn.GetOutput()
+    """Performd image connectivity filter"""
+    conn = vtkbone.vtkboneImageConnectivityFilter()
+    conn.SetInputData(vtk_image)
+    conn.Update()
+    return conn.GetOutput()
 
 
-#def imageResample(vtk_image, isotropic_voxel_size):
+def imageResample(vtk_image, isotropic_voxel_size):
     """Resample the input vtk image to isotropic voxel size as specified.
     The first argument is the input vtk Image Data.
     The second argument is the isotropic output voxel size.
@@ -1168,24 +1189,56 @@ def marchingCubes(vtk_image):
     return march.GetOutput()
 
 
-def maskThreshold(imageData, threshold_value):
-    """Applies the threshold value to the input image.
-    The first argument is the image. The second argument is the threshold value to be applied.
-    Returns the thresholded image region as image Data.
+def maskThreshold(imageData, threshold_values):
     """
-    thres = vtk.vtkImageThreshold()
-    thres.SetInputData(imageData)
-    thres.ThresholdBetween(threshold_value, threshold_value)
-    thres.ReplaceInOn()
-    thres.SetInValue(1)
-    thres.ReplaceOutOn()
-    thres.SetOutValue(0)
-    thres.SetOutputScalarTypeToUnsignedChar()
-    thres.Update()
-    return thres.GetOutput()
+    Applies a list of threshold values (or a single value) to the input image and combines the results,
+    assigning consecutive values for each threshold.
+
+    Parameters:
+    - imageData: vtkImageData, the input image.
+    - threshold_values: int or list of int, the threshold value(s) to apply.
+
+    Returns:
+    - Combined thresholded image as vtkImageData with consecutive values for each threshold.
+    """
+    # Ensure threshold_values is a list
+    if isinstance(threshold_values, int):
+        threshold_values = [threshold_values]
+
+    # Initialize a variable to hold the combined mask
+    combined_mask = None
+    
+    for i, threshold_value in enumerate(threshold_values, start=1):
+        message("Threshold Value: %d" % threshold_value)
+        
+        # Threshold the image for the current value
+        thres = vtk.vtkImageThreshold()
+        thres.SetInputData(imageData)
+        thres.ThresholdBetween(threshold_value, threshold_value)
+        thres.ReplaceInOn()
+        thres.SetInValue(i)  # Assign a unique value for this threshold
+        thres.ReplaceOutOn()
+        thres.SetOutValue(0)
+        thres.SetOutputScalarTypeToUnsignedChar()
+        thres.Update()
+
+        if combined_mask is None:
+            # First iteration: initialize combined mask
+            combined_mask = vtk.vtkImageData()
+            combined_mask.DeepCopy(thres.GetOutput())
+        else:
+            # Combine the current mask with the previous masks
+            math = vtk.vtkImageMathematics()
+            math.SetInput1Data(combined_mask)
+            math.SetInput2Data(thres.GetOutput())
+            math.SetOperationToAdd()  # Add the values to assign consecutive numbers
+            math.Update()
+            combined_mask.DeepCopy(math.GetOutput())
+
+    return combined_mask
 
 
-#def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):
+def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):
     """Defines the material table for the FE model.
     The first argument is the hexahedral mesh.
     The second argument is the bone poissons ratio.
@@ -1539,398 +1592,398 @@ def add_to_filename(filepath, suffix):
 
     return new_file_path
 
-# def writeN88Model(model, fileName, pathname):
-#     """Writes out a N88Model.
-#     The first argument is the model.
-#     The second argument is the filename.
-#     The third argument is the pathname.
-#     Returns the N88model in the directory.
-#     """
-#     os.chdir(pathname)
-#     writer = vtkbone.vtkboneN88ModelWriter()
-#     writer.SetInputData(model)
-#     writer.SetFileName(fileName)
-#     writer.Update()
-# 
-# def writeNii(imageData, fileName, output_directory):
-#     """Writes out an input image as a NIFTI file.
-#     The first argument is the image Data. The second argument is the filename. The third argument is the output directory where the file is to be written to.
-#     """
-#     os.chdir(output_directory)
-#     writer = vtk.vtkNIFTIImageWriter()
-#     writer.SetInputData(imageData)
-#     writer.SetFileName(fileName)
-#     writer.Write()
-#
-#  def applyInternalCalibration(imageData, cali_parameters):
-#      """ Applies the internal calibration to the image.
-#      The first argument is the image.
-#      The second argument is a dictionary of the calibration parameters.
-#      Returns the calibrated image in mg/cc.
-#      """
-#      ##
-#      # Some parameters to have from the inputs
-#      extent = imageData.GetExtent()
-#      origin = imageData.GetOrigin()
-#      spacing = imageData.GetSpacing()
-#      voxel_volume_mm = spacing[0] * spacing[1] * spacing[2] # [mm^3]
-#      voxel_volume_cm = voxel_volume_mm / 1000 # [cm^3]
-#      HU_MassAtten_Slope = cali_parameters['HU-u/p Slope']
-#      HU_MassAtten_Yint = cali_parameters['HU-u/p Y-Intercept']
-#      HU_Den_Slope = cali_parameters['HU-Material Density Slope']
-#      HU_Den_Yint = cali_parameters['HU-Material Density Y-Intercept']
-#      Triglyceride_Mass_Atten = cali_parameters['Triglyceride u/p']
-#      K2HPO4_Mass_Atten = cali_parameters['K2HPO4 u/p']
-#  
-#      ##
-#      # Create copies of the image data for Output density Images and convert to numpy arrays
-#      # Mass Attenuation Reference Image
-#      Mass_Atten_image = vtk.vtkImageData()
-#      Mass_Atten_image.SetExtent(extent)
-#      Mass_Atten_image.SetOrigin(origin)
-#      Mass_Atten_image.SetSpacing(spacing)
-#      Mass_Atten_image.AllocateScalars(vtk.VTK_FLOAT, 1)
-#      Mass_Atten_data = vtk2numpy(Mass_Atten_image)
-#  
-#      # Archimedian Density Reference Image
-#      Arch_den_image = vtk.vtkImageData()
-#      Arch_den_image.SetExtent(extent)
-#      Arch_den_image.SetOrigin(origin)
-#      Arch_den_image.SetSpacing(spacing)
-#      Arch_den_image.AllocateScalars(vtk.VTK_FLOAT, 1)
-#      Arch_den_data = vtk2numpy(Arch_den_image)
-#  
-#      # Mass Attenuation Reference Image
-#      Mass_image = vtk.vtkImageData()
-#      Mass_image.SetExtent(extent)
-#      Mass_image.SetOrigin(origin)
-#      Mass_image.SetSpacing(spacing)
-#      Mass_image.AllocateScalars(vtk.VTK_FLOAT, 1)
-#      Mass_data = vtk2numpy(Mass_image)
-#  
-#      # K2HPO4 Density
-#      K2HPO4_den_image = vtk.vtkImageData()
-#      K2HPO4_den_image.SetExtent(extent)
-#      K2HPO4_den_image.SetOrigin(origin)
-#      K2HPO4_den_image.SetSpacing(spacing)
-#      K2HPO4_den_image.AllocateScalars(vtk.VTK_FLOAT, 1)
-#      K2HPO4_den_data = vtk2numpy(K2HPO4_den_image)
-#  
-#      ##
-#      # Convert image to NumPy
-#      message("Converting image to NumPy...")
-#      numpy_image = vtk2numpy(imageData)
-#  
-#      ##
-#      # Apply HU to Mass Attenuation Conversion
-#      message("Converting image to mass attenuation equivalent...")
-#      Mass_Atten_data[:,:,:] = ((HU_MassAtten_Slope * numpy_image) + HU_MassAtten_Yint)
-#  
-#      # Apply HU to Archimedian Density Conversion
-#      message("Converting image to Archimedian density equivalent...")
-#      Arch_den_data[:,:,:] = ((HU_Den_Slope * numpy_image) + HU_Den_Yint)
-#  
-#      # Convert Archimedian density to total mass equivalent
-#      message("Converting Archimedian density equivalent to Mass equivalent image...")
-#      Mass_data[:,:,:] = Arch_den_data * voxel_volume_cm
-#  
-#      # Converting onverting to K2HPO4 Mass
-#      message("Converting to K2HPO4 Mass Image...")
-#      K2HPO4_mass_seg_data = np.zeros_like(Mass_data, dtype = 'h')
-#  
-#      # Two component model to derive K2HPO4 mass image
-#      K2HPO4_mass_seg_data = (Mass_data *((Mass_Atten_data - Triglyceride_Mass_Atten) / (K2HPO4_Mass_Atten - Triglyceride_Mass_Atten)))
-#  
-#      # Converting mass images to density images
-#      message("Converting K2HPO4 mass images to K2HPO4 density images...")
-#      K2HPO4_den_data = K2HPO4_mass_seg_data / voxel_volume_cm * 1000 # *1000 to convert g to mg
-#  
-#      # Convery Numpy images back to vtk Image
-#      scalars = K2HPO4_den_data.flatten(order='C')
-#      VTK_data = numpy_to_vtk(num_array=scalars, deep=True, array_type=vtk.VTK_FLOAT)
-#      K2HPO4_den_image.GetPointData().SetScalars(VTK_data)
-#  
-#      return K2HPO4_den_image
-#
-# def applyPhantomParameters(vtk_image, calibration_parameters):
-#     """Uses image mathematics to apply image calibration.
-#     The first argument is the vtk Image Data.
-#     The second argument are the calibration parameters dictionary (slope, y-intercept).
-#     Returns vtk Image Data in FLOAT data type.
-#     """
-#     cast = vtk.vtkImageCast()
-#     cast.SetInputData(vtk_image)
-#     cast.SetOutputScalarTypeToFloat()
-#     cast.Update()
-# 
-#     slope_image = vtk.vtkImageMathematics()
-#     slope_image.SetInputConnection(0, cast.GetOutputPort())
-#     slope_image.SetOperationToMultiplyByK()
-#     slope_image.SetConstantK(calibration_parameters['Calibration Slope'])
-#     slope_image.Update()
-# 
-#     calibrated_image = vtk.vtkImageMathematics()
-#     calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
-#     calibrated_image.SetOperationToAddConstant()
-#     calibrated_image.SetConstantC(calibration_parameters['Calibration Y-Intercept'])
-#     calibrated_image.Update()
-# 
-#     return calibrated_image.GetOutput()
-#
-# def bmd_CHAToAsh(vtk_image):
-#     """Converts CHA density to ash density using equation from:
-#     CHA density to ASH density relationship from Kaneko et al. 2004 J Biomech
-#     'Mechanical properties, density and quantitative CT scan data of trabecular
-#         bone with and without metastases'
-#     The first argument is the density image.
-#     Returns the Ash Density Image.
-#     """
-#     slope_image = vtk.vtkImageMathematics()
-#     slope_image.SetInputData(0, vtk_image)
-#     slope_image.SetOperationToMultiplyByK()
-#     slope_image.SetConstantK(0.839)
-#     slope_image.Update()
-# 
-#     calibrated_image = vtk.vtkImageMathematics()
-#     calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
-#     calibrated_image.SetOperationToAddConstant()
-#     calibrated_image.SetConstantC(69.8)
-#     calibrated_image.Update()
-#     return calibrated_image.GetOutput()
-#
-# def combineImageData_SLS(image, fh_pmma_id_pad, pmma_mat_id):
-#     """Combines the 2 image data together to get final image.
-#     The first argument is the original image data.
-#     The second argument is the femoral head PMMA cap image.
-#     The third argument is the greater trochanter PMMA cap image.
-#     Returns the combined image data.
-#     """
-#     message("Padding the images to constant size...")
-#     ##
-#     # Pad all images so that they are the same size
-#     fh_pad = vtk.vtkImageConstantPad()
-#     fh_pad.SetInputData(fh_pmma_id_pad)
-#     fh_pad.SetOutputWholeExtent(image.GetExtent())
-#     fh_pad.SetConstant(0)
-#     fh_pad.Update()
-# 
-#     message("Combining PMMA Caps with Image Data...")
-#     fh_logic = vtk.vtkImageLogic()
-#     fh_logic.SetInput1Data(fh_pad.GetOutput())
-#     fh_logic.SetInput2Data(image)
-#     fh_logic.SetOperationToAnd()
-#     fh_logic.SetOutputTrueValue(pmma_mat_id)
-#     fh_logic.Update()
-# 
-#     fh_math = vtk.vtkImageMathematics()
-#     fh_math.SetInput1Data(fh_pad.GetOutput())
-#     fh_math.SetInput2Data(fh_logic.GetOutput())
-#     fh_math.SetOperationToSubtract()
-#     fh_math.Update()
-# 
-#     combo_image = vtk.vtkImageMathematics()
-#     combo_image.SetInput1Data(fh_math.GetOutput())
-#     combo_image.SetInput2Data(image)
-#     combo_image.SetOperationToAdd()
-#     combo_image.Update()
-# 
-#     message("PMMA caps added.")
-#     message("Creating final image...")
-#     # Remove any negative values...
-#     final_thres = vtk.vtkImageThreshold()
-#     final_thres.SetInputData(combo_image.GetOutput())
-#     final_thres.ThresholdByLower(0)
-#     final_thres.ReplaceInOn()
-#     final_thres.SetInValue(0)
-#     final_thres.ReplaceOutOff()
-#     final_thres.Update()
-#     final_image = final_thres.GetOutput()
-# 
-#     return final_image
+def writeN88Model(model, fileName, pathname):
+    """Writes out a N88Model.
+    The first argument is the model.
+    The second argument is the filename.
+    The third argument is the pathname.
+    Returns the N88model in the directory.
+    """
+    os.chdir(pathname)
+    writer = vtkbone.vtkboneN88ModelWriter()
+    writer.SetInputData(model)
+    writer.SetFileName(fileName)
+    writer.Update()
 
-# def icEffectiveEnergy(HU_array, adipose, air, blood, bone, muscle, k2hpo4, cha, triglyceride, water):
-#     """Used to determine the scan effective energy for internal calibration.
-#     The first argument is the mean HU for each tissue.
-#     The remaining arguments are the tissue specific interpolated tables from icInterpolation.
-#     Returns the scan effective energy and calibration parameters as a dictionary.
-#     """
-#     energy_r2_values = pd.DataFrame(columns = ['Energy [keV]', 'R-Squared'])
-#     energy_r2_values['Energy [keV]'] = adipose['Energy [keV]']
+def writeNii(imageData, fileName, output_directory):
+    """Writes out an input image as a NIFTI file.
+    The first argument is the image Data. The second argument is the filename. The third argument is the output directory where the file is to be written to.
+    """
+    os.chdir(output_directory)
+    writer = vtk.vtkNIFTIImageWriter()
+    writer.SetInputData(imageData)
+    writer.SetFileName(fileName)
+    writer.Write()
+
+def applyInternalCalibration(imageData, cali_parameters):
+     """ Applies the internal calibration to the image.
+     The first argument is the image.
+     The second argument is a dictionary of the calibration parameters.
+     Returns the calibrated image in mg/cc.
+     """
+     ##
+     # Some parameters to have from the inputs
+     extent = imageData.GetExtent()
+     origin = imageData.GetOrigin()
+     spacing = imageData.GetSpacing()
+     voxel_volume_mm = spacing[0] * spacing[1] * spacing[2] # [mm^3]
+     voxel_volume_cm = voxel_volume_mm / 1000 # [cm^3]
+     HU_MassAtten_Slope = cali_parameters['HU-u/p Slope']
+     HU_MassAtten_Yint = cali_parameters['HU-u/p Y-Intercept']
+     HU_Den_Slope = cali_parameters['HU-Material Density Slope']
+     HU_Den_Yint = cali_parameters['HU-Material Density Y-Intercept']
+     Triglyceride_Mass_Atten = cali_parameters['Triglyceride u/p']
+     K2HPO4_Mass_Atten = cali_parameters['K2HPO4 u/p']
+ 
+     ##
+     # Create copies of the image data for Output density Images and convert to numpy arrays
+     # Mass Attenuation Reference Image
+     Mass_Atten_image = vtk.vtkImageData()
+     Mass_Atten_image.SetExtent(extent)
+     Mass_Atten_image.SetOrigin(origin)
+     Mass_Atten_image.SetSpacing(spacing)
+     Mass_Atten_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+     Mass_Atten_data = vtk2numpy(Mass_Atten_image)
+ 
+     # Archimedian Density Reference Image
+     Arch_den_image = vtk.vtkImageData()
+     Arch_den_image.SetExtent(extent)
+     Arch_den_image.SetOrigin(origin)
+     Arch_den_image.SetSpacing(spacing)
+     Arch_den_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+     Arch_den_data = vtk2numpy(Arch_den_image)
+ 
+     # Mass Attenuation Reference Image
+     Mass_image = vtk.vtkImageData()
+     Mass_image.SetExtent(extent)
+     Mass_image.SetOrigin(origin)
+     Mass_image.SetSpacing(spacing)
+     Mass_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+     Mass_data = vtk2numpy(Mass_image)
+ 
+     # K2HPO4 Density
+     K2HPO4_den_image = vtk.vtkImageData()
+     K2HPO4_den_image.SetExtent(extent)
+     K2HPO4_den_image.SetOrigin(origin)
+     K2HPO4_den_image.SetSpacing(spacing)
+     K2HPO4_den_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+     K2HPO4_den_data = vtk2numpy(K2HPO4_den_image)
+ 
+     ##
+     # Convert image to NumPy
+     message("Converting image to NumPy...")
+     numpy_image = vtk2numpy(imageData)
+ 
+     ##
+     # Apply HU to Mass Attenuation Conversion
+     message("Converting image to mass attenuation equivalent...")
+     Mass_Atten_data[:,:,:] = ((HU_MassAtten_Slope * numpy_image) + HU_MassAtten_Yint)
+ 
+     # Apply HU to Archimedian Density Conversion
+     message("Converting image to Archimedian density equivalent...")
+     Arch_den_data[:,:,:] = ((HU_Den_Slope * numpy_image) + HU_Den_Yint)
+ 
+     # Convert Archimedian density to total mass equivalent
+     message("Converting Archimedian density equivalent to Mass equivalent image...")
+     Mass_data[:,:,:] = Arch_den_data * voxel_volume_cm
+ 
+     # Converting onverting to K2HPO4 Mass
+     message("Converting to K2HPO4 Mass Image...")
+     K2HPO4_mass_seg_data = np.zeros_like(Mass_data, dtype = 'h')
+ 
+     # Two component model to derive K2HPO4 mass image
+     K2HPO4_mass_seg_data = (Mass_data *((Mass_Atten_data - Triglyceride_Mass_Atten) / (K2HPO4_Mass_Atten - Triglyceride_Mass_Atten)))
+ 
+     # Converting mass images to density images
+     message("Converting K2HPO4 mass images to K2HPO4 density images...")
+     K2HPO4_den_data = K2HPO4_mass_seg_data / voxel_volume_cm * 1000 # *1000 to convert g to mg
+ 
+     # Convery Numpy images back to vtk Image
+     scalars = K2HPO4_den_data.flatten(order='C')
+     VTK_data = numpy_to_vtk(num_array=scalars, deep=True, array_type=vtk.VTK_FLOAT)
+     K2HPO4_den_image.GetPointData().SetScalars(VTK_data)
+ 
+     return K2HPO4_den_image
+
+def applyPhantomParameters(vtk_image, calibration_parameters):
+    """Uses image mathematics to apply image calibration.
+    The first argument is the vtk Image Data.
+    The second argument are the calibration parameters dictionary (slope, y-intercept).
+    Returns vtk Image Data in FLOAT data type.
+    """
+    cast = vtk.vtkImageCast()
+    cast.SetInputData(vtk_image)
+    cast.SetOutputScalarTypeToFloat()
+    cast.Update()
+
+    slope_image = vtk.vtkImageMathematics()
+    slope_image.SetInputConnection(0, cast.GetOutputPort())
+    slope_image.SetOperationToMultiplyByK()
+    slope_image.SetConstantK(calibration_parameters['Calibration Slope'])
+    slope_image.Update()
+
+    calibrated_image = vtk.vtkImageMathematics()
+    calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
+    calibrated_image.SetOperationToAddConstant()
+    calibrated_image.SetConstantC(calibration_parameters['Calibration Y-Intercept'])
+    calibrated_image.Update()
+
+    return calibrated_image.GetOutput()
+
+def bmd_CHAToAsh(vtk_image):
+    """Converts CHA density to ash density using equation from:
+    CHA density to ASH density relationship from Kaneko et al. 2004 J Biomech
+    'Mechanical properties, density and quantitative CT scan data of trabecular
+        bone with and without metastases'
+    The first argument is the density image.
+    Returns the Ash Density Image.
+    """
+    slope_image = vtk.vtkImageMathematics()
+    slope_image.SetInputData(0, vtk_image)
+    slope_image.SetOperationToMultiplyByK()
+    slope_image.SetConstantK(0.839)
+    slope_image.Update()
+
+    calibrated_image = vtk.vtkImageMathematics()
+    calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
+    calibrated_image.SetOperationToAddConstant()
+    calibrated_image.SetConstantC(69.8)
+    calibrated_image.Update()
+    return calibrated_image.GetOutput()
+
+def combineImageData_SLS(image, fh_pmma_id_pad, pmma_mat_id):
+    """Combines the 2 image data together to get final image.
+    The first argument is the original image data.
+    The second argument is the femoral head PMMA cap image.
+    The third argument is the greater trochanter PMMA cap image.
+    Returns the combined image data.
+    """
+    message("Padding the images to constant size...")
+    ##
+    # Pad all images so that they are the same size
+    fh_pad = vtk.vtkImageConstantPad()
+    fh_pad.SetInputData(fh_pmma_id_pad)
+    fh_pad.SetOutputWholeExtent(image.GetExtent())
+    fh_pad.SetConstant(0)
+    fh_pad.Update()
+
+    message("Combining PMMA Caps with Image Data...")
+    fh_logic = vtk.vtkImageLogic()
+    fh_logic.SetInput1Data(fh_pad.GetOutput())
+    fh_logic.SetInput2Data(image)
+    fh_logic.SetOperationToAnd()
+    fh_logic.SetOutputTrueValue(pmma_mat_id)
+    fh_logic.Update()
+
+    fh_math = vtk.vtkImageMathematics()
+    fh_math.SetInput1Data(fh_pad.GetOutput())
+    fh_math.SetInput2Data(fh_logic.GetOutput())
+    fh_math.SetOperationToSubtract()
+    fh_math.Update()
+
+    combo_image = vtk.vtkImageMathematics()
+    combo_image.SetInput1Data(fh_math.GetOutput())
+    combo_image.SetInput2Data(image)
+    combo_image.SetOperationToAdd()
+    combo_image.Update()
+
+    message("PMMA caps added.")
+    message("Creating final image...")
+    # Remove any negative values...
+    final_thres = vtk.vtkImageThreshold()
+    final_thres.SetInputData(combo_image.GetOutput())
+    final_thres.ThresholdByLower(0)
+    final_thres.ReplaceInOn()
+    final_thres.SetInValue(0)
+    final_thres.ReplaceOutOff()
+    final_thres.Update()
+    final_image = final_thres.GetOutput()
+
+    return final_image
+
+def icEffectiveEnergy(HU_array, adipose, air, blood, bone, muscle, k2hpo4, cha, triglyceride, water):
+    """Used to determine the scan effective energy for internal calibration.
+    The first argument is the mean HU for each tissue.
+    The remaining arguments are the tissue specific interpolated tables from icInterpolation.
+    Returns the scan effective energy and calibration parameters as a dictionary.
+    """
+    energy_r2_values = pd.DataFrame(columns = ['Energy [keV]', 'R-Squared'])
+    energy_r2_values['Energy [keV]'] = adipose['Energy [keV]']
+
+    for i in np.arange(1, len(adipose), 1):
+        attenuation = [
+        adipose.loc[i,'Mass Attenuation [cm2/g]'],
+        air.loc[i,'Mass Attenuation [cm2/g]'],
+        blood.loc[i,'Mass Attenuation [cm2/g]'],
+        bone.loc[i,'Mass Attenuation [cm2/g]'],
+        muscle.loc[i,'Mass Attenuation [cm2/g]']
+        ]
+
+        EE_lr = stats.linregress(HU_array, attenuation)
+        r_squared = EE_lr[2]**2
+        energy_r2_values.loc[i, 'R-Squared'] = r_squared
+
+    max_row = energy_r2_values[energy_r2_values['R-Squared'] == energy_r2_values['R-Squared'].max()]
+    max_r2 = energy_r2_values['R-Squared'].max()
+    index = max_row.index.values.astype(int)[0]
+    effective_energy = max_row.at[index, 'Energy [keV]']
+
+    # Determine the corresponding mass attenuation values for each material
+    adipose_EE = adipose.at[index, 'Mass Attenuation [cm2/g]']
+    air_EE = air.at[index, 'Mass Attenuation [cm2/g]']
+    blood_EE = blood.at[index, 'Mass Attenuation [cm2/g]']
+    bone_EE = bone.at[index, 'Mass Attenuation [cm2/g]']
+    muscle_EE = muscle.at[index, 'Mass Attenuation [cm2/g]']
+    k2hpo4_EE = k2hpo4.at[index, 'Mass Attenuation [cm2/g]']
+    cha_EE = cha.at[index, 'Mass Attenuation [cm2/g]']
+    triglyceride_EE = triglyceride.at[index, 'Mass Attenuation [cm2/g]']
+    water_EE = water.at[index, 'Mass Attenuation [cm2/g]']
+
+    # Create dictionary for output
+    dict = OrderedDict()
+    dict['Effective Energy [keV]'] = effective_energy
+    dict['Max R^2'] = max_r2
+    dict['Adipose u/p'] = adipose_EE
+    dict['Air u/p'] = air_EE
+    dict['Blood u/p'] = blood_EE
+    dict['Cortical Bone u/p'] = bone_EE
+    dict['Skeletal Muscle u/p'] = muscle_EE
+    dict['K2HPO4 u/p'] = k2hpo4_EE
+    dict['CHA u/p'] = cha_EE
+    dict['Triglyceride u/p'] = triglyceride_EE
+    dict['Water u/p'] = water_EE
+
+    return dict
+
+def icInterpolation(material_table):
+    """Used for internal calibration. Interpolates the material table for energy
+    levels 1-200 keV.The first argument is the reference material table.
+    Returns the interpolated material table for internal calibration.
+    """
+    energies = np.arange(1, 200.5, 0.5)
+    interp_table = interp.griddata(material_table['Energy [keV]'], material_table['Mass Attenuation [cm2/g]'], energies, method = 'linear')
+    interp_df = pd.DataFrame({'Energy [keV]':energies, 'Mass Attenuation [cm2/g]':interp_table})
+    return interp_df
+
+def icLinearRegression(x_values, y_values, slopeLabel, yintLabel):
+    """Function for linear regression of two values.
+    The first argument are the x values.
+    The second argument are the y values.
+    The third argument is the dictionary label for the slope.
+    The fourth argument is the dictionary ladel for the y-intercept
+    Returns the regression slope and y-intercept as dictionary.
+    """
+    linreg = stats.linregress(x_values, y_values)
+    dict = OrderedDict()
+    dict[slopeLabel] = linreg[0]
+    dict[yintLabel] = linreg[1]
+    return dict
+
+def imageHistogramMean(imageData):
+    """Creates a histogram of the input image data, ignoring zero values.
+    The first argument is the input image data.
+    Returns the mean value of the histogram.
+    """
+    accumulate = vtk.vtkImageAccumulate()
+    accumulate.SetInputData(imageData)
+    accumulate.IgnoreZeroOn()
+    accumulate.Update()
+    mean = accumulate.GetMean()
+    return mean
+
+def imageHistogram(imageData):
+    """Creates a histogram of the input image data, ignoring zero values.
+    Returns the mean value of the histogram.
+    """
+    accumulate = vtk.vtkImageAccumulate()
+    accumulate.SetInputData(imageData)
+    accumulate.IgnoreZeroOn()
+    accumulate.Update()
+    image_mean = accumulate.GetMean()[0] # First value in tuple is our result
+    image_sd = accumulate.GetStandardDeviation()[0]
+    image_min = accumulate.GetMin()[0]
+    image_max = accumulate.GetMax()[0]
+    image_voxel_count = accumulate.GetVoxelCount()
+    return [image_mean, image_sd, image_min, image_max, image_voxel_count]
+
+def icMaterialDensity(material_HU, material_attenuation, water_attenuation, water_density):
+    """Determines the apparent density for each material.
+    The first argument is the material HU from ROI.
+    The second argument is the material attenuation at the effective energy.
+    The third argument is water's attenuation at the effective energy.
+    The fourth argument is the assumed density of water at 1.0 g/cc.
+    Returns the material density.
+    """
+    output_density = (material_HU/1000*water_attenuation*water_density + water_attenuation*water_density)/material_attenuation
+    return output_density
+
+def phantomParameters(h2o_density, k2hpo4_density, phantom_HU):
+    """Determine the slope and y-intercept for the phantom calibration.
+    The first argument are the phantom specific H2O equivalent density values. The second
+    argument are the phantom specific K2HPO4 equivalent density values. The third
+    argument are the phantom rod mean HU values from the image and mask.
+    Returns the slope and y-intercept for the calibration as a float list.
+    """
+    y_values = np.subtract(phantom_HU, h2o_density)
+    x_values = k2hpo4_density
+    regression_parameters = stats.linregress(x_values, y_values)
+
+    # convert slope and y-intercept to CT parameters
+    sigma_ct = regression_parameters[0] - 0.2174
+    beta_ct = regression_parameters[1] + 999.6
+
+    # Determine calibration parameters
+    calibration_slope = 1/sigma_ct
+    calibration_yint = 1*beta_ct/sigma_ct
+    return {
+    'Calibration Slope':calibration_slope,
+    'Calibration Y-Intercept':calibration_yint
+    }
+
+def phantomParameters_bmas200(cha_density, phantom_HU):
+    """Determine the slope and y-intercept for the phantom calibration.
+    The first argument is the phantom specific cha equivalent density values. The second
+    argument are the phantom rod mean HU values from the image and mask.
+    Returns the slope and y-intercept for the calibration as a float list.
+    """
+    x_values = phantom_HU
+    y_values = cha_density
+    regression_parameters = stats.linregress(x_values, y_values)
+
+    # Determine calibration parameters
+    calibration_slope = regression_parameters[0]
+    calibration_yint = regression_parameters[1]
+    return {
+    'Calibration Slope':calibration_slope,
+    'Calibration Y-Intercept':calibration_yint
+    }
+
+def readDCM(fileDir):
+    """Reads a DICOM image from a directory.
+    The first argument is the image directory.
+    Returns the image as vtk Output Data.
+    """
+    image = vtk.vtkDICOMImageReader()
+    image.SetDirectoryName(fileDir)
+    image.Update()
+
+    flip = vtk.vtkImageFlip()
+    flip.SetInputConnection(image.GetOutputPort())
+    flip.SetFilteredAxis(1)
+    flip.Update()
+    flip2 = vtk.vtkImageFlip()
+    flip2.SetInputConnection(flip.GetOutputPort())
+    flip2.SetFilteredAxis(2)
+    flip2.Update()
+
+    return flip2.GetOutput()
 # 
-#     for i in np.arange(1, len(adipose), 1):
-#         attenuation = [
-#         adipose.loc[i,'Mass Attenuation [cm2/g]'],
-#         air.loc[i,'Mass Attenuation [cm2/g]'],
-#         blood.loc[i,'Mass Attenuation [cm2/g]'],
-#         bone.loc[i,'Mass Attenuation [cm2/g]'],
-#         muscle.loc[i,'Mass Attenuation [cm2/g]']
-#         ]
-# 
-#         EE_lr = stats.linregress(HU_array, attenuation)
-#         r_squared = EE_lr[2]**2
-#         energy_r2_values.loc[i, 'R-Squared'] = r_squared
-# 
-#     max_row = energy_r2_values[energy_r2_values['R-Squared'] == energy_r2_values['R-Squared'].max()]
-#     max_r2 = energy_r2_values['R-Squared'].max()
-#     index = max_row.index.values.astype(int)[0]
-#     effective_energy = max_row.at[index, 'Energy [keV]']
-# 
-#     # Determine the corresponding mass attenuation values for each material
-#     adipose_EE = adipose.at[index, 'Mass Attenuation [cm2/g]']
-#     air_EE = air.at[index, 'Mass Attenuation [cm2/g]']
-#     blood_EE = blood.at[index, 'Mass Attenuation [cm2/g]']
-#     bone_EE = bone.at[index, 'Mass Attenuation [cm2/g]']
-#     muscle_EE = muscle.at[index, 'Mass Attenuation [cm2/g]']
-#     k2hpo4_EE = k2hpo4.at[index, 'Mass Attenuation [cm2/g]']
-#     cha_EE = cha.at[index, 'Mass Attenuation [cm2/g]']
-#     triglyceride_EE = triglyceride.at[index, 'Mass Attenuation [cm2/g]']
-#     water_EE = water.at[index, 'Mass Attenuation [cm2/g]']
-# 
-#     # Create dictionary for output
-#     dict = OrderedDict()
-#     dict['Effective Energy [keV]'] = effective_energy
-#     dict['Max R^2'] = max_r2
-#     dict['Adipose u/p'] = adipose_EE
-#     dict['Air u/p'] = air_EE
-#     dict['Blood u/p'] = blood_EE
-#     dict['Cortical Bone u/p'] = bone_EE
-#     dict['Skeletal Muscle u/p'] = muscle_EE
-#     dict['K2HPO4 u/p'] = k2hpo4_EE
-#     dict['CHA u/p'] = cha_EE
-#     dict['Triglyceride u/p'] = triglyceride_EE
-#     dict['Water u/p'] = water_EE
-# 
-#     return dict
-#
-# def icInterpolation(material_table):
-#     """Used for internal calibration. Interpolates the material table for energy
-#     levels 1-200 keV.The first argument is the reference material table.
-#     Returns the interpolated material table for internal calibration.
-#     """
-#     energies = np.arange(1, 200.5, 0.5)
-#     interp_table = interp.griddata(material_table['Energy [keV]'], material_table['Mass Attenuation [cm2/g]'], energies, method = 'linear')
-#     interp_df = pd.DataFrame({'Energy [keV]':energies, 'Mass Attenuation [cm2/g]':interp_table})
-#     return interp_df
-# 
-# def icLinearRegression(x_values, y_values, slopeLabel, yintLabel):
-#     """Function for linear regression of two values.
-#     The first argument are the x values.
-#     The second argument are the y values.
-#     The third argument is the dictionary label for the slope.
-#     The fourth argument is the dictionary ladel for the y-intercept
-#     Returns the regression slope and y-intercept as dictionary.
-#     """
-#     linreg = stats.linregress(x_values, y_values)
-#     dict = OrderedDict()
-#     dict[slopeLabel] = linreg[0]
-#     dict[yintLabel] = linreg[1]
-#     return dict
-#
-# def imageHistogramMean(imageData):
-#     """Creates a histogram of the input image data, ignoring zero values.
-#     The first argument is the input image data.
-#     Returns the mean value of the histogram.
-#     """
-#     accumulate = vtk.vtkImageAccumulate()
-#     accumulate.SetInputData(imageData)
-#     accumulate.IgnoreZeroOn()
-#     accumulate.Update()
-#     mean = accumulate.GetMean()
-#     return mean
-# 
-# def imageHistogram(imageData):
-#     """Creates a histogram of the input image data, ignoring zero values.
-#     Returns the mean value of the histogram.
-#     """
-#     accumulate = vtk.vtkImageAccumulate()
-#     accumulate.SetInputData(imageData)
-#     accumulate.IgnoreZeroOn()
-#     accumulate.Update()
-#     image_mean = accumulate.GetMean()[0] # First value in tuple is our result
-#     image_sd = accumulate.GetStandardDeviation()[0]
-#     image_min = accumulate.GetMin()[0]
-#     image_max = accumulate.GetMax()[0]
-#     image_voxel_count = accumulate.GetVoxelCount()
-#     return [image_mean, image_sd, image_min, image_max, image_voxel_count]
-#
-# def icMaterialDensity(material_HU, material_attenuation, water_attenuation, water_density):
-#     """Determines the apparent density for each material.
-#     The first argument is the material HU from ROI.
-#     The second argument is the material attenuation at the effective energy.
-#     The third argument is water's attenuation at the effective energy.
-#     The fourth argument is the assumed density of water at 1.0 g/cc.
-#     Returns the material density.
-#     """
-#     output_density = (material_HU/1000*water_attenuation*water_density + water_attenuation*water_density)/material_attenuation
-#     return output_density
-#
-# def phantomParameters(h2o_density, k2hpo4_density, phantom_HU):
-#     """Determine the slope and y-intercept for the phantom calibration.
-#     The first argument are the phantom specific H2O equivalent density values. The second
-#     argument are the phantom specific K2HPO4 equivalent density values. The third
-#     argument are the phantom rod mean HU values from the image and mask.
-#     Returns the slope and y-intercept for the calibration as a float list.
-#     """
-#     y_values = np.subtract(phantom_HU, h2o_density)
-#     x_values = k2hpo4_density
-#     regression_parameters = stats.linregress(x_values, y_values)
-# 
-#     # convert slope and y-intercept to CT parameters
-#     sigma_ct = regression_parameters[0] - 0.2174
-#     beta_ct = regression_parameters[1] + 999.6
-# 
-#     # Determine calibration parameters
-#     calibration_slope = 1/sigma_ct
-#     calibration_yint = 1*beta_ct/sigma_ct
-#     return {
-#     'Calibration Slope':calibration_slope,
-#     'Calibration Y-Intercept':calibration_yint
-#     }
-# 
-# def phantomParameters_bmas200(cha_density, phantom_HU):
-#     """Determine the slope and y-intercept for the phantom calibration.
-#     The first argument is the phantom specific cha equivalent density values. The second
-#     argument are the phantom rod mean HU values from the image and mask.
-#     Returns the slope and y-intercept for the calibration as a float list.
-#     """
-#     x_values = phantom_HU
-#     y_values = cha_density
-#     regression_parameters = stats.linregress(x_values, y_values)
-# 
-#     # Determine calibration parameters
-#     calibration_slope = regression_parameters[0]
-#     calibration_yint = regression_parameters[1]
-#     return {
-#     'Calibration Slope':calibration_slope,
-#     'Calibration Y-Intercept':calibration_yint
-#     }
-#
-# def readDCM(fileDir):
-#     """Reads a DICOM image from a directory.
-#     The first argument is the image directory.
-#     Returns the image as vtk Output Data.
-#     """
-#     image = vtk.vtkDICOMImageReader()
-#     image.SetDirectoryName(fileDir)
-#     image.Update()
-# 
-#     flip = vtk.vtkImageFlip()
-#     flip.SetInputConnection(image.GetOutputPort())
-#     flip.SetFilteredAxis(1)
-#     flip.Update()
-#     flip2 = vtk.vtkImageFlip()
-#     flip2.SetInputConnection(flip.GetOutputPort())
-#     flip2.SetFilteredAxis(2)
-#     flip2.Update()
-# 
-#     return flip2.GetOutput()
-# 
-# def readNii(filename):
-#     """Reads a NIFTI image.
-#     The first argument is the image filename.
-#     Returns the Image as vtk Output Data
-#     """
-#     image = vtk.vtkNIFTIImageReader()
-#     image.SetFileName(filename)
-#     image.Update()
-#     return image.GetOutput()
+def readNii(filename):
+     """Reads a NIFTI image.
+     The first argument is the image filename.
+     Returns the Image as vtk Output Data
+     """
+     image = vtk.vtkNIFTIImageReader()
+     image.SetFileName(filename)
+     image.Update()
+     return image.GetOutput()

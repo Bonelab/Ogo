@@ -20,7 +20,7 @@ script_version = 1.0
 
 ##
 # Import the required modules
-import ogo.cli.Helper as ogo
+import ogo.util.Helper as ogo
 import os
 import sys
 import argparse
@@ -35,8 +35,15 @@ from ogo.util.echo_arguments import echo_arguments
 
 ##
 # Reference File Associated with this script
-left_femur_reference = "LT_FEMUR_SIDEWAYS_FALL_REF.vtk"
-right_femur_reference = "RT_FEMUR_SIDEWAYS_FALL_REF.vtk"
+# Get the directory of the current script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Navigate to the parent directory and then to 'dat'
+data_dir = os.path.join(script_dir, "../../dat")
+
+# Reference files in the 'dat' directory
+left_femur_reference = os.path.join(data_dir, "LT_FEMUR_SIDEWAYS_FALL_REF.vtk")
+right_femur_reference = os.path.join(data_dir, "RT_FEMUR_SIDEWAYS_FALL_REF.vtk")
 
 
 ##
@@ -70,10 +77,10 @@ def sidewaysFallFe(args):
     mask_basename = os.path.basename(mask)
     script_name = sys.argv[0]
     if femur_side == 1:
-        N88_fileName = mask_basename.replace("_PERI_CORR.nii", "_LT_FEMUR_SF.n88model")
+        N88_fileName = mask_basename.split('.nii')[0]+"_LT_FEMUR_SF.n88model"
         rot_z = 90
     elif femur_side == 2:
-        N88_fileName = mask_basename.replace("_PERI_CORR.nii", "_RT_FEMUR_SF.n88model")
+        N88_fileName = mask_basename.split('.nii')[0]+"_RT_FEMUR_SF.n88model"
         rot_z = -90
 
 
