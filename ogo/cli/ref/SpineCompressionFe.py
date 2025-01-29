@@ -197,14 +197,14 @@ def crop_to_bounding_box(image_data, bb=None):
 
     return crop, bb
 
-def pad_vtk_image(vtk_image, axis='x', thickness=5, pad_value=0):
+def pad_vtk_image(vtk_image, axis='x', pmma_thick=5, pad_value=0):
     """
-    Pad a VTK image along the specified axis with a given thickness while preserving VTK metadata.
+    Pad a VTK image along the specified axis with a given pmma_thick while preserving VTK metadata.
 
     Parameters:
     - vtk_image: The input VTK image to pad.
     - axis: The axis along which to pad ('x', 'y', or 'z').
-    - thickness: Number of voxels to pad on each side along the specified axis.
+    - pmma_thick: Number of voxels to pad on each side along the specified axis.
     - pad_value: The value to pad with (default: 0).
 
     Returns:
@@ -223,7 +223,7 @@ def pad_vtk_image(vtk_image, axis='x', thickness=5, pad_value=0):
 
     # Define the padding configuration
     pad_width = [(0, 0)] * 3  # Default no padding
-    pad_width[extrusion_axis] = (thickness, thickness)  # Apply padding along the target axis
+    pad_width[extrusion_axis] = (pmma_thick, pmma_thick)  # Apply padding along the target axis
 
     # Apply padding
     padded_array = np.pad(input_array, pad_width=pad_width, mode='constant', constant_values=pad_value)
@@ -234,7 +234,7 @@ def pad_vtk_image(vtk_image, axis='x', thickness=5, pad_value=0):
     spacing = vtk_image.GetSpacing()
 
     # Adjust the origin for padding in the negative direction
-    padded_origin[extrusion_axis] -= thickness * spacing[extrusion_axis]
+    padded_origin[extrusion_axis] -= pmma_thick * spacing[extrusion_axis]
 
     # Convert the padded array back to VTK format
     padded_vtk_image = vtk_image.NewInstance()
@@ -331,6 +331,7 @@ def get_icp(body, reference_path):
     icp = vtk.vtkIterativeClosestPointTransform()
     icp.SetTarget(mcubes_output)
     icp.SetSource(reference_bone_reader.GetOutput())
+    
     icp.StartByMatchingCentroidsOn()
     icp.GetLandmarkTransform().SetModeToRigidBody()
     icp.SetMeanDistanceModeToRMS()
@@ -437,7 +438,7 @@ def identify_boundary_surface(input_vtk_image, top_value, bottom_value):
 
     return output_vtk_image
 
-def extrude_disk(boundary_labelled_vtk_image, value, thickness=5, direction='up', axis='x'):
+def extrude_disk(boundary_labelled_vtk_image, value, pmma_thick=5, direction='up', axis='x'):
     """
     Extend the surface along the specified axis by projecting the surface in the
     remaining two axes and filling the bounding box for each slice along the chosen axis.
@@ -446,7 +447,7 @@ def extrude_disk(boundary_labelled_vtk_image, value, thickness=5, direction='up'
     Parameters:
     - boundary_labelled_vtk_image: VTK image with labeled boundary surface.
     - value: Integer value representing the labeled surface to extrude.
-    - thickness: Number of slices to extrude.
+    - pmma_thick: Number of slices to extrude.
     - direction: Direction of extrusion ('up' or 'down').
     - axis: Axis along which to extrude ('x', 'y', 'z').
 
@@ -465,7 +466,7 @@ def extrude_disk(boundary_labelled_vtk_image, value, thickness=5, direction='up'
     # Determine bounding box of the binary mask
     bb = get_bounding_box(binary_mask)
 
-    # Adjust the bounding box based on direction and thickness
+    # Adjust the bounding box based on direction and pmma_thick
     axis_map = {'x': 0, 'y': 1, 'z': 2}
     extrusion_axis = axis_map[axis]
     bb_list = list(bb)  # Convert tuple to list for modification
@@ -473,11 +474,11 @@ def extrude_disk(boundary_labelled_vtk_image, value, thickness=5, direction='up'
     if direction == 'up':
         bb_list[extrusion_axis] = slice(
             bb[extrusion_axis].start, 
-            min(bb[extrusion_axis].stop + thickness, binary_mask.shape[extrusion_axis])
+            min(bb[extrusion_axis].stop + pmma_thick, binary_mask.shape[extrusion_axis])
         )
     elif direction == 'down':
         bb_list[extrusion_axis] = slice(
-            max(bb[extrusion_axis].start - thickness, 0), 
+            max(bb[extrusion_axis].start - pmma_thick, 0), 
             bb[extrusion_axis].stop
         )
     else:
@@ -548,7 +549,9 @@ def convert_image_to_material(image, mask):
     ash_image = ogo.bmd_K2hpo4ToAsh(thr_image)
     cast_image = ogo.cast2short(ash_image)
     bone_image = ogo.applyMask(cast_image, mask)
-    return bone_image
+    binned_image, bin_centers = ogo.density2materialID(bone_image, n_bins=128)
+
+    return binned_image, bin_centers
 
 def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_id, node_set_name):
     visibleNodesIds = vtk.vtkIdTypeArray()
@@ -559,15 +562,19 @@ def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_
     ogo.message(f"Found {visibleNodesIds.GetNumberOfTuples()} visible nodes for {node_set_name}.")
     return model 
 
-def apply_boundary_conditions(model):
+def apply_boundary_conditions(model,**kwargs):
+
+    fe_displacement = kwargs.get("fe_displacement", -1.0)
+
     ogo.message('Applying boundary conditions...')
-    model.ApplyBoundaryCondition("body_top", vtkbone.vtkboneConstraint.SENSE_Z, -0.01, "top_displacement")
+    model.ApplyBoundaryCondition("body_top", vtkbone.vtkboneConstraint.SENSE_Z, fe_displacement, "top_displacement")
     model.ApplyBoundaryCondition("body_bottom", vtkbone.vtkboneConstraint.SENSE_Z, 0, "bottom_fixed_z")
     return model
 
 def create_microfe_model(
     image_with_pads,
     boundary_masks_with_pads,
+    bin_centers,
     **kwargs
 ):
     """
@@ -622,15 +629,19 @@ def create_microfe_model(
     temp_bc_mesh = ogo.Image2Mesh(conn_bc)
 
     ogo.message("Setting up the Finite Element Material Table...")
-    material_table = ogo.materialTable(
-        mesh,
-        poissons_ratio,
-        elastic_Emax,
-        elastic_exponent,
-        pmma_mat_id,
-        pmma_E,
-        pmma_v
-    )
+    material_table = vtkbone.vtkboneMaterialTable()
+    material_table = ogo.add_bone_material(material_table, bin_centers, elastic_Emax=elastic_Emax, elastic_exponent=elastic_exponent, mu=poissons_ratio)
+    material_table = ogo.add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v)
+    
+ #   material_table = ogo.materialTable(
+ #       mesh,
+ #       poissons_ratio,
+ #       elastic_Emax,
+ #       elastic_exponent,
+ #       pmma_mat_id,
+ #       pmma_E,
+ #       pmma_v
+ #   )
 
     ogo.message("Constructing the Finite Element Model...")
     model = ogo.applyTestBase(mesh, material_table)
@@ -639,7 +650,7 @@ def create_microfe_model(
     ogo.message(f"Identifying boundary nodes...")
     model = find_and_add_visible_nodes(model, temp_bc_mesh, top_direction, top_node_set_id, top_node_set_name)
     model = find_and_add_visible_nodes(model, temp_bc_mesh, bottom_direction, bottom_node_set_id, bottom_node_set_name)
-    model = apply_boundary_conditions(model)
+    model = apply_boundary_conditions(model,**kwargs)
 
     ogo.message(f"Setting convergence criteria...")
     model.ConvergenceSetFromConstraint(top_displacement)
@@ -795,7 +806,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     
     pmma_mat_id = kwargs.get("pmma_mat_id", 5000)
     iso_resolution = kwargs.get("iso_resolution", 1.0)
-    thickness = kwargs.get("thickness", 5)
+    pmma_thick = kwargs.get("pmma_thick", 5)
     top_node_set_id = kwargs.get("top_node_set_id", 4)
     bottom_node_set_id = kwargs.get("bottom_node_set_id", 3)
     quality_control = kwargs.get("quality_control", True)
@@ -843,17 +854,17 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     
     ogo.message(f"converting image to material ID...")
     # This converts the raw image to a material ID mapped image
-    bone_image = convert_image_to_material(transformed_image.GetOutput(), combined_masks.GetOutput())
+    bone_image, bin_centers = convert_image_to_material(transformed_image.GetOutput(), combined_masks.GetOutput())
     
     ogo.message(f"padding images...")
-    # Pad images before we add the disks (otherwise they may not have right thickness)
-    padded_image = pad_vtk_image(bone_image, axis='x', thickness=thickness, pad_value=0)
-    padded_mask = pad_vtk_image(boundary_masks, axis='x', thickness=thickness, pad_value=0)
+    # Pad images before we add the disks (otherwise they may not have right pmma_thick)
+    padded_image = pad_vtk_image(bone_image, axis='x', pmma_thick=pmma_thick, pad_value=0)
+    padded_mask = pad_vtk_image(boundary_masks, axis='x', pmma_thick=pmma_thick, pad_value=0)
 
-    ogo.message(f"extruding boundary diks (thickness > {thickness} mm)...")
+    ogo.message(f"extruding boundary diks (pmma_thick > {pmma_thick} mm)...")
     # Generate disks for the top and bottom surfaces (this could be easily changed to have no disk)
-    inferior_disk = extrude_disk(padded_mask, value=bottom_node_set_id, thickness=thickness, direction='down', axis='x')
-    superior_disk = extrude_disk(padded_mask, value=top_node_set_id, thickness=thickness, direction='up', axis='x')
+    inferior_disk = extrude_disk(padded_mask, value=bottom_node_set_id, pmma_thick=pmma_thick, direction='down', axis='x')
+    superior_disk = extrude_disk(padded_mask, value=top_node_set_id, pmma_thick=pmma_thick, direction='up', axis='x')
 
     ogo.message(f"merging disks with image...")
     # Now we create the image with the disks and the boundary image as well
@@ -866,7 +877,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     # This is the final model that we will use for the FEA. 
     # For the future --> pull out material table to have option without disks
     ogo.message("generating n88model file...")
-    model = create_microfe_model(image_with_pads, boundary_masks_with_pads)
+    model = create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers)
 
     # Quality control and output. If quality control is activated output only provided if it passes
     if quality_control:
@@ -918,7 +929,7 @@ def main():
         5) Bone Poissons ratio
         6) PMMA Elastic Modulus
         7) PMMA Poissons ratio
-        8) PMMA thickness
+        8) PMMA pmma_thick
         9) PMMA material ID
         10) FE displacement
 
@@ -927,16 +938,16 @@ def main():
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
-        prog="ogoL4CompressionFe",
+        prog="OgoSpineCompressionFe",
         description=description
     )
 
     parser.add_argument("calibrated_image", help="*_K2HPO4.nii image file")
     parser.add_argument("bone_mask", help="*_MASK.nii mask image of bone")
 
-    parser.add_argument("--vertebral_body_label", type=int, required=True,
+    parser.add_argument("--mask_threshold", type=int, required=True,
                         help="Label value for the vertebral body in the bone mask.")
-    parser.add_argument("--vertebral_process_label", type=int, required=True,
+    parser.add_argument("--process_mask_threshold", type=int, required=True,
                         help="Label value for the vertebral process in the bone mask.")
     parser.add_argument("--output_path", type=str, default=None,
                         help="Set output path for the N88 model file. (default: same as input image)")
@@ -954,9 +965,9 @@ def main():
                         help="Sets the Elastic Modulus for PMMA caps in the FE model. (default: %(default)s [MPa])")
     parser.add_argument("--pmma_v", type=float, default=0.3,
                         help="Sets the Poisson's ratio for the PMMA material(s) in the FE model. (default: %(default)s)")
-    parser.add_argument("--thickness", type=int, default=3,
-                        help="Sets the minimum thickness for PMMA caps in the FE model. (default: %(default)s [mm])")
-    parser.add_argument("--pmma_mat_id", type=int, default=10000,
+    parser.add_argument("--pmma_thick", type=int, default=3,
+                        help="Sets the minimum pmma_thick for PMMA caps in the FE model. (default: %(default)s [mm])")
+    parser.add_argument("--pmma_mat_id", type=int, default=5000,
                         help="Sets the material ID for the PMMA blocks. (default: %(default)s)")
     parser.add_argument("--fe_displacement", type=float, default=-1.0,
                         help="Sets the applied displacement in [mm] to the FE model. (default: %(default)s [mm])")
@@ -970,7 +981,7 @@ def main():
     args = parser.parse_args()
 
     # Print arguments
-    ogo.message(echo_arguments('Vertebra FE', vars(args)))
+    ogo.message(echo_arguments('OgoSpineCompressionFe', vars(args)))
 
     # Prepare the output file
     basename = remove_extension(os.path.basename(args.calibrated_image))
@@ -980,7 +991,9 @@ def main():
     else:
         output_dir = args.output_path
     
-    output_file = os.path.join(output_dir, f"{basename}_vertebra_{args.vertebral_body_label}.n88model")
+    output_dir = os.path.abspath(output_dir)
+
+    output_file = os.path.join(output_dir, f"{basename}_vertebra_{args.mask_threshold}.n88model")
 
     # Set default reference path if not provided
     reference_path = args.reference_path
@@ -993,8 +1006,8 @@ def main():
     kwargs = vars(args).copy()  # Convert parsed arguments to a dictionary
     kwargs.pop("calibrated_image")  # Remove positional argument
     kwargs.pop("bone_mask")  # Remove positional argument
-    kwargs.pop("vertebral_body_label")  # Remove required argument
-    kwargs.pop("vertebral_process_label")  # Remove required argument
+    kwargs.pop("mask_threshold")  # Remove required argument
+    kwargs.pop("process_mask_threshold")  # Remove required argument
     kwargs.pop("reference_path")  # Ensure updated reference path
 
     # Run the vertebra processing
@@ -1002,8 +1015,8 @@ def main():
         args.bone_mask,
         args.calibrated_image,
         output_file,
-        args.vertebral_body_label,
-        args.vertebral_process_label,
+        args.mask_threshold,
+        args.process_mask_threshold,
         reference_path,
         **kwargs  # Pass remaining arguments as kwargs
     )

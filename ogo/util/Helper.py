@@ -1248,6 +1248,8 @@ def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat
     The 6th is the pmma elastic modulus.
     The 7th is the pmma poissons ratio.
     Returns the Finite Element Material Table.
+
+    This does not work with PISTOIA postprocessing - Matthias Walle 01/2025
     """
     # Initialize the material table
     material_table = vtkbone.vtkboneMaterialTable()
@@ -1264,7 +1266,7 @@ def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat
     # Determine maximum material ID: exclude PMMA
     values = vtk_to_numpy(mesh.GetCellData().GetScalars())
     max_id = int(max(values))
-    # message("Maximum ID: %d" % max_id)
+    message("Maximum ID: %d" % max_id)
 
     # Create array of Young's Modulus values
     bone_E = np.arange(1, max_id + 2, dtype=np.float32)
@@ -1279,11 +1281,11 @@ def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat
         # Power law density-Elastic Modulus conversion. Requires Density in [g/cc], not [mg/cc].
         den_bin_step = 0.001
         den = i * den_bin_step
-        # message("Calculated density: %8.4f" % den)
+        message("Calculated density: %8.4f" % den)
         modulus = elastic_Emax * math.pow(den, elastic_exponent)
-        # message("Calculated Elastic Modulus: %8.4f" % modulus)
+        message("Calculated Elastic Modulus: %8.4f" % modulus)
         bone_E[i] = modulus
-        # message("ID:%d; Density(g/cc):%8.4f; Modulus(MPa):%8.4f" % (i, den, modulus))
+        message("ID:%d; Density(g/cc):%8.4f; Modulus(MPa):%8.4f" % (i, den, modulus))
 
     # Convert these numpy arrays to VTK arrays
     bone_E_vtk = numpy_to_vtk(bone_E, deep=True, array_type=vtk.VTK_FLOAT)
@@ -1296,6 +1298,106 @@ def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat
 
     # Add the material array to the material table
     material_table.AddMaterial(1, bone_material_array)
+    return material_table
+
+def density2materialID(density_image, n_bins=128):
+    """
+    Bins the density values from a VTK image into specified bins while keeping the background (0) unchanged.
+
+    Parameters:
+        density_image (vtkImageData): VTK image containing density values.
+        n_bins (int): Number of bins for density values.
+
+    Returns:
+        vtkImageData: Binned image with material IDs (0 for background, 1 to n_bins for other densities).
+        np.ndarray: Bin center values representing the densities for each bin.
+    """
+    # Extract the density values as a numpy array
+    density_array = vtk_to_numpy(density_image.GetPointData().GetScalars())
+
+    # Preserve the background (values equal to 0)
+    background_mask = density_array == 0
+
+    # Determine the density range, excluding background
+    density_nonzero = density_array[~background_mask]
+    density_min = np.min(density_nonzero)
+    density_max = np.max(density_nonzero)
+
+    # Create bin edges and bin centers
+    bin_edges = np.linspace(density_min, density_max, n_bins + 1)
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+    # Bin the non-background density values to create material IDs
+    binned_values = np.digitize(density_array, bin_edges, right=False)
+    binned_values = np.clip(binned_values, 1, n_bins)  # Ensure IDs are within 1 to n_bins
+
+    # Restore background values to 0
+    binned_values[background_mask] = 0
+
+    # Convert the binned values back to a VTK array
+    binned_vtk = numpy_to_vtk(binned_values, deep=True)
+    binned_image = vtk.vtkImageData()
+    binned_image.DeepCopy(density_image)
+    binned_image.GetPointData().SetScalars(binned_vtk)
+
+    return binned_image, bin_centers
+
+def add_bone_material(material_table, bin_centers, elastic_Emax=10500, elastic_exponent=2.29, mu=0.3):
+    """
+    Adds bone material properties to a VTK material table based on density bins.
+
+    Parameters:
+        material_table (vtkbone.vtkboneMaterialTable): The material table to populate.
+        bin_centers (np.ndarray): Array of density values !! IN MG/CCM !!for each bin.
+        elastic_Emax (float): Maximum elastic modulus (MPa).
+        elastic_exponent (float): Exponent for power-law calculation of modulus.
+        mu (float): Constant Poisson's ratio for all materials.
+
+    Returns:
+        vtkbone.vtkboneMaterialTable: The updated material table with bone properties.
+    """
+    # Loop through each density bin
+    for i, density in enumerate(bin_centers, start=1):
+        # Calculate Young's modulus using the power-law formula (Converting to G/CCM)
+        E = elastic_Emax * ((density/1000) ** elastic_exponent)
+
+        message("ID:%d; Density(g/cc):%8.4f; Modulus(MPa):%8.4f" % (i, density/1000, E))
+
+        # Create a linear isotropic material with calculated properties
+        bone_material = vtkbone.vtkboneLinearIsotropicMaterial()
+        bone_material.SetYoungsModulus(E)
+        bone_material.SetPoissonsRatio(mu)
+
+        # Set a dynamic name for the material
+        bone_material.SetName(f"BoneMaterial{i}")
+
+        # Add material to the table with an ID corresponding to the bin index
+        material_table.AddMaterial(i, bone_material)
+
+    return material_table
+
+def add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v):
+    """
+    Adds a PMMA material to the provided material table.
+
+    Parameters:
+        material_table (vtkbone.vtkboneMaterialTable): The material table to populate.
+        pmma_mat_id (int): The material ID for PMMA.
+        pmma_E (float): Young's modulus for PMMA (MPa).
+        pmma_v (float): Poisson's ratio for PMMA.
+
+    Returns:
+        vtkbone.vtkboneMaterialTable: The updated material table with the PMMA material.
+    """
+    # Create PMMA material
+    pmma_material = vtkbone.vtkboneLinearIsotropicMaterial()
+    pmma_material.SetName("PMMA")
+    pmma_material.SetYoungsModulus(pmma_E)
+    pmma_material.SetPoissonsRatio(pmma_v)
+
+    # Add the PMMA material to the material table
+    material_table.AddMaterial(pmma_mat_id, pmma_material)
+
     return material_table
 
 

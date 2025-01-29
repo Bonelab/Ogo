@@ -33,17 +33,12 @@ import vtkbone
 
 from ogo.util.echo_arguments import echo_arguments
 
-##
-# Reference File Associated with this script
-# Get the directory of the current script
-script_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Navigate to the parent directory and then to 'dat'
-data_dir = os.path.join(script_dir, "../../dat")
-
-# Reference files in the 'dat' directory
-left_femur_reference = os.path.join(data_dir, "LT_FEMUR_SIDEWAYS_FALL_REF.vtk")
-right_femur_reference = os.path.join(data_dir, "RT_FEMUR_SIDEWAYS_FALL_REF.vtk")
+def remove_extension(filename):
+    while True:
+        filename, ext = os.path.splitext(filename)
+        if not ext:
+            break
+    return filename
 
 
 ##
@@ -57,7 +52,7 @@ def sidewaysFallFe(args):
     mask = args.bone_mask
 
     mask_threshold = args.mask_threshold
-    isotropic_voxel = args.isotropic_voxel
+    iso_resolution = args.iso_resolution
     femur_side = args.femur_side
     elastic_exponent = args.elastic_exponent
     elastic_Emax = args.elastic_Emax
@@ -67,8 +62,9 @@ def sidewaysFallFe(args):
     pmma_thick = args.pmma_thick
     pmma_mat_id = args.pmma_mat_id
     fe_displacement = args.fe_displacement
-
-
+    left_femur_reference = args.left_femur_reference
+    right_femur_reference = args.right_femur_reference
+    output_file = args.output_file
     ##
     # Determine image locations and names of files
     image_pathname = os.path.dirname(image)
@@ -76,11 +72,13 @@ def sidewaysFallFe(args):
     mask_pathname = os.path.dirname(mask)
     mask_basename = os.path.basename(mask)
     script_name = sys.argv[0]
+    
+    
     if femur_side == 1:
-        N88_fileName = mask_basename.split('.nii')[0]+"_LT_FEMUR_SF.n88model"
+        N88_fileName = output_file.replace('.n88model',"_LT_FEMUR_SF.n88model")
         rot_z = 90
     elif femur_side == 2:
-        N88_fileName = mask_basename.split('.nii')[0]+"_RT_FEMUR_SF.n88model"
+        N88_fileName = output_file.replace('.n88model',"_RT_FEMUR_SF.n88model")
         rot_z = -90
 
 
@@ -90,7 +88,7 @@ def sidewaysFallFe(args):
     ogo.message("Image File: %s" % image_basename)
     ogo.message("Mask Path: %s" % mask_pathname)
     ogo.message("Mask File: %s" % mask_basename)
-    ogo.message("Isotropic Voxel Size: %8.4f" % isotropic_voxel)
+    ogo.message("Isotropic Voxel Size: %8.4f" % iso_resolution)
     if femur_side == 1:
         ogo.message("Femur Side for Model: Left")
     elif femur_side == 2:
@@ -121,8 +119,8 @@ def sidewaysFallFe(args):
     ##
     # Resampling the images to isotropic voxel size
     ogo.message("Resampling the Input image and bone mask to isotropic...")
-    image_resample = ogo.imageResample(imageData, isotropic_voxel)
-    mask_resample = ogo.imageResample(maskThres, isotropic_voxel)
+    image_resample = ogo.imageResample(imageData, iso_resolution)
+    mask_resample = ogo.imageResample(maskThres, iso_resolution)
 
     ##
     # Pre-rotate the image and mask for better alignment
@@ -169,13 +167,16 @@ def sidewaysFallFe(args):
     # K2HPO4 den = -31 mg/cc => Ash den = 6 mg/cc => E = 0.1 MPa
     image_thres = ogo.bmd_preprocess(image_trans, -31)
     image_ash = ogo.bmd_K2hpo4ToAsh(image_thres)
+    
+    binned_image, bin_centers = ogo.density2materialID(image_ash, n_bins=128)
 
     ##
     # Set up the FE model.
     ogo.message("Setting up the Finite Element Model...")
     # Cast the image to Short to "round" float values to nearest whole number
-    cast_image = ogo.cast2short(image_ash)
+    cast_image = ogo.cast2short(binned_image)
     cast_mask = ogo.cast2unsignchar(mask_trans)
+
 
     # Apply the mask to the bone
     ogo.message("Applying the bone mask to the image...")
@@ -184,6 +185,7 @@ def sidewaysFallFe(args):
     # Ensure connectivity
     ogo.message("Performing Image connectivity...")
     conn = ogo.imageConnectivity(bone_image)
+
 
     change = ogo.changeInfo(conn)
 
@@ -194,15 +196,11 @@ def sidewaysFallFe(args):
     ##
     # Set up the Material Table
     ogo.message("Setting up the Finite Element Material Table...")
-    material_table = ogo.materialTable(
-        mesh,
-        poissons_ratio,
-        elastic_Emax,
-        elastic_exponent,
-        pmma_mat_id,
-        pmma_E,
-        pmma_v
-    )
+    material_table = vtkbone.vtkboneMaterialTable()
+    material_table = ogo.add_bone_material(material_table, bin_centers, elastic_Emax=elastic_Emax, elastic_exponent=elastic_exponent, mu=poissons_ratio)
+    material_table = ogo.add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v)
+    
+
 
     ##
     # Create the preliminary FE model
@@ -435,7 +433,7 @@ def sidewaysFallFe(args):
         "Femoral_Head_PMMA_Nodes",
         vtkbone.vtkboneConstraint.SENSE_Y,
         0,
-        "Femoral_Head_PMMA_Y_Fixed")
+        "bottom_fixed_z_PMMA")
 
     # - Greater Trochanter PMMA Cap BCs
     ogo.message("Applying boundary conditions to Greater Trochanter PMMA cap...")
@@ -443,7 +441,7 @@ def sidewaysFallFe(args):
         "Greater_Trochanter_PMMA_Nodes",
         vtkbone.vtkboneConstraint.SENSE_Y,
         fe_displacement,
-        "Greater_Trochanter_PMMA_Y_Displacement")
+        "top_displacement")
 
     # - Distal Femur fixed in z-axis
     ogo.message("Applying boundary conditions to Distal Femur...")
@@ -451,7 +449,7 @@ def sidewaysFallFe(args):
         "Distal_Femur_Nodes",
         vtkbone.vtkboneConstraint.SENSE_Z,
         0,
-        "Distal_Femur_Z_Fixed")
+        "bottom_fixed_z")
 
     ##
     # Post Processing parameters
@@ -508,7 +506,7 @@ This script sets up the sideways fall FE model on the hip from the
     # Setup argument parsing
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
-        prog="ogoMindwaysModel3AsyncCalib",
+        prog="OgoSidewaysFallFe",
         description=description
     )
     
@@ -521,10 +519,12 @@ This script sets up the sideways fall FE model on the hip from the
     parser.add_argument("--mask_threshold", type = int,
                         default = 1,
                         help = "Set the threshold value to extract the bone of interest from the mask. (Default: %(default)s)")
-    parser.add_argument("--isotropic_voxel", type = float, default = 1.0,
+    parser.add_argument("--iso_resolution", type = float, default = 1.0,
                         help = "Set the isotropic voxel size [in mm]. (default: %(default)s [mm])")
     parser.add_argument("--femur_side", type = int, default = 1,
                         help = "Set whether the left or right femur is to be analyzed. 1 = Left; 2 = Right. (default: %(default)s)")
+    parser.add_argument("--output_path", type=str, default=None,
+                        help="Set output path for the N88 model file. (default: same as input image)")
     parser.add_argument("--elastic_exponent", type=float, default=2.29,
                         help="Sets the exponent (b) for power law: E=A(den)^b, used in converting material IDS/density to Elastic Moduli value. (default: %(default)s)")
     parser.add_argument("--elastic_Emax", type=float, default=10500,
@@ -541,12 +541,36 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Sets the material ID for the PMMA blocks. (default: %(default)s)")
     parser.add_argument("--fe_displacement", type=float, default=-1.0,
                         help="Sets the applied displacement in [mm] to the FE model. (default: %(default)s [mm])")
-
+    parser.add_argument("--reference_path", type=str, required=False, default=None,
+                        help="Path to the reference vtk file for ICP registration. (default: None)")
 
     # Parse and display
     args = parser.parse_args()
     
-    print(echo_arguments('ogoMindways_sideways_fall_fe', vars(args)))
+    # Set default reference paths
+    # This needs to be aligned to be a "folder" level above between Spine and Femur
+    if args.reference_path is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(script_dir, "../../dat")
+        args.left_femur_reference = os.path.join(data_dir, "LT_FEMUR_SIDEWAYS_FALL_REF.vtk")
+        args.right_femur_reference = os.path.join(data_dir, "RT_FEMUR_SIDEWAYS_FALL_REF.vtk")
+    else:
+        args.left_femur_reference = os.path.join(args.reference_path, "LT_FEMUR_SIDEWAYS_FALL_REF.vtk")
+        args.right_femur_reference = os.path.join(args.reference_path, "RT_FEMUR_SIDEWAYS_FALL_REF.vtk")
+
+
+    basename = remove_extension(os.path.basename(args.calibrated_image))
+
+    if args.output_path is None:
+        output_dir = os.path.dirname(args.calibrated_image)
+    else:
+        output_dir = args.output_path
+    
+    output_dir = os.path.abspath(output_dir)
+
+    args.output_file = os.path.join(output_dir, f"{basename}.n88model")
+
+    print(echo_arguments('ogoSidewaysFallFe', vars(args)))
 
     # Run program
     sidewaysFallFe(args)
