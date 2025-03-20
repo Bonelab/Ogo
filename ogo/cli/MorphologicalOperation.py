@@ -29,8 +29,7 @@ def get_labels(ct):
     return labels
 
 # +------------------------------------------------------------------------------+
-def MorphologicalOperation(input_image, output_image, operation_labels, operation, kernel, overwrite):
-
+def MorphologicalOperation(input_image, output_image, operation_labels, operation, kernel, overwrite, kernels=None):
     # Check if output exists and should overwrite
     if os.path.isfile(output_image) and not overwrite:
         result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_image))
@@ -62,7 +61,14 @@ def MorphologicalOperation(input_image, output_image, operation_labels, operatio
         for label in operation_labels:
             if label not in labels:
                 os.sys.exit('[ERROR] Label {} is not in input file.'.format(label))
-
+    
+    # Validate kernels if mulitple provided
+    if kernels:
+        if len(kernels) != len(operation_labels):
+            os.sys.exit('[ERROR] Number of kernels must match number of operation labels.')
+    else:
+        kernels = [kernel] * len(operation_labels)
+    
     # Set the morphological operation
     ogo.message('Setting morphological operation to: [{}]'.format(operation))
     if operation == 'dilate':
@@ -76,22 +82,23 @@ def MorphologicalOperation(input_image, output_image, operation_labels, operatio
     else:
         os.sys.exit('[ERROR] Unknown morphological operation: {}'.format(operation))
     
-    # Confirm kernel is set properly
-    if kernel<=0:
-        os.sys.exit('[ERROR] Kernel must be positive: {}'.format(kernel))
-    morphFilt.SetKernelRadius(kernel)
-    #morphFilt.SetKernelRadius([0,0,2]) # we could implement a kernel with three components
-
     # Cycle through the labels
     seg = ct<0 # Zero all labels
         
-    for label in labels:
+    for idx, label in enumerate(labels):
         ct_thres = ct==label
         if label in operation_labels:
-            ogo.message('  label {:3d}: {:s}, kernel={:d}'.format(label,operation,kernel))
+            kernel_idx = operation_labels.index(label)
+            current_kernel = kernels[kernel_idx]
+            
+            if current_kernel <= 0:
+                os.sys.exit('[ERROR] Kernel must be positive: {}'.format(current_kernel))
+            
+            morphFilt.SetKernelRadius(current_kernel)
+            ogo.message('  label {:3d}: {:s}, kernel={:d}'.format(label, operation, current_kernel))
             ct_part = morphFilt.Execute(ct_thres)
         else:
-            ogo.message('  label {:3d}: {:s}'.format(label,'skip'))
+            ogo.message('  label {:3d}: {:s}'.format(label, 'skip'))
             ct_part = ct_thres
             
         bin_seg = seg>0
@@ -109,9 +116,8 @@ def MorphologicalOperation(input_image, output_image, operation_labels, operatio
     
     ogo.message('Done.')
     
-    
+
 def main():
-    # Setup description
     description = '''
 Function performs morphological operations. Although it is possible to 
 apply this to images, it is meant for application with labels. The operations
@@ -130,11 +136,10 @@ list.
     epilog = '''
 Example call: 
      
-ogoMorphologicalOperation image_in.nii.gz image_out.nii.gz --operation erode --kernel 2
+ogoMorphologicalOperation image_in.nii.gz image_out.nii.gz --operation erode --operation_labels 1 2 3 --kernels 2 3 4
+ogoMorphologicalOperation image_in.nii.gz image_out.nii.gz --operation erode --operation_labels 1 2 3 --kernel 3
 
 '''
-
-    # Setup argument parsing
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
         prog="ogoMorphologicalOperation",
@@ -147,10 +152,10 @@ ogoMorphologicalOperation image_in.nii.gz image_out.nii.gz --operation erode --k
     parser.add_argument('--operation_labels', type=int, nargs='*', default=[], metavar='LABEL', help='List of labels to apply operation (default: all)')
     parser.add_argument('--operation', default='dilate', choices=['dilate', 'erode', 'opening', 'closing'],
                                                            help='Select morphological operation (default: %(default)s)')
-    parser.add_argument('--kernel', type=int, default=1, metavar='KERNEL',help='Kernel for morphological operation (default: %(default)s)')
+    parser.add_argument('--kernel', type=int, default=1, metavar='KERNEL', help='Default kernel for morphological operation (default: %(default)s)')
+    parser.add_argument('--kernels', type=int, nargs='*', metavar='KERNELS', help='List of kernels for each label (overrides --kernel)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output file without asking')
 
-    # Parse and display
     args = parser.parse_args()
     print(echo_arguments('MorphologicalOperation', vars(args)))
 
