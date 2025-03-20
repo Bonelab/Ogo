@@ -37,7 +37,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
           miniconda-version: "latest"
           activate-environment: test
-          environment-name: test
           channels: numerics88,simpleitk,conda-forge
           auto-activate-base: false
       - name: Create and install dependencies
@@ -45,11 +44,6 @@ jobs:
           conda install -n test n88tools matplotlib pbr nose six simpleitk pydicom gdcm pandas
           conda activate test
           pip install -e .
-      - name: Debug test environment
-        run: |
-          conda activate test
-          which nosetests
-          nosetests --version
       - name: Run tests
         run: |
           conda activate test
