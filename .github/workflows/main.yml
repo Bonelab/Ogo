@@ -46,5 +46,4 @@ jobs:
           pip install -e .
       - name: Run tests
         run: |
-          conda activate test
           nosetests tests
