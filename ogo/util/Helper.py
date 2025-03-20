@@ -23,6 +23,7 @@ from scipy import stats
 import scipy.interpolate as interp
 import SimpleITK as sitk
 import vtk
+
 #import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
@@ -133,6 +134,7 @@ def get_phantom(phantom_type):
 
 def histogram(image, nbins):
     array = vtk_to_numpy(image.GetPointData().GetScalars()).ravel()
+    image_type = image.GetScalarType()
     guard = '!-------------------------------------------------------------------------------'
 
     # Define formatting
@@ -143,26 +145,52 @@ def histogram(image, nbins):
     line_format_bin_edge = '!>  {:>8d} {:>8s} {:>12s}'
     line_skip = '!> ...'
 
-    # Find the range of the data type. Options are:
-    #          wide: -32768 to 32767  (short)
-    #           med:   -128 to   127  (char)
-    #        narrow:      0 to   127  (unsigned char)
+    if image_type is vtk.VTK_CHAR:
+        data_type_minimum = vtk.VTK_CHAR_MIN
+        data_type_maximum = vtk.VTK_CHAR_MAX
+    elif image_type is vtk.VTK_SIGNED_CHAR:
+        data_type_minimum = vtk.VTK_SIGNED_CHAR_MIN
+        data_type_maximum = vtk.VTK_SIGNED_CHAR_MAX
+    elif image_type is vtk.VTK_UNSIGNED_CHAR:
+        data_type_minimum = vtk.VTK_UNSIGNED_CHAR_MIN
+        data_type_maximum = vtk.VTK_UNSIGNED_CHAR_MAX
+    elif image_type is vtk.VTK_SHORT:
+        data_type_minimum = vtk.VTK_SHORT_MIN
+        data_type_maximum = vtk.VTK_SHORT_MAX
+    elif image_type is vtk.VTK_UNSIGNED_SHORT:
+        data_type_minimum = vtk.VTK_UNSIGNED_SHORT_MIN
+        data_type_maximum = vtk.VTK_UNSIGNED_SHORT_MAX
+    elif image_type is vtk.VTK_INT:
+        data_type_minimum = vtk.VTK_INT_MIN
+        data_type_maximum = vtk.VTK_INT_MAX
+    elif image_type is vtk.VTK_UNSIGNED_INT:
+        data_type_minimum = vtk.VTK_UNSIGNED_INT_MIN
+        data_type_maximum = vtk.VTK_UNSIGNED_INT_MAX
+    elif image_type is vtk.VTK_LONG:
+        data_type_minimum = vtk.VTK_LONG_MIN
+        data_type_maximum = vtk.VTK_LONG_MAX
+    elif image_type is vtk.VTK_UNSIGNED_LONG:
+        data_type_minimum = vtk.VTK_UNSIGNED_LONG_MIN
+        data_type_maximum = vtk.VTK_UNSIGNED_LONG_MAX
+    elif image_type is vtk.VTK_FLOAT:
+        data_type_minimum = vtk.VTK_FLOAT_MIN
+        data_type_maximum = vtk.VTK_FLOAT_MAX
+    elif image_type is vtk.VTK_DOUBLE:
+        data_type_minimum = vtk.VTK_DOUBLE_MIN
+        data_type_maximum = vtk.VTK_DOUBLE_MAX
+    else:
+        os.sys.exit('[ERROR] Unknown data type: \"{}\"'.format(image.GetScalarTypeAsString()))
+        
+    message('Data type is {}'.format(image.GetScalarTypeAsString()))
+    message('Data type minimum is {}'.format(data_type_minimum))
+    message('Data type maximum is {}'.format(data_type_maximum))
+
     data_minimum = array.min()
-    if (data_minimum < -128):
-        data_type_minimum = -32768
-    elif (data_minimum < 0):
-        data_type_minimum = -128
-    else:
-        data_type_minimum = 0
-
     data_maximum = array.max()
-    if (data_maximum > 255):
-        data_type_maximum = 32767
-    elif (data_maximum > 127):
-        data_type_maximum = 255
-    else:
-        data_type_maximum = 127
 
+    message('Data minimum is {}'.format(data_minimum))
+    message('Data maximum is {}'.format(data_maximum))
+    
     level_4 = False  # Show every possible value within data type range
     level_3 = False  # Show non-zero range within data type range
     level_2 = False  # Show non-zero range with number_bins fixed
@@ -179,7 +207,7 @@ def histogram(image, nbins):
         number_bins = nbins
 
     # Make sure number of bins isn't greater than the data range
-    data_range_span = data_maximum - data_minimum + 1
+    data_range_span = int(data_maximum - data_minimum + 1)
     if (data_range_span < number_bins):
         number_bins = data_range_span
         print('!> WARNING: Histogram data range reset to {} bins.'.format(number_bins))
@@ -202,14 +230,16 @@ def histogram(image, nbins):
     # print(guard)
     print('!>  Number of bins:            {:8d}'.format(number_bins))
     print('!>  Bin width:                 {:8.3f}'.format(bin_width))
-    print('!>  Data type range: minimum = {:8d}, maximum = {:8d}'.format(data_type_minimum, data_type_maximum))
-    print('!>  Data range:      minimum = {:8d}, maximum = {:8d}'.format(data_minimum, data_maximum))
-    print('!>  Non-zero:          first = {:8d},    last = {:8d}'.format(first_nonzero_idx, last_nonzero_idx))
+    print('!>  Data type range: minimum = {:8}, maximum = {:8}'.format(data_type_minimum, data_type_maximum))
+    print('!>  Data range:      minimum = {:8}, maximum = {:8}'.format(data_minimum, data_maximum))
+    print('!>  Non-zero:          first = {:8},    last = {:8}'.format(first_nonzero_idx, last_nonzero_idx))
     print('!>  ')
     print(line_format_header.format('ImageValue', 'Percent', '#Voxels'))
 
+    ids = []
+      
     for idx in range(number_bins):
-
+            
         if (level_4):
             image_value = idx + data_type_minimum
             number_voxels = image_histogram[idx]
@@ -251,6 +281,11 @@ def histogram(image, nbins):
                 bin_edge = int(((idx + 1) * bin_width) + data_minimum)
                 print(line_format_bin_edge.format(bin_edge, '-----', '-----'))
 
+        if number_voxels>0:
+            ids.append(image_value)
+        else:
+            ids.append(0)
+        
         total_percent += percent_number_voxels
         total_voxels += number_voxels
 
@@ -261,8 +296,9 @@ def histogram(image, nbins):
         print('!> WARNING: Not all voxels in the image were included in the histogram.')
         print('!>          Image voxel count     = {}.'.format(len(array)))
         print('!>          Histogram voxel count = {}.'.format(total_voxels))
-
-
+    print('!> labels: ' + ','.join('{}'.format(i) for i in ids))
+    print(guard)
+    
 def aix(infile, image):
     guard = '!-------------------------------------------------------------------------------'
     phys_dim = [x * y for x, y in zip(image.GetDimensions(), image.GetSpacing())]
@@ -473,7 +509,7 @@ def find_executable(executable, path=None):
     if os.name == 'os2':
         (base, ext) = os.path.splitext(executable)
         # executable files on OS/2 can have an arbitrary extension, but
-        # .exe is automatically appended if no dot is present in the name
+        # .exe is automatically appended if no dot is nonzero in the name
         if not ext:
             executable = executable + ".exe"
     elif sys.platform == 'win32':
