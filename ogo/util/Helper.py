@@ -136,7 +136,6 @@ def get_phantom(phantom_type):
         calibration_dict['densities'] = [0, 200]
         calibration_dict['h2o_densities'] = [None]
 
-
     else:
         # TODO - should raise an exception rather than sys.exit
         os.sys.exit('[ERROR] Cannot find appropriate phantom density for \"{}\"'.format(phantom_type))
