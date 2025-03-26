@@ -651,7 +651,7 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
-    parser_internal.add_argument('--corticalbone', type=int, default=2,
+    parser_internal.add_argument('--corticalbone', type=int, default=None,
                                  help='Define which segmentation label to use to define cortical bone. Default is 2 (left femur).')
     parser_internal.add_argument('--tissue_checks', action='store_true', 
                                 help='Use when you would like to perform checks on whether the calibration tissues are within expected HU range. ')
