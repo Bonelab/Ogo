@@ -125,6 +125,18 @@ def get_phantom(phantom_type):
         calibration_dict['densities'] = [0, 50, 100, 150, 200]
         calibration_dict['h2o_densities'] = [None]
 
+    elif phantom_type in 'Siemens-Osteo':
+        calibration_dict['name'] = 'Siemens-Osteo'
+        calibration_dict['units'] = 'mg/cc'
+        calibration_dict['type'] = 'CHA'
+        calibration_dict['serial'] = 'unknown'
+        calibration_dict['number_rods'] = 2
+        calibration_dict['rod_labels'] = [171, 172]
+        calibration_dict['rod_names'] = ['A', 'B']
+        calibration_dict['densities'] = [0, 200]
+        calibration_dict['h2o_densities'] = [None]
+
+
     else:
         # TODO - should raise an exception rather than sys.exit
         os.sys.exit('[ERROR] Cannot find appropriate phantom density for \"{}\"'.format(phantom_type))
