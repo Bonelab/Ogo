@@ -5,6 +5,7 @@ click
 # Image processing
 simpleitk
 numpy
+opencv-python
 
 # Statistics
 scipy
