@@ -398,8 +398,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                 os.sys.exit('[ERROR] Invalid label selected: ({})'.format(labelID))
             labelList.append(labelID)
     else:
-        labelList = [91, 92, 93, 94, 95]
-
+        labelList = [v for k, v in labels.items() if labels_data[k]['count'] > 0]
+        
     if (len(labelList) < 3):
         os.sys.exit('[ERROR] A minimum of three sample tissues needed.')
 
