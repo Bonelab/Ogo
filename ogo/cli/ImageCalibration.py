@@ -34,6 +34,7 @@ from ogo.calib.standard_calibration import StandardCalibration
 import ogo.util.Helper as ogo
 from ogo.util.echo_arguments import echo_arguments
 from ogo.util.write_txt import write_txt
+from ogo.util.Helper import reapply_internal_calibration_from_txt 
 
 
 # PHANTOM CALIBARATION ------------------------------------------------------------------
@@ -292,8 +293,13 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     if not os.path.isfile(input_mask):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_mask))
 
-    if not (input_mask.lower().endswith('.nii') or input_mask.lower().endswith('.nii.gz')):
-        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_mask))
+    if input_mask.lower().endswith('.txt'):
+        ogo.message("Detected calibration file as input. Reapplying calibration directly from txt.")
+        den = reapply_internal_calibration_from_txt(input_image, input_mask, output_image)
+        ogo.message('Done internal calibration.')
+        return  # Skip the rest of the function
+    elif not (input_mask.lower().endswith('.nii') or input_mask.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file or calibration .txt file: \"{}\"'.format(input_mask))
 
     ogo.message('Reading input mask used for calibration:')
     ogo.message('      \"{}\"'.format(input_mask))
