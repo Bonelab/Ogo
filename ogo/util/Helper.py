@@ -23,11 +23,14 @@ from scipy import stats
 import scipy.interpolate as interp
 import SimpleITK as sitk
 import vtk
+import re
+from pathlib import Path
 
 #import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
 import ogo.dat.OgoMasterLabels as lb
+from ogo.calib.internal_calibration import InternalCalibration
 
 start_time = time.time()
 
@@ -1596,6 +1599,79 @@ def add_to_filename(filepath, suffix):
     new_file_path = os.path.join(directory, filename)
 
     return new_file_path
+
+def reapply_internal_calibration_from_txt(input_image_path, calib_txt_path, output_image_path=None):
+    """
+    Uses values from a calibration .txt file to reapply internal calibration to a CT image.
+    Leverages ogo's InternalCalibration class and logic.
+
+    Parameters:
+        input_image_path (str): Path to the HU image (.nii or .nii.gz)
+        calib_txt_path (str): Path to the ogo-generated calibration text file
+        output_image_path (str, optional): Path to save the calibrated output image
+
+    Returns:
+        sitk.Image: Calibrated density image (mg/cc)
+    """
+
+    def extract(label, text):
+        match = re.search(rf'{re.escape(label)}\s+([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)', text)
+        if not match:
+            raise ValueError(f"{label} not found in calibration file.")
+        return float(match.group(1))
+
+    # Read calibration file
+    with open(calib_txt_path, 'r') as f:
+        contents = f.read()
+
+    # Extract HU means
+    adipose_hu   = extract("Adipose", contents)
+    air_hu       = extract("Air", contents)
+    blood_hu     = extract("Blood", contents)
+    bone_hu      = extract("Cortical Bone", contents)
+    muscle_hu    = extract("Skeletal Muscle", contents)
+
+    # Extract labels used
+    label_list = []
+    label_map = {
+        "Adipose": 91,
+        "Air": 92,
+        "Blood": 93,
+        "Cortical Bone": 94,
+        "Skeletal Muscle": 95
+    }
+    for name, label_id in label_map.items():
+        pattern = rf"{name}.*\[\s*(used|not used)\s*\]"
+        match = re.search(pattern, contents)
+        if match and match.group(1).strip() == 'used':
+            label_list.append(label_id)
+
+    if len(label_list) < 3:
+        raise ValueError("At least three tissues must have been used in the original calibration.")
+
+    # Load input image
+    hu_img = sitk.ReadImage(input_image_path, sitk.sitkFloat64)
+    voxel_volume = np.prod(hu_img.GetSpacing())
+
+    # Reconstruct calibration object
+    calib = InternalCalibration(
+        adipose_hu=adipose_hu,
+        air_hu=air_hu,
+        blood_hu=blood_hu,
+        bone_hu=bone_hu,
+        muscle_hu=muscle_hu,
+        label_list=label_list
+    )
+    calib.fit()
+
+    # Predict calibrated image
+    density_img, _ = calib.predict(hu_img, voxel_volume)
+
+    if output_image_path:
+        sitk.WriteImage(density_img, output_image_path)
+        print(f"Calibrated image saved to {output_image_path}")
+
+    return density_img
 
 # def writeN88Model(model, fileName, pathname):
 #     """Writes out a N88Model.
