@@ -27,6 +27,7 @@ import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
 import ogo.dat.OgoMasterLabels as lb
+import ogo.cli.ref.material_laws 
 
 start_time = time.time()
 
@@ -152,7 +153,7 @@ def get_phantom(phantom_type):
     return calibration_dict
 
 
-def histogram(image, nbins):
+def histogram(image, n_bins):
     array = vtk_to_numpy(image.GetPointData().GetScalars()).ravel()
     guard = '!-------------------------------------------------------------------------------'
 
@@ -197,7 +198,7 @@ def histogram(image, nbins):
         data_range = [data_type_minimum, data_type_maximum]
     if (level_2 or level_1):
         data_range = [data_minimum, data_maximum]
-        number_bins = nbins
+        number_bins = n_bins
 
     # Make sure number of bins isn't greater than the data range
     data_range_span = data_maximum - data_minimum + 1
@@ -748,6 +749,90 @@ def extractBox(extraction_bounds, model):
 
 
 def femoralHeadPMMA(femoral_head_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
+    """Creates the image data for the femoral head PMMA cap with a rounded bottom (cylindrical shape).
+    
+    The arguments are:
+    - femoral_head_model_bounds: Boundaries of the femoral head model
+    - spacing: Image voxel spacing
+    - origin: Image origin
+    - inval: Inside PMMA value
+    - outval: Outside PMMA value
+    - thickness: PMMA padding thickness
+    - pmma_mat_id: Material ID for PMMA
+    
+    Returns:
+    - vtkImageData with the bottom PMMA pad rounded as a cylinder.
+    """
+
+    ##
+    # Create vtkImageData for femoral head PMMA capping
+    fh_pmma_id = vtk.vtkImageData()
+    fh_pmma_id.SetSpacing(spacing)
+    fh_pmma_id.SetExtent(
+        int(femoral_head_model_bounds[0] / spacing[0]),
+        int(femoral_head_model_bounds[1] / spacing[0]),
+        int(femoral_head_model_bounds[2] / spacing[1]),
+        int(femoral_head_model_bounds[3] / spacing[1]),
+        int(femoral_head_model_bounds[4] / spacing[2]),
+        int(femoral_head_model_bounds[5] / spacing[2])
+    )
+    fh_pmma_id.SetOrigin(origin)
+    fh_pmma_id.AllocateScalars(vtk.VTK_SHORT, 1)
+
+    ##
+    # Create numpy array of PMMA cap to convert to vtkImageData
+    fh_pmma_np = np.empty(fh_pmma_id.GetDimensions())
+    fh_pmma_np.fill(inval)
+
+    ##
+    # Import Numpy array to vtk
+    vtk_data = numpy_to_vtk(
+        num_array=fh_pmma_np.ravel(),
+        deep=True,
+        array_type=vtk.VTK_SHORT
+    )
+    fh_pmma_id.GetPointData().SetScalars(vtk_data)
+
+    ##
+    # Pad Image with extra thickness
+    extent2 = fh_pmma_id.GetExtent()
+
+    fh_pmma_id_pad = vtk.vtkImageConstantPad()
+    fh_pmma_id_pad.SetInputData(fh_pmma_id)
+    fh_pmma_id_pad.SetOutputWholeExtent(
+        extent2[0], extent2[1],  # X extent unchanged
+        extent2[2] - thickness, extent2[3],  # Y min reduced (negative direction)
+        extent2[4], extent2[5]  # Z extent unchanged
+    )
+    fh_pmma_id_pad.SetConstant(pmma_mat_id)
+    fh_pmma_id_pad.Update()
+
+    # Create a cylinder for the bottom padding
+    cylinder = vtk.vtkCylinder()
+    cylinder.SetCenter(
+        (extent2[0] + extent2[1]) * 0.5 * spacing[0] + origin[0],  # Center in X
+        (extent2[2] - thickness) * spacing[1] + origin[1],  # Bottom Y position
+        (extent2[4] + extent2[5]) * 0.5 * spacing[2] + origin[2]   # Center in Z
+    )
+    cylinder.SetRadius((extent2[1] - extent2[0]) * 0.3 * spacing[0])  # Approximate radius
+    cylinder.SetAxis(0, 1, 0)  # Aligned with Y-axis
+
+    # Apply Boolean intersection to make the bottom part rounded
+    stencil = vtk.vtkImplicitFunctionToImageStencil()
+    stencil.SetInput(cylinder)
+    stencil.SetOutputWholeExtent(fh_pmma_id_pad.GetOutputWholeExtent())
+    stencil.Update()
+
+    stencil_filter = vtk.vtkImageStencil()
+    stencil_filter.SetInputData(fh_pmma_id_pad.GetOutput())
+    stencil_filter.SetStencilData(stencil.GetOutput())
+    stencil_filter.ReverseStencilOff()
+    stencil_filter.SetBackgroundValue(outval)
+    stencil_filter.Update()
+
+    return stencil_filter.GetOutput()
+
+def femoralHeadPMMA_square(femoral_head_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
     """Creates the image data for the femoral head PMMA cap.
     The arguments are the femoral head model bounds, image spacing, image origin, in value of pmma, out value for pmma, pmma thickness and pmma material ID.
     Returns the Femoral Head PMMA padded image.
@@ -1300,7 +1385,7 @@ def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat
     material_table.AddMaterial(1, bone_material_array)
     return material_table
 
-def density2materialID(density_image, n_bins=128):
+def density2materialID(density_image, n_bins=128, cort_mask=None):
     """
     Bins the density values from a VTK image into specified bins while keeping the background (0) unchanged.
 
@@ -1314,7 +1399,6 @@ def density2materialID(density_image, n_bins=128):
     """
     # Extract the density values as a numpy array
     density_array = vtk_to_numpy(density_image.GetPointData().GetScalars())
-
     # Preserve the background (values equal to 0)
     background_mask = density_array == 0
 
@@ -1334,6 +1418,11 @@ def density2materialID(density_image, n_bins=128):
     # Restore background values to 0
     binned_values[background_mask] = 0
 
+    if cort_mask is not None:
+        cort_array = vtk_to_numpy(cort_mask.GetPointData().GetScalars())
+        binned_values[cort_array > 0] += n_bins
+        bin_centers = np.concatenate([bin_centers, bin_centers])  # Duplicate bin centers for cortical region
+
     # Convert the binned values back to a VTK array
     binned_vtk = numpy_to_vtk(binned_values, deep=True)
     binned_image = vtk.vtkImageData()
@@ -1342,41 +1431,150 @@ def density2materialID(density_image, n_bins=128):
 
     return binned_image, bin_centers
 
-def add_bone_material(material_table, bin_centers, elastic_Emax=10500, elastic_exponent=2.29, mu=0.3):
+def resolve_material_func(name: str, module):
+    if name.startswith("constant_"):
+        try:
+            value = float(name.split("_")[1])
+            return module.constant(value)
+        except (IndexError, ValueError):
+            raise ValueError(f"Invalid constant definition: {name}")
+
+    elif name.startswith("power_"):
+        try:
+            _, A, b = name.split("_")
+            return module.power_law(float(A), float(b))
+        except (ValueError, IndexError):
+            raise ValueError(f"Invalid power law definition: {name} (expected format: power_A_B)")
+
+    elif name.startswith("linear_"):
+        try:
+            _, A, B = name.split("_")
+            return module.linear(float(A), float(B))
+        except (ValueError, IndexError):
+            raise ValueError(f"Invalid linear definition: {name} (expected format: linear_A_B)")
+
+    else:
+        try:
+            return getattr(module, name)
+        except AttributeError:
+            raise ValueError(f"Function '{name}' not found in module {module.__name__}")
+
+def add_bone_material(
+    material_table,
+    bin_centers,
+    elastic_E_func=None,
+    yield_comp_func=None,
+    yield_tens_func=None,
+    mu=0.3,
+    bin_range=(0, 128),
+    material_name="Bone",
+):
     """
-    Adds bone material properties to a VTK material table based on density bins.
+    Adds linear or nonlinear bone materials to a vtkboneMaterialTable using function handles.
+
+    Parameters:
+        material_table (vtkboneMaterialTable): The material table to modify.
+        bin_centers (np.ndarray): The density values [mg/cc] used for binning.
+        elastic_E_func (callable): Function mapping density -> Young's modulus [MPa].
+        yield_comp_func (callable): (Optional) Function mapping density -> compressive yield stress [MPa].
+        yield_tens_func (callable): (Optional) Function mapping density -> tensile yield stress [MPa].
+        mu (float): Poisson's ratio (default: 0.3).
+        bin_range (tuple): Range of bin indices to assign these properties to.
+        material_name (str): Descriptive name for the material.
+
+    Returns:
+        vtkboneMaterialTable: The updated material table.
+    """
+
+    for i, rho in enumerate(bin_centers):
+        mat_id = bin_range[0] + i
+        E = elastic_E_func(rho) if elastic_E_func else 0.0
+
+        yc = yield_comp_func(rho) if yield_comp_func else None
+        yt = yield_tens_func(rho) if yield_tens_func else None
+
+        if yc is not None or yt is not None:
+            if yc is None:
+                yc = yt
+            if yt is None:
+                yt = yc
+            mat_name = f"MohrCoulomb_{material_name}_{mat_id}"
+            material = vtkbone.vtkboneMohrCoulombIsotropicMaterial()
+            material.SetYieldStrengths(yt, yc)
+            material.SetName(mat_name)
+        else:
+            mat_name = f"LinearIsotropic_{material_name}_{mat_id}"
+            material = vtkbone.vtkboneLinearIsotropicMaterial()
+            material.SetName(mat_name)
+
+        material.SetYoungsModulus(E)
+        material.SetPoissonsRatio(mu)
+
+        material_table.AddMaterial(mat_id, material)
+
+        print(f"{mat_name}: Density(g/cc):{rho/1000:.4f}; Modulus(MPa):{E:.4f}; "
+              f"Yield Strength (Comp):{yc} MPa; Yield Strength (Tens):{yt} MPa")
+    return material_table
+
+def add_bone_material_depreciated(material_table, bin_centers, elastic_Emax=10500, elastic_exponent=2.29, mu=0.3, 
+                                    bone_yield_compression=None, bone_yield_tension=None, bin_range=None, material_name='BoneMat'):
+    """
+    Adds Mohr-Coulomb elastoplastic bone material properties to a VTK material table based on density bins.
 
     Parameters:
         material_table (vtkbone.vtkboneMaterialTable): The material table to populate.
-        bin_centers (np.ndarray): Array of density values !! IN MG/CCM !!for each bin.
+        bin_centers (np.ndarray): Array of density values (in mg/ccm) for each bin.
         elastic_Emax (float): Maximum elastic modulus (MPa).
         elastic_exponent (float): Exponent for power-law calculation of modulus.
         mu (float): Constant Poisson's ratio for all materials.
+        yield_strength_compressive (float): Yield strength (MPa) for compression.
+        yield_strength_tensile (float): Yield strength (MPa) for tension.
 
     Returns:
-        vtkbone.vtkboneMaterialTable: The updated material table with bone properties.
+        vtkbone.vtkboneMaterialTable: The updated material table with Mohr-Coulomb bone properties.
     """
+
+    # Apply bin range filtering if provided
+    if bin_range is not None:
+        if len(bin_range) != 2:
+            raise ValueError("bin_range must be a list or tuple with exactly two values [min_bin_idx, max_bin_idx].")
+        
+        min_bin_idx, max_bin_idx = bin_range
+        if min_bin_idx < 0 or max_bin_idx > len(bin_centers):
+            raise ValueError(f"bin_range indices must be within [0, {len(bin_centers)}]")
+
+        # Convert to zero-based indexing for slicing
+        bin_centers = bin_centers[min_bin_idx : max_bin_idx]
+
     # Loop through each density bin
     for i, density in enumerate(bin_centers, start=1):
-        # Calculate Young's modulus using the power-law formula (Converting to G/CCM)
-        E = elastic_Emax * ((density/1000) ** elastic_exponent)
+        # Calculate Young's modulus using the power-law formula (Converting density to g/ccm)
+        E = elastic_Emax * ((density / 1000) ** elastic_exponent)
 
-        message("ID:%d; Density(g/cc):%8.4f; Modulus(MPa):%8.4f" % (i, density/1000, E))
+        print(f"ID:{i+bin_range[0]}; Density(g/cc):{density/1000:.4f}; Modulus(MPa):{E:.4f}; "
+              f"Yield Strength (Comp):{bone_yield_compression} MPa; Yield Strength (Tens):{bone_yield_tension} MPa")
 
-        # Create a linear isotropic material with calculated properties
-        bone_material = vtkbone.vtkboneLinearIsotropicMaterial()
+        # Create a Mohr-Coulomb elastoplastic material
+        if bone_yield_tension is not None and bone_yield_compression is not None:
+            bone_material = vtkbone.vtkboneMohrCoulombIsotropicMaterial()
+            bone_material.SetYieldStrengths(bone_yield_tension, bone_yield_compression)
+            bone_material.SetName(f"MohrCoulomb_{material_name}{i}")
+        else:
+            bone_material = vtkbone.vtkboneLinearIsotropicMaterial()
+            bone_material.SetName(f"LinearIsotropic_{material_name}{i}")
+
         bone_material.SetYoungsModulus(E)
         bone_material.SetPoissonsRatio(mu)
 
         # Set a dynamic name for the material
-        bone_material.SetName(f"BoneMaterial{i}")
 
         # Add material to the table with an ID corresponding to the bin index
-        material_table.AddMaterial(i, bone_material)
+        material_table.AddMaterial(i+bin_range[0], bone_material)
 
     return material_table
 
-def add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v):
+
+def add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v, pmma_yield_tension=None, pmma_yield_compression=None):
     """
     Adds a PMMA material to the provided material table.
 
@@ -1390,7 +1588,12 @@ def add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v):
         vtkbone.vtkboneMaterialTable: The updated material table with the PMMA material.
     """
     # Create PMMA material
-    pmma_material = vtkbone.vtkboneLinearIsotropicMaterial()
+    if pmma_yield_tension is not None and pmma_yield_compression is not None:
+        pmma_material = vtkbone.vtkboneMohrCoulombIsotropicMaterial()
+        pmma_material.SetYieldStrengths(pmma_yield_tension, pmma_yield_compression)
+    else:
+        pmma_material = vtkbone.vtkboneLinearIsotropicMaterial()
+
     pmma_material.SetName("PMMA")
     pmma_material.SetYoungsModulus(pmma_E)
     pmma_material.SetPoissonsRatio(pmma_v)
@@ -1399,6 +1602,7 @@ def add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v):
     material_table.AddMaterial(pmma_mat_id, pmma_material)
 
     return material_table
+
 
 
 def message(msg, *additionalLines):

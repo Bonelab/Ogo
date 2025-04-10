@@ -29,7 +29,7 @@ from datetime import date
 from collections import OrderedDict
 import vtk
 import vtkbone
-
+import numpy as np
 
 from ogo.util.echo_arguments import echo_arguments
 
@@ -65,6 +65,13 @@ def sidewaysFallFe(args):
     left_femur_reference = args.left_femur_reference
     right_femur_reference = args.right_femur_reference
     output_file = args.output_file
+    bone_yield_compression = args.bone_yield_compression
+    bone_yield_tension = args.bone_yield_tension
+    pmma_yield_compression = args.pmma_yield_compression
+    pmma_yield_tension = args.pmma_yield_tension
+
+
+
     ##
     # Determine image locations and names of files
     image_pathname = os.path.dirname(image)
@@ -197,10 +204,14 @@ def sidewaysFallFe(args):
     # Set up the Material Table
     ogo.message("Setting up the Finite Element Material Table...")
     material_table = vtkbone.vtkboneMaterialTable()
-    material_table = ogo.add_bone_material(material_table, bin_centers, elastic_Emax=elastic_Emax, elastic_exponent=elastic_exponent, mu=poissons_ratio)
-    material_table = ogo.add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v)
+    material_table = ogo.add_bone_material(material_table, bin_centers, elastic_Emax=elastic_Emax, elastic_exponent=elastic_exponent, 
+        bone_yield_compression=bone_yield_compression, bone_yield_tension=bone_yield_tension, mu=poissons_ratio)
+    material_table = ogo.add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v,pmma_yield_tension=pmma_yield_tension, pmma_yield_compression=pmma_yield_compression)
     
-
+    bone_yield_compression = args.bone_yield_compression
+    bone_yield_tension = args.bone_yield_tension
+    pmma_yield_compression = args.pmma_yield_compression
+    pmma_yield_tension = args.pmma_yield_tension
 
     ##
     # Create the preliminary FE model
@@ -215,6 +226,17 @@ def sidewaysFallFe(args):
     top_support_vector = (0, 1, 0)
     bottom_support_vector = (0, -1, 0)
     side_support_vector = (0, 0, -1)
+
+    # Define the rotation angle in degrees
+    theta = np.radians(-20)  # Convert to radians
+
+    # Define the rotation matrix around the x-axis
+    Rx = np.array([[1, 0, 0],
+                [0, np.cos(theta), -np.sin(theta)],
+                [0, np.sin(theta), np.cos(theta)]])
+
+    # Apply the rotation
+    side_support_vector = Rx @ side_support_vector
 
     ogo.message("Determining Femoral Head ROI...")
     femoral_head_bounds = (
@@ -404,7 +426,7 @@ def sidewaysFallFe(args):
         model2_bounds[2],
         model2_bounds[3],
         model2_bounds[4],
-        model2_bounds[4]+3
+        model2_bounds[4]+10 #This was 3, the depth of the BC search but does not capture with the slanted approach
     )
     ogo.message("Distal Femur Bounds: %s" % str(distal_femur_bounds))
     df_model = ogo.extractBox(distal_femur_bounds, model2)
@@ -432,24 +454,28 @@ def sidewaysFallFe(args):
     model2.ApplyBoundaryCondition(
         "Femoral_Head_PMMA_Nodes",
         vtkbone.vtkboneConstraint.SENSE_Y,
-        0,
-        "bottom_fixed_z_PMMA")
+        -fe_displacement,
+        "top_displacement") #switched from bottom_fixed_z_PMMA
 
-    # - Greater Trochanter PMMA Cap BCs
-    ogo.message("Applying boundary conditions to Greater Trochanter PMMA cap...")
-    model2.ApplyBoundaryCondition(
-        "Greater_Trochanter_PMMA_Nodes",
-        vtkbone.vtkboneConstraint.SENSE_Y,
-        fe_displacement,
-        "top_displacement")
+    dirs = [vtkbone.vtkboneConstraint.SENSE_Y, vtkbone.vtkboneConstraint.SENSE_X, vtkbone.vtkboneConstraint.SENSE_Z]
+    labels = ['y','x','z']
 
-    # - Distal Femur fixed in z-axis
-    ogo.message("Applying boundary conditions to Distal Femur...")
-    model2.ApplyBoundaryCondition(
-        "Distal_Femur_Nodes",
-        vtkbone.vtkboneConstraint.SENSE_Z,
-        0,
-        "bottom_fixed_z")
+    for SENSE, label in zip(dirs,labels):
+        # - Greater Trochanter PMMA Cap BCs
+        ogo.message("Applying boundary conditions to Greater Trochanter PMMA cap...")
+        model2.ApplyBoundaryCondition(
+            "Greater_Trochanter_PMMA_Nodes",
+            SENSE,
+            0,
+            f"bottom_fixed_{label}_PMMA") #switched from top_displacement
+
+        # - Distal Femur fixed in z-axis
+        ogo.message("Applying boundary conditions to Distal Femur...")
+        model2.ApplyBoundaryCondition(
+            "Distal_Femur_Nodes",
+            SENSE,
+            0,
+            f"bottom_fixed_{label}")
 
     ##
     # Post Processing parameters
@@ -535,7 +561,7 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Sets the Elastic Modulus for PMMA caps in the FE model. (default: %(default)s [MPa])")
     parser.add_argument("--pmma_v", type=float, default=0.3,
                         help="Sets the Poisson's ratio for the PMMA material(s) in the FE model. (default: %(default)s)")
-    parser.add_argument("--pmma_thick", type=float, default=6.0,
+    parser.add_argument("--pmma_thick", type=float, default=2.0,
                         help="Sets the minimum thickness for PMMA caps in the FE model. Default value (6 [mm]) based on observed measurement of Keaveny BCT FE modeling of the femur. (default: %(default)s [mm])")
     parser.add_argument("--pmma_mat_id", type=int, default=5000,
                         help="Sets the material ID for the PMMA blocks. (default: %(default)s)")
@@ -543,6 +569,15 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Sets the applied displacement in [mm] to the FE model. (default: %(default)s [mm])")
     parser.add_argument("--reference_path", type=str, required=False, default=None,
                         help="Path to the reference vtk file for ICP registration. (default: None)")
+    parser.add_argument("--pmma_yield_compression", type=float, default=None,
+                        help="Sets the yield strength in compression for PMMA material in the FE model. (default: %(default)s [MPa])")
+    parser.add_argument("--pmma_yield_tension", type=float, default=None,
+                        help="Sets the yield strength in tension for PMMA material in the FE model. (default: %(default)s [MPa])")
+    parser.add_argument("--bone_yield_compression", type=float, default=None,
+                        help="Sets the yield strength in compression for bone material in the FE model. (default: %(default)s [MPa])")
+    parser.add_argument("--bone_yield_tension", type=float, default=None,
+                        help="Sets the yield strength in tension for bone material in the FE model. (default: %(default)s [MPa])")
+
 
     # Parse and display
     args = parser.parse_args()
