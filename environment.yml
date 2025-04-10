@@ -1,97 +1,130 @@
-name: ogo
+name: spineFE
 channels:
   - numerics88
   - defaults
   - conda-forge
 dependencies:
-  - aimio=1.0.0
-  - boost=1.67.0
-  - bzip2=1.0.8
-  - c-ares=1.25.0
-  - ca-certificates=2023.12.12
-  - cftime=1.4.1
-  - curl=8.5.0
-  - expat=2.5.0
-  - fftw=3.3.9
-  - freetype=2.12.1
-  - future=0.18.2
-  - hdf4=4.2.15
-  - hdf5=1.10.5
-  - icu=58.2
-  - jpeg=9e
-  - jsoncpp=1.8.4
-  - krb5=1.21.2
-  - lerc=4.0.0
-  - libblas=3.9.0
-  - libboost=1.67.0
-  - libcblas=3.9.0
-  - libcurl=8.5.0
-  - libcxx=16.0.6
-  - libdeflate=1.14
-  - libedit=3.1.20191231
-  - libev=4.33
-  - libexpat=2.5.0
-  - libffi=3.4.2
-  - libgfortran5=13.2.0
-  - libiconv=1.17
-  - libitk=4.13.2
-  - liblapack=3.9.0
-  - libnetcdf=4.7.1
-  - libnghttp2=1.58.0
-  - libopenblas=0.3.25
-  - libpng=1.6.39
-  - libsqlite=3.44.2
-  - libssh2=1.11.0
-  - libtiff=4.4.0
-  - libwebp-base=1.3.2
-  - libxml2=2.9.14
-  - libzlib=1.2.13
-  - llvm-openmp=17.0.6
-  - lz4-c=1.8.3
-  - n88tools=9.0.0
-  - n88util=2.0.0
-  - ncurses=6.4
-  - netcdf4=1.5.3
-  - openssl=3.2.0
-  - pip=23.3.2
-  - pqctio=1.0.0
-  - py-boost=1.67.0
-  - python=3.7.12
-  - python_abi=3.7
-  - readline=8.2
-  - scipy=1.6.1
-  - setuptools=69.0.3
-  - simpleitk=1.2.4
-  - sqlite=3.44.2
-  - tbb=2020.2
-  - tk=8.6.13
-  - vtk=8.2.0
-  - vtkbone=1.1.0
-  - wheel=0.42.0
-  - xz=5.2.6
-  - zlib=1.2.13
-  - zstd=1.5.5
+  - _libgcc_mutex=0.1=main
+  - _openmp_mutex=5.1=1_gnu
+  - aimio=1.0.0=h2bc3f7f_0
+  - blas=1.0=openblas
+  - boost=1.67.0=py37_4
+  - bzip2=1.0.8=h5eee18b_6
+  - c-ares=1.25.0=hd590300_0
+  - ca-certificates=2023.12.12=h06a4308_0
+  - cftime=1.4.1=py37h6323ea4_0
+  - curl=8.5.0=hca28451_0
+  - expat=2.5.0=h6a678d5_0
+  - fftw=3.3.9=h5eee18b_2
+  - freetype=2.12.1=h4a9f257_0
+  - future=0.18.2=py37_1
+  - hdf4=4.2.15=h9772cbc_5
+  - hdf5=1.10.5=nompi_h5b725eb_1114
+  - icu=58.2=he6710b0_3
+  - jpeg=9e=h5eee18b_3
+  - jsoncpp=1.8.4=hfd86e86_0
+  - keyutils=1.6.1=h166bdaf_0
+  - krb5=1.21.2=h659d440_0
+  - ld_impl_linux-64=2.40=h12ee557_0
+  - lerc=4.0.0=h6a678d5_0
+  - libblas=3.9.0=20_linux64_openblas
+  - libboost=1.67.0=h46d08c1_4
+  - libcblas=3.9.0=20_linux64_openblas
+  - libcurl=8.5.0=hca28451_0
+  - libcxx=16.0.6=he02047a_2
+  - libcxxabi=16.0.6=h4bc722e_2
+  - libdeflate=1.14=h166bdaf_0
+  - libedit=3.1.20191231=h14c3975_1
+  - libev=4.33=h7f8727e_1
+  - libexpat=2.5.0=hcb278e6_1
+  - libffi=3.4.2=h6a678d5_6
+  - libgcc=14.2.0=h767d61c_2
+  - libgcc-ng=14.2.0=h69a702a_2
+  - libgfortran-ng=13.2.0=h69a702a_13
+  - libgfortran5=13.2.0=h3d2ce59_13
+  - libgomp=14.2.0=h767d61c_2
+  - libiconv=1.17=hd590300_2
+  - libitk=4.13.2=h8f2a977_6
+  - liblapack=3.9.0=20_linux64_openblas
+  - libnetcdf=4.7.1=nompi_h94020b1_102
+  - libnghttp2=1.58.0=h47da74e_1
+  - libnsl=2.0.0=h5eee18b_0
+  - libopenblas=0.3.25=pthreads_h413a1c8_0
+  - libpng=1.6.39=h5eee18b_0
+  - libsqlite=3.44.2=h2797004_0
+  - libssh2=1.11.0=h251f7ec_0
+  - libstdcxx=14.2.0=h8f9b012_2
+  - libstdcxx-ng=14.2.0=h4852527_2
+  - libtiff=4.4.0=h82bc61c_5
+  - libuuid=2.38.1=h0b41bf4_0
+  - libwebp-base=1.3.2=h5eee18b_1
+  - libxcb=1.17.0=h8a09558_0
+  - libxml2=2.9.14=h74e7548_0
+  - libzlib=1.2.13=h4ab18f5_6
+  - llvm-openmp=17.0.6=h4dfa4b3_0
+  - lz4-c=1.8.3=he1b5a44_1001
+  - n88tools=9.0.0=py37_np116
+  - n88util=2.0.0=h2bc3f7f_0
+  - ncurses=6.4=h6a678d5_0
+  - netcdf4=1.5.3=nompi_py37hfee4bf2_101
+  - openssl=3.2.0=hd590300_1
+  - pip=23.3.2=pyhd8ed1ab_0
+  - pqctio=1.0.0=h2bc3f7f_0
+  - pthread-stubs=0.3=h0ce48e5_1
+  - py-boost=1.67.0=py37h04863e7_4
+  - python=3.7.12=hf930737_100_cpython
+  - python_abi=3.7=4_cp37m
+  - readline=8.2=h5eee18b_0
+  - scipy=1.6.1=py37h14a347d_0
+  - setuptools=69.0.3=pyhd8ed1ab_0
+  - simpleitk=1.2.4=py37h3340039_1
+  - sqlite=3.44.2=h2c6b66d_0
+  - tbb=2020.2=hff7bd54_0
+  - tk=8.6.13=noxft_h4845f30_101
+  - vtk=8.2.0=py37hd1c59f8_206
+  - vtkbone=1.1.0=py37
+  - wheel=0.42.0=pyhd8ed1ab_0
+  - xorg-libice=1.1.2=hb9d3cd8_0
+  - xorg-libsm=1.2.6=he73a12e_0
+  - xorg-libx11=1.8.12=h4f16b4b_0
+  - xorg-libxau=1.0.12=hb9d3cd8_0
+  - xorg-libxdmcp=1.1.5=hb9d3cd8_0
+  - xorg-libxt=1.3.1=hb9d3cd8_0
+  - xz=5.2.6=h5eee18b_0
+  - zlib=1.2.13=h4ab18f5_6
+  - zstd=1.5.5=hfc55251_0
   - pip:
+      - alabaster==0.7.13
       - anyio==3.7.1
       - appnope==0.1.3
       - argon2-cffi==23.1.0
       - argon2-cffi-bindings==21.2.0
+      - argparse==1.4.0
       - attrs==23.2.0
+      - babel==2.14.0
       - backcall==0.2.0
+      - batchgenerators==0.25.1
       - beautifulsoup4==4.12.2
       - bleach==6.0.0
+      - certifi==2025.1.31
       - cffi==1.15.1
+      - charset-normalizer==3.4.1
+      - click==8.1.8
       - comm==0.1.4
       - cycler==0.11.0
       - debugpy==1.7.0
       - decorator==5.1.1
       - defusedxml==0.7.1
+      - docutils==0.17.1
       - entrypoints==0.4
       - exceptiongroup==1.2.0
       - fastjsonschema==2.19.1
+      - flake8==5.0.4
       - fonttools==4.38.0
       - idna==3.6
-      - importlib-metadata==6.7.0
+      - imageio==2.31.2
+      - imagesize==1.4.1
+      - importlib-metadata==4.2.0
       - importlib-resources==5.12.0
       - ipykernel==6.16.2
       - ipython==7.34.0
@@ -99,6 +132,7 @@ dependencies:
       - ipywidgets==8.1.1
       - jedi==0.19.1
       - jinja2==3.1.3
+      - joblib==1.3.2
       - jsonschema==4.17.3
       - jupyter==1.0.0
       - jupyter-client==7.4.9
@@ -109,9 +143,11 @@ dependencies:
       - jupyterlab-widgets==3.0.9
       - k3d==2.16.1
       - kiwisolver==1.4.5
+      - linecache2==1.0.0
       - markupsafe==2.1.3
       - matplotlib==3.5.3
       - matplotlib-inline==0.1.6
+      - mccabe==0.7.0
       - mistune==3.0.2
       - msgpack==1.0.5
       - nbclassic==1.0.0
@@ -119,12 +155,17 @@ dependencies:
       - nbconvert==7.6.0
       - nbformat==5.8.0
       - nest-asyncio==1.5.9
+      - networkx==2.6.3
+      - nose==1.3.7
       - notebook==6.5.6
       - notebook-shim==0.2.3
       - numpy==1.21.6
+      - opencv-python==4.11.0.86
       - packaging==23.2
+      - pandas==1.3.5
       - pandocfilters==1.5.0
       - parso==0.8.3
+      - pbr==6.1.1
       - pexpect==4.9.0
       - pickleshare==0.7.5
       - pillow==9.5.0
@@ -133,26 +174,48 @@ dependencies:
       - prompt-toolkit==3.0.43
       - psutil==5.9.7
       - ptyprocess==0.7.0
+      - pycodestyle==2.9.1
       - pycparser==2.21
+      - pyflakes==2.5.0
       - pygments==2.17.2
       - pyparsing==3.1.1
       - pyrsistent==0.19.3
       - python-dateutil==2.8.2
+      - pytz==2025.2
+      - pywavelets==1.3.0
       - pyzmq==24.0.1
       - qtconsole==5.4.4
       - qtpy==2.4.1
+      - requests==2.31.0
+      - scikit-image==0.19.3
+      - scikit-learn==1.0.2
+      - seaborn==0.12.2
       - send2trash==1.8.2
       - six==1.16.0
       - sniffio==1.3.0
+      - snowballstemmer==2.2.0
       - soupsieve==2.4.1
+      - sphinx==4.3.2
+      - sphinxcontrib-applehelp==1.0.2
+      - sphinxcontrib-devhelp==1.0.2
+      - sphinxcontrib-htmlhelp==2.0.0
+      - sphinxcontrib-jsmath==1.0.1
+      - sphinxcontrib-qthelp==1.0.3
+      - sphinxcontrib-serializinghtml==1.1.5
       - terminado==0.17.1
+      - threadpoolctl==3.1.0
+      - tifffile==2021.11.2
       - tinycss2==1.2.1
       - tornado==6.2
+      - traceback2==1.4.0
       - traitlets==5.9.0
       - traittypes==0.2.1
       - typing-extensions==4.7.1
+      - unittest2==1.1.0
+      - urllib3==2.0.7
       - wcwidth==0.2.13
       - webencodings==0.5.1
       - websocket-client==1.6.1
       - widgetsnbextension==4.0.9
       - zipp==3.15.0
+prefix: /home/matthias.walle/software/miniforge3/envs/spineFE
