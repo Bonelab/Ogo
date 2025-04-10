@@ -23,11 +23,15 @@ from scipy import stats
 import scipy.interpolate as interp
 import SimpleITK as sitk
 import vtk
+import re
+from pathlib import Path
+
 import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
 import ogo.dat.OgoMasterLabels as lb
 import ogo.cli.ref.material_laws 
+from ogo.calib.internal_calibration import InternalCalibration
 
 start_time = time.time()
 
@@ -146,6 +150,17 @@ def get_phantom(phantom_type):
         calibration_dict['densities'] = [0, 50, 100, 150, 200]
         calibration_dict['h2o_densities'] = [None]
 
+    elif phantom_type in 'Siemens-Osteo':
+        calibration_dict['name'] = 'Siemens-Osteo'
+        calibration_dict['units'] = 'mg/cc'
+        calibration_dict['type'] = 'CHA'
+        calibration_dict['serial'] = 'unknown'
+        calibration_dict['number_rods'] = 2
+        calibration_dict['rod_labels'] = [171, 172]
+        calibration_dict['rod_names'] = ['A', 'B']
+        calibration_dict['densities'] = [0, 200]
+        calibration_dict['h2o_densities'] = [None]
+
     else:
         # TODO - should raise an exception rather than sys.exit
         os.sys.exit('[ERROR] Cannot find appropriate phantom density for \"{}\"'.format(phantom_type))
@@ -155,6 +170,7 @@ def get_phantom(phantom_type):
 
 def histogram(image, n_bins):
     array = vtk_to_numpy(image.GetPointData().GetScalars()).ravel()
+    image_type = image.GetScalarType()
     guard = '!-------------------------------------------------------------------------------'
 
     # Define formatting
@@ -165,26 +181,52 @@ def histogram(image, n_bins):
     line_format_bin_edge = '!>  {:>8d} {:>8s} {:>12s}'
     line_skip = '!> ...'
 
-    # Find the range of the data type. Options are:
-    #          wide: -32768 to 32767  (short)
-    #           med:   -128 to   127  (char)
-    #        narrow:      0 to   127  (unsigned char)
+    if image_type is vtk.VTK_CHAR:
+        data_type_minimum = vtk.VTK_CHAR_MIN
+        data_type_maximum = vtk.VTK_CHAR_MAX
+    elif image_type is vtk.VTK_SIGNED_CHAR:
+        data_type_minimum = vtk.VTK_SIGNED_CHAR_MIN
+        data_type_maximum = vtk.VTK_SIGNED_CHAR_MAX
+    elif image_type is vtk.VTK_UNSIGNED_CHAR:
+        data_type_minimum = vtk.VTK_UNSIGNED_CHAR_MIN
+        data_type_maximum = vtk.VTK_UNSIGNED_CHAR_MAX
+    elif image_type is vtk.VTK_SHORT:
+        data_type_minimum = vtk.VTK_SHORT_MIN
+        data_type_maximum = vtk.VTK_SHORT_MAX
+    elif image_type is vtk.VTK_UNSIGNED_SHORT:
+        data_type_minimum = vtk.VTK_UNSIGNED_SHORT_MIN
+        data_type_maximum = vtk.VTK_UNSIGNED_SHORT_MAX
+    elif image_type is vtk.VTK_INT:
+        data_type_minimum = vtk.VTK_INT_MIN
+        data_type_maximum = vtk.VTK_INT_MAX
+    elif image_type is vtk.VTK_UNSIGNED_INT:
+        data_type_minimum = vtk.VTK_UNSIGNED_INT_MIN
+        data_type_maximum = vtk.VTK_UNSIGNED_INT_MAX
+    elif image_type is vtk.VTK_LONG:
+        data_type_minimum = vtk.VTK_LONG_MIN
+        data_type_maximum = vtk.VTK_LONG_MAX
+    elif image_type is vtk.VTK_UNSIGNED_LONG:
+        data_type_minimum = vtk.VTK_UNSIGNED_LONG_MIN
+        data_type_maximum = vtk.VTK_UNSIGNED_LONG_MAX
+    elif image_type is vtk.VTK_FLOAT:
+        data_type_minimum = vtk.VTK_FLOAT_MIN
+        data_type_maximum = vtk.VTK_FLOAT_MAX
+    elif image_type is vtk.VTK_DOUBLE:
+        data_type_minimum = vtk.VTK_DOUBLE_MIN
+        data_type_maximum = vtk.VTK_DOUBLE_MAX
+    else:
+        os.sys.exit('[ERROR] Unknown data type: \"{}\"'.format(image.GetScalarTypeAsString()))
+        
+    message('Data type is {}'.format(image.GetScalarTypeAsString()))
+    message('Data type minimum is {}'.format(data_type_minimum))
+    message('Data type maximum is {}'.format(data_type_maximum))
+
     data_minimum = array.min()
-    if (data_minimum < -128):
-        data_type_minimum = -32768
-    elif (data_minimum < 0):
-        data_type_minimum = -128
-    else:
-        data_type_minimum = 0
-
     data_maximum = array.max()
-    if (data_maximum > 255):
-        data_type_maximum = 32767
-    elif (data_maximum > 127):
-        data_type_maximum = 255
-    else:
-        data_type_maximum = 127
 
+    message('Data minimum is {}'.format(data_minimum))
+    message('Data maximum is {}'.format(data_maximum))
+    
     level_4 = False  # Show every possible value within data type range
     level_3 = False  # Show non-zero range within data type range
     level_2 = False  # Show non-zero range with number_bins fixed
@@ -201,7 +243,7 @@ def histogram(image, n_bins):
         number_bins = n_bins
 
     # Make sure number of bins isn't greater than the data range
-    data_range_span = data_maximum - data_minimum + 1
+    data_range_span = int(data_maximum - data_minimum + 1)
     if (data_range_span < number_bins):
         number_bins = data_range_span
         print('!> WARNING: Histogram data range reset to {} bins.'.format(number_bins))
@@ -224,14 +266,16 @@ def histogram(image, n_bins):
     # print(guard)
     print('!>  Number of bins:            {:8d}'.format(number_bins))
     print('!>  Bin width:                 {:8.3f}'.format(bin_width))
-    print('!>  Data type range: minimum = {:8d}, maximum = {:8d}'.format(data_type_minimum, data_type_maximum))
-    print('!>  Data range:      minimum = {:8d}, maximum = {:8d}'.format(data_minimum, data_maximum))
-    print('!>  Non-zero:          first = {:8d},    last = {:8d}'.format(first_nonzero_idx, last_nonzero_idx))
+    print('!>  Data type range: minimum = {:8}, maximum = {:8}'.format(data_type_minimum, data_type_maximum))
+    print('!>  Data range:      minimum = {:8}, maximum = {:8}'.format(data_minimum, data_maximum))
+    print('!>  Non-zero:          first = {:8},    last = {:8}'.format(first_nonzero_idx, last_nonzero_idx))
     print('!>  ')
     print(line_format_header.format('ImageValue', 'Percent', '#Voxels'))
 
+    ids = []
+      
     for idx in range(number_bins):
-
+            
         if (level_4):
             image_value = idx + data_type_minimum
             number_voxels = image_histogram[idx]
@@ -273,6 +317,11 @@ def histogram(image, n_bins):
                 bin_edge = int(((idx + 1) * bin_width) + data_minimum)
                 print(line_format_bin_edge.format(bin_edge, '-----', '-----'))
 
+        if number_voxels>0:
+            ids.append(image_value)
+        else:
+            ids.append(0)
+        
         total_percent += percent_number_voxels
         total_voxels += number_voxels
 
@@ -283,8 +332,9 @@ def histogram(image, n_bins):
         print('!> WARNING: Not all voxels in the image were included in the histogram.')
         print('!>          Image voxel count     = {}.'.format(len(array)))
         print('!>          Histogram voxel count = {}.'.format(total_voxels))
-
-
+    print('!> labels: ' + ','.join('{}'.format(i) for i in ids))
+    print(guard)
+    
 def aix(infile, image):
     guard = '!-------------------------------------------------------------------------------'
     phys_dim = [x * y for x, y in zip(image.GetDimensions(), image.GetSpacing())]
@@ -441,7 +491,7 @@ def get_cortical_bone(array):
         sample_mean = rslt
 
     # Method 2: Top voxels
-    if (True):
+    if (False):
         sorted_index_array = np.argsort(array)
         sorted_array = array[sorted_index_array]
         n = 899  # number of top voxels
@@ -451,6 +501,17 @@ def get_cortical_bone(array):
         sample_mean = np.mean(rslt)
         sample_std = np.std(rslt)
         sample_count = len(rslt)
+
+    # Method 3: If the image has implants in it, then there will be artificially inflated cortical bone voxels from streaking (i.e., > 2200). 
+    # This method makes an effort to exclude them by only isolating the voxels in the bone that are most likely cortical bone (1000-1500 HU)
+    # ... anything higher than 1500 is likely due to image artifact and probably isn't cortical bone. This is mostly applicable when taking from larger bones (femur, humerus,...?)
+    # Disclaimer: this is arbitrary threshold chosen based off experience (aka I usually never see true cortical bone under 1000 and over 1500)... might need to be adjusted
+    if (True): 
+        voxel_mask = (array >= 1000) & (array <= 1500)
+        filtered_voxels = array[voxel_mask]
+        sample_mean = np.mean(filtered_voxels)
+        sample_std = np.std(filtered_voxels)
+        sample_count = len(filtered_voxels) 
 
     return [sample_mean, sample_std, sample_count]
 
@@ -484,7 +545,7 @@ def find_executable(executable, path=None):
     if os.name == 'os2':
         (base, ext) = os.path.splitext(executable)
         # executable files on OS/2 can have an arbitrary extension, but
-        # .exe is automatically appended if no dot is present in the name
+        # .exe is automatically appended if no dot is nonzero in the name
         if not ext:
             executable = executable + ".exe"
     elif sys.platform == 'win32':
@@ -1898,18 +1959,287 @@ def add_to_filename(filepath, suffix):
 
     return new_file_path
 
-def writeN88Model(model, fileName, pathname):
-    """Writes out a N88Model.
-    The first argument is the model.
-    The second argument is the filename.
-    The third argument is the pathname.
-    Returns the N88model in the directory.
+def reapply_internal_calibration_from_txt(input_image_path, calib_txt_path, output_image_path=None):
     """
-    os.chdir(pathname)
-    writer = vtkbone.vtkboneN88ModelWriter()
-    writer.SetInputData(model)
-    writer.SetFileName(fileName)
-    writer.Update()
+    Uses values from a calibration .txt file to reapply internal calibration to a CT image.
+    Leverages ogo's InternalCalibration class and logic.
+
+    Parameters:
+        input_image_path (str): Path to the HU image (.nii or .nii.gz)
+        calib_txt_path (str): Path to the ogo-generated calibration text file
+        output_image_path (str, optional): Path to save the calibrated output image
+
+    Returns:
+        sitk.Image: Calibrated density image (mg/cc)
+    """
+
+    def extract(label, text):
+        match = re.search(rf'{re.escape(label)}\s+([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)', text)
+        if not match:
+            raise ValueError(f"{label} not found in calibration file.")
+        return float(match.group(1))
+
+    # Read calibration file
+    with open(calib_txt_path, 'r') as f:
+        contents = f.read()
+
+    # Extract HU means
+    adipose_hu   = extract("Adipose", contents)
+    air_hu       = extract("Air", contents)
+    blood_hu     = extract("Blood", contents)
+    bone_hu      = extract("Cortical Bone", contents)
+    muscle_hu    = extract("Skeletal Muscle", contents)
+
+    # Extract labels used
+    label_list = []
+    label_map = {
+        "Adipose": 91,
+        "Air": 92,
+        "Blood": 93,
+        "Cortical Bone": 94,
+        "Skeletal Muscle": 95
+    }
+    for name, label_id in label_map.items():
+        pattern = rf"{name}.*\[\s*(used|not used)\s*\]"
+        match = re.search(pattern, contents)
+        if match and match.group(1).strip() == 'used':
+            label_list.append(label_id)
+
+    if len(label_list) < 3:
+        raise ValueError("At least three tissues must have been used in the original calibration.")
+
+    # Load input image
+    hu_img = sitk.ReadImage(input_image_path, sitk.sitkFloat64)
+    voxel_volume = np.prod(hu_img.GetSpacing())
+
+    # Reconstruct calibration object
+    calib = InternalCalibration(
+        adipose_hu=adipose_hu,
+        air_hu=air_hu,
+        blood_hu=blood_hu,
+        bone_hu=bone_hu,
+        muscle_hu=muscle_hu,
+        label_list=label_list
+    )
+    calib.fit()
+
+    # Predict calibrated image
+    density_img, _ = calib.predict(hu_img, voxel_volume)
+
+    if output_image_path:
+        sitk.WriteImage(density_img, output_image_path)
+        print(f"Calibrated image saved to {output_image_path}")
+
+    return density_img
+
+# def writeN88Model(model, fileName, pathname):
+#     """Writes out a N88Model.
+#     The first argument is the model.
+#     The second argument is the filename.
+#     The third argument is the pathname.
+#     Returns the N88model in the directory.
+#     """
+#     os.chdir(pathname)
+#     writer = vtkbone.vtkboneN88ModelWriter()
+#     writer.SetInputData(model)
+#     writer.SetFileName(fileName)
+#     writer.Update()
+# 
+# def writeNii(imageData, fileName, output_directory):
+#     """Writes out an input image as a NIFTI file.
+#     The first argument is the image Data. The second argument is the filename. The third argument is the output directory where the file is to be written to.
+#     """
+#     os.chdir(output_directory)
+#     writer = vtk.vtkNIFTIImageWriter()
+#     writer.SetInputData(imageData)
+#     writer.SetFileName(fileName)
+#     writer.Write()
+#
+#  def applyInternalCalibration(imageData, cali_parameters):
+#      """ Applies the internal calibration to the image.
+#      The first argument is the image.
+#      The second argument is a dictionary of the calibration parameters.
+#      Returns the calibrated image in mg/cc.
+#      """
+#      ##
+#      # Some parameters to have from the inputs
+#      extent = imageData.GetExtent()
+#      origin = imageData.GetOrigin()
+#      spacing = imageData.GetSpacing()
+#      voxel_volume_mm = spacing[0] * spacing[1] * spacing[2] # [mm^3]
+#      voxel_volume_cm = voxel_volume_mm / 1000 # [cm^3]
+#      HU_MassAtten_Slope = cali_parameters['HU-u/p Slope']
+#      HU_MassAtten_Yint = cali_parameters['HU-u/p Y-Intercept']
+#      HU_Den_Slope = cali_parameters['HU-Material Density Slope']
+#      HU_Den_Yint = cali_parameters['HU-Material Density Y-Intercept']
+#      Triglyceride_Mass_Atten = cali_parameters['Triglyceride u/p']
+#      K2HPO4_Mass_Atten = cali_parameters['K2HPO4 u/p']
+#  
+#      ##
+#      # Create copies of the image data for Output density Images and convert to numpy arrays
+#      # Mass Attenuation Reference Image
+#      Mass_Atten_image = vtk.vtkImageData()
+#      Mass_Atten_image.SetExtent(extent)
+#      Mass_Atten_image.SetOrigin(origin)
+#      Mass_Atten_image.SetSpacing(spacing)
+#      Mass_Atten_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+#      Mass_Atten_data = vtk2numpy(Mass_Atten_image)
+#  
+#      # Archimedian Density Reference Image
+#      Arch_den_image = vtk.vtkImageData()
+#      Arch_den_image.SetExtent(extent)
+#      Arch_den_image.SetOrigin(origin)
+#      Arch_den_image.SetSpacing(spacing)
+#      Arch_den_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+#      Arch_den_data = vtk2numpy(Arch_den_image)
+#  
+#      # Mass Attenuation Reference Image
+#      Mass_image = vtk.vtkImageData()
+#      Mass_image.SetExtent(extent)
+#      Mass_image.SetOrigin(origin)
+#      Mass_image.SetSpacing(spacing)
+#      Mass_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+#      Mass_data = vtk2numpy(Mass_image)
+#  
+#      # K2HPO4 Density
+#      K2HPO4_den_image = vtk.vtkImageData()
+#      K2HPO4_den_image.SetExtent(extent)
+#      K2HPO4_den_image.SetOrigin(origin)
+#      K2HPO4_den_image.SetSpacing(spacing)
+#      K2HPO4_den_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+#      K2HPO4_den_data = vtk2numpy(K2HPO4_den_image)
+#  
+#      ##
+#      # Convert image to NumPy
+#      message("Converting image to NumPy...")
+#      numpy_image = vtk2numpy(imageData)
+#  
+#      ##
+#      # Apply HU to Mass Attenuation Conversion
+#      message("Converting image to mass attenuation equivalent...")
+#      Mass_Atten_data[:,:,:] = ((HU_MassAtten_Slope * numpy_image) + HU_MassAtten_Yint)
+#  
+#      # Apply HU to Archimedian Density Conversion
+#      message("Converting image to Archimedian density equivalent...")
+#      Arch_den_data[:,:,:] = ((HU_Den_Slope * numpy_image) + HU_Den_Yint)
+#  
+#      # Convert Archimedian density to total mass equivalent
+#      message("Converting Archimedian density equivalent to Mass equivalent image...")
+#      Mass_data[:,:,:] = Arch_den_data * voxel_volume_cm
+#  
+#      # Converting onverting to K2HPO4 Mass
+#      message("Converting to K2HPO4 Mass Image...")
+#      K2HPO4_mass_seg_data = np.zeros_like(Mass_data, dtype = 'h')
+#  
+#      # Two component model to derive K2HPO4 mass image
+#      K2HPO4_mass_seg_data = (Mass_data *((Mass_Atten_data - Triglyceride_Mass_Atten) / (K2HPO4_Mass_Atten - Triglyceride_Mass_Atten)))
+#  
+#      # Converting mass images to density images
+#      message("Converting K2HPO4 mass images to K2HPO4 density images...")
+#      K2HPO4_den_data = K2HPO4_mass_seg_data / voxel_volume_cm * 1000 # *1000 to convert g to mg
+#  
+#      # Convery Numpy images back to vtk Image
+#      scalars = K2HPO4_den_data.flatten(order='C')
+#      VTK_data = numpy_to_vtk(num_array=scalars, deep=True, array_type=vtk.VTK_FLOAT)
+#      K2HPO4_den_image.GetPointData().SetScalars(VTK_data)
+#  
+#      return K2HPO4_den_image
+#
+# def applyPhantomParameters(vtk_image, calibration_parameters):
+#     """Uses image mathematics to apply image calibration.
+#     The first argument is the vtk Image Data.
+#     The second argument are the calibration parameters dictionary (slope, y-intercept).
+#     Returns vtk Image Data in FLOAT data type.
+#     """
+#     cast = vtk.vtkImageCast()
+#     cast.SetInputData(vtk_image)
+#     cast.SetOutputScalarTypeToFloat()
+#     cast.Update()
+# 
+#     slope_image = vtk.vtkImageMathematics()
+#     slope_image.SetInputConnection(0, cast.GetOutputPort())
+#     slope_image.SetOperationToMultiplyByK()
+#     slope_image.SetConstantK(calibration_parameters['Calibration Slope'])
+#     slope_image.Update()
+# 
+#     calibrated_image = vtk.vtkImageMathematics()
+#     calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
+#     calibrated_image.SetOperationToAddConstant()
+#     calibrated_image.SetConstantC(calibration_parameters['Calibration Y-Intercept'])
+#     calibrated_image.Update()
+# 
+#     return calibrated_image.GetOutput()
+#
+# def bmd_CHAToAsh(vtk_image):
+#     """Converts CHA density to ash density using equation from:
+#     CHA density to ASH density relationship from Kaneko et al. 2004 J Biomech
+#     'Mechanical properties, density and quantitative CT scan data of trabecular
+#         bone with and without metastases'
+#     The first argument is the density image.
+#     Returns the Ash Density Image.
+#     """
+#     slope_image = vtk.vtkImageMathematics()
+#     slope_image.SetInputData(0, vtk_image)
+#     slope_image.SetOperationToMultiplyByK()
+#     slope_image.SetConstantK(0.839)
+#     slope_image.Update()
+# 
+#     calibrated_image = vtk.vtkImageMathematics()
+#     calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
+#     calibrated_image.SetOperationToAddConstant()
+#     calibrated_image.SetConstantC(69.8)
+#     calibrated_image.Update()
+#     return calibrated_image.GetOutput()
+#
+# def combineImageData_SLS(image, fh_pmma_id_pad, pmma_mat_id):
+#     """Combines the 2 image data together to get final image.
+#     The first argument is the original image data.
+#     The second argument is the femoral head PMMA cap image.
+#     The third argument is the greater trochanter PMMA cap image.
+#     Returns the combined image data.
+#     """
+#     message("Padding the images to constant size...")
+#     ##
+#     # Pad all images so that they are the same size
+#     fh_pad = vtk.vtkImageConstantPad()
+#     fh_pad.SetInputData(fh_pmma_id_pad)
+#     fh_pad.SetOutputWholeExtent(image.GetExtent())
+#     fh_pad.SetConstant(0)
+#     fh_pad.Update()
+# 
+#     message("Combining PMMA Caps with Image Data...")
+#     fh_logic = vtk.vtkImageLogic()
+#     fh_logic.SetInput1Data(fh_pad.GetOutput())
+#     fh_logic.SetInput2Data(image)
+#     fh_logic.SetOperationToAnd()
+#     fh_logic.SetOutputTrueValue(pmma_mat_id)
+#     fh_logic.Update()
+# 
+#     fh_math = vtk.vtkImageMathematics()
+#     fh_math.SetInput1Data(fh_pad.GetOutput())
+#     fh_math.SetInput2Data(fh_logic.GetOutput())
+#     fh_math.SetOperationToSubtract()
+#     fh_math.Update()
+# 
+#     combo_image = vtk.vtkImageMathematics()
+#     combo_image.SetInput1Data(fh_math.GetOutput())
+#     combo_image.SetInput2Data(image)
+#     combo_image.SetOperationToAdd()
+#     combo_image.Update()
+# 
+#     message("PMMA caps added.")
+#     message("Creating final image...")
+#     # Remove any negative values...
+#     final_thres = vtk.vtkImageThreshold()
+#     final_thres.SetInputData(combo_image.GetOutput())
+#     final_thres.ThresholdByLower(0)
+#     final_thres.ReplaceInOn()
+#     final_thres.SetInValue(0)
+#     final_thres.ReplaceOutOff()
+#     final_thres.Update()
+#     final_image = final_thres.GetOutput()
+# 
+#     return final_image
 
 def writeNii(imageData, fileName, output_directory):
     """Writes out an input image as a NIFTI file.

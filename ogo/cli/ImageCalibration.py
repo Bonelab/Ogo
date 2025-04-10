@@ -34,6 +34,7 @@ from ogo.calib.standard_calibration import StandardCalibration
 import ogo.util.Helper as ogo
 from ogo.util.echo_arguments import echo_arguments
 from ogo.util.write_txt import write_txt
+from ogo.util.Helper import reapply_internal_calibration_from_txt 
 
 
 # PHANTOM CALIBARATION ------------------------------------------------------------------
@@ -267,7 +268,7 @@ def phantom(input_image, input_mask, output_image, calib_file_name, async_image,
 
 
 # INTERNAL CALIBARATION ------------------------------------------------------------------
-def internal(input_image, input_mask, output_image, calib_file_name, useLabels, useL4, output_arch_image, overwrite, func):
+def internal(input_image, input_mask, output_image, calib_file_name, useLabels, corticalbone, tissue_checks, output_arch_image, overwrite, func):
     ogo.message('Starting internal calibration.')
 
     # Check if output exists and should overwrite
@@ -292,8 +293,13 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     if not os.path.isfile(input_mask):
         os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(input_mask))
 
-    if not (input_mask.lower().endswith('.nii') or input_mask.lower().endswith('.nii.gz')):
-        os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_mask))
+    if input_mask.lower().endswith('.txt'):
+        ogo.message("Detected calibration file as input. Reapplying calibration directly from txt.")
+        den = reapply_internal_calibration_from_txt(input_image, input_mask, output_image)
+        ogo.message('Done internal calibration.')
+        return  # Skip the rest of the function
+    elif not (input_mask.lower().endswith('.nii') or input_mask.lower().endswith('.nii.gz')):
+        os.sys.exit('[ERROR] Input must be type NIFTI file or calibration .txt file: \"{}\"'.format(input_mask))
 
     ogo.message('Reading input mask used for calibration:')
     ogo.message('      \"{}\"'.format(input_mask))
@@ -326,17 +332,17 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
         labels_data[label] = {'ID': value, 'mean': filt.GetMean(value), 'stdev': np.sqrt(filt.GetVariance(value)),
                               'count': filt.GetCount(value), 'marker': ''}
 
-        if (useL4 and label in 'Cortical Bone'):
-            ogo.message('Calculating \"{}\" ({}) from L4'.format(label, value))
-            L4_label = 7
+        if (corticalbone and label in 'Cortical Bone'):
+            ogo.message(f'Calculating from label {corticalbone}')
+            L4_label = corticalbone #user defines which bone to use to take cortical bone from 
             if (not filt.HasLabel(L4_label)):
-                os.sys.exit('[ERROR] No L4 found in image.')
+                os.sys.exit(f'[ERROR] No label {corticalbone} found in image.')
             else:
                 bone = sitk.BinaryThreshold(mask, L4_label, L4_label, 1, 0)
                 array = sitk.Mask(ct, bone)
                 [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()))
                 labels_data[label] = {'ID': value, 'mean': bone_mean, 'stdev': bone_std, 'count': bone_count,
-                                      'marker': '(from L4)'}
+                                      'marker': '(from bone seg.)'}
 
     # Print the values for each label
     ogo.message('  {:>22s} {:>8s} {:>8s} {:>8s}'.format(' ', 'Mean', 'StdDev', '#Voxels'))
@@ -347,6 +353,49 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                                                                   labels_data[label]['count'], labels_data[label][
                                                                       'marker']))  # Report mean, SD, # voxels
 
+    if tissue_checks: 
+        # Create checks for internal calibration HU values
+        expected_adipose = -100
+        expected_air = -1000
+        expected_blood = 20
+        expected_muscle = 30
+        expected_cortical_bone = 1200
+        
+        if (expected_adipose - 30) < labels_data['Adipose']['mean'] < (expected_adipose + 30):
+            pass
+        else: 
+            ogo.message('ERROR: Adipose ROI outside of expected range.')
+            ogo.message('Please check ROI for correct segmentation. Exiting...')
+            os.sys.exit()
+
+        if (expected_air - 30) < labels_data['Air']['mean'] < (expected_air + 20):
+            pass
+        else: 
+            ogo.message('ERROR: Air ROI outside of expected range.')
+            ogo.message('Please check ROI for correct segmentation. Exiting...')
+            os.sys.exit()
+
+        if (expected_blood - 40) < labels_data['Blood']['mean'] < (expected_blood + 40):
+            pass
+        else:
+            ogo.message('ERROR: Blood ROI outside of expected range.')
+            ogo.message('Please check ROI for correct segmentation. Exiting...')
+            os.sys.exit()
+
+        if (expected_muscle - 35) < labels_data['Skeletal Muscle']['mean'] < (expected_muscle + 35):
+            pass
+        else:
+            ogo.message('ERROR: Skeletal Muscle ROI outside of expected range.')
+            ogo.message('Please check ROI for correct segmentation. Exiting...')
+            os.sys.exit()
+        
+        if (expected_cortical_bone - 250) < labels_data['Cortical Bone']['mean'] < (expected_cortical_bone + 250):
+            pass
+        else:
+            ogo.message('ERROR: Cortical Bone ROI outside of expected range.')
+            ogo.message('Please check ROI for correct segmentation. Exiting...')
+            os.sys.exit()
+
     # Finalize the labels to be used (user may select subset)
     labelList = []
     if (useLabels):  # User explicitly defines which labels to use
@@ -355,8 +404,8 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                 os.sys.exit('[ERROR] Invalid label selected: ({})'.format(labelID))
             labelList.append(labelID)
     else:
-        labelList = [91, 92, 93, 94, 95]
-
+        labelList = [v for k, v in labels.items() if labels_data[k]['count'] > 0]
+        
     if (len(labelList) < 3):
         os.sys.exit('[ERROR] A minimum of three sample tissues needed.')
 
@@ -370,6 +419,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
                     '[ERROR] Invalid HU for {} ({}). Explicitly define labels to use \nor define --useL4.'.format(label,
                                                                                                                   value))
     ogo.message('')
+
 
     # Perform the internal calibration fit
     ogo.message('Computing calibration parameters.')
@@ -607,8 +657,10 @@ ogoImageCalibration internal image.nii.gz samples_mask.nii.gz \\
     parser_internal.add_argument('--calib_file_name', help='Calibration results file (*.txt)')
     parser_internal.add_argument('--useLabels', type=int, nargs='*', default=[], metavar='ID',
                                  help='Explicitly define labels for internal calibration; space separated (e.g. 91 92 93 94 95) (default: all)')
-    parser_internal.add_argument('--useL4', action='store_true',
-                                 help='Use when label 94 (cortical bone) is not available (it samples L4).')
+    parser_internal.add_argument('--corticalbone', type=int, default=None,
+                                 help='Define which segmentation label to use to define cortical bone. Default is 2 (left femur).')
+    parser_internal.add_argument('--tissue_checks', action='store_true', 
+                                help='Use when you would like to perform checks on whether the calibration tissues are within expected HU range. ')
     parser_internal.add_argument('--output_arch_image', action='store_true',
                                  help='Use when you would also like to output the Archimedian density image. Filename will be the same as the output_image but with "ARCH" added.')
     parser_internal.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
