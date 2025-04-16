@@ -26,14 +26,36 @@ import vtk
 import re
 from pathlib import Path
 
-#import vtkbone
+import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
 import ogo.dat.OgoMasterLabels as lb
+import ogo.cli.ref.material_laws 
 from ogo.calib.internal_calibration import InternalCalibration
 
 start_time = time.time()
 
+def combineImageData(image1, image2):
+    """
+    Combines two 3D images (NumPy arrays) by overlaying image2 on image1.
+    If both images have non-zero values in overlapping regions, image2 takes precedence.
+
+    Parameters:
+    - image1: ndarray
+        First 3D image (base image).
+    - image2: ndarray
+        Second 3D image to overlay on image1.
+
+    Returns:
+    - combined_image: ndarray
+        Combined 3D image.
+    """
+    if image1.shape != image2.shape:
+        raise ValueError("Images must have the same shape to combine.")
+
+    # Overlay image2 on image1, prioritizing non-zero values from image2
+    combined_image = np.where(image2 > 0, image2, image1)
+    return combined_image
 
 def pass_check_if_output_exists(filename,overwrite=False):
     if filename: # only continues if not None
@@ -146,7 +168,7 @@ def get_phantom(phantom_type):
     return calibration_dict
 
 
-def histogram(image, nbins):
+def histogram(image, n_bins):
     array = vtk_to_numpy(image.GetPointData().GetScalars()).ravel()
     image_type = image.GetScalarType()
     guard = '!-------------------------------------------------------------------------------'
@@ -218,7 +240,7 @@ def histogram(image, nbins):
         data_range = [data_type_minimum, data_type_maximum]
     if (level_2 or level_1):
         data_range = [data_minimum, data_maximum]
-        number_bins = nbins
+        number_bins = n_bins
 
     # Make sure number of bins isn't greater than the data range
     data_range_span = int(data_maximum - data_minimum + 1)
@@ -392,7 +414,7 @@ def applyMask(imageData, maskData):
     return mask.GetOutput()
 
 
-#def applyTestBase(mesh, material_table):
+def applyTestBase(mesh, material_table):
     """Constructs to the FEM object.
     The first argument is the Image Mesh.
     The second argument is the material table.
@@ -788,6 +810,90 @@ def extractBox(extraction_bounds, model):
 
 
 def femoralHeadPMMA(femoral_head_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
+    """Creates the image data for the femoral head PMMA cap with a rounded bottom (cylindrical shape).
+    
+    The arguments are:
+    - femoral_head_model_bounds: Boundaries of the femoral head model
+    - spacing: Image voxel spacing
+    - origin: Image origin
+    - inval: Inside PMMA value
+    - outval: Outside PMMA value
+    - thickness: PMMA padding thickness
+    - pmma_mat_id: Material ID for PMMA
+    
+    Returns:
+    - vtkImageData with the bottom PMMA pad rounded as a cylinder.
+    """
+
+    ##
+    # Create vtkImageData for femoral head PMMA capping
+    fh_pmma_id = vtk.vtkImageData()
+    fh_pmma_id.SetSpacing(spacing)
+    fh_pmma_id.SetExtent(
+        int(femoral_head_model_bounds[0] / spacing[0]),
+        int(femoral_head_model_bounds[1] / spacing[0]),
+        int(femoral_head_model_bounds[2] / spacing[1]),
+        int(femoral_head_model_bounds[3] / spacing[1]),
+        int(femoral_head_model_bounds[4] / spacing[2]),
+        int(femoral_head_model_bounds[5] / spacing[2])
+    )
+    fh_pmma_id.SetOrigin(origin)
+    fh_pmma_id.AllocateScalars(vtk.VTK_SHORT, 1)
+
+    ##
+    # Create numpy array of PMMA cap to convert to vtkImageData
+    fh_pmma_np = np.empty(fh_pmma_id.GetDimensions())
+    fh_pmma_np.fill(inval)
+
+    ##
+    # Import Numpy array to vtk
+    vtk_data = numpy_to_vtk(
+        num_array=fh_pmma_np.ravel(),
+        deep=True,
+        array_type=vtk.VTK_SHORT
+    )
+    fh_pmma_id.GetPointData().SetScalars(vtk_data)
+
+    ##
+    # Pad Image with extra thickness
+    extent2 = fh_pmma_id.GetExtent()
+
+    fh_pmma_id_pad = vtk.vtkImageConstantPad()
+    fh_pmma_id_pad.SetInputData(fh_pmma_id)
+    fh_pmma_id_pad.SetOutputWholeExtent(
+        extent2[0], extent2[1],  # X extent unchanged
+        extent2[2] - thickness, extent2[3],  # Y min reduced (negative direction)
+        extent2[4], extent2[5]  # Z extent unchanged
+    )
+    fh_pmma_id_pad.SetConstant(pmma_mat_id)
+    fh_pmma_id_pad.Update()
+
+    # Create a cylinder for the bottom padding
+    cylinder = vtk.vtkCylinder()
+    cylinder.SetCenter(
+        (extent2[0] + extent2[1]) * 0.5 * spacing[0] + origin[0],  # Center in X
+        (extent2[2] - thickness) * spacing[1] + origin[1],  # Bottom Y position
+        (extent2[4] + extent2[5]) * 0.5 * spacing[2] + origin[2]   # Center in Z
+    )
+    cylinder.SetRadius((extent2[1] - extent2[0]) * 0.3 * spacing[0])  # Approximate radius
+    cylinder.SetAxis(0, 1, 0)  # Aligned with Y-axis
+
+    # Apply Boolean intersection to make the bottom part rounded
+    stencil = vtk.vtkImplicitFunctionToImageStencil()
+    stencil.SetInput(cylinder)
+    stencil.SetOutputWholeExtent(fh_pmma_id_pad.GetOutputWholeExtent())
+    stencil.Update()
+
+    stencil_filter = vtk.vtkImageStencil()
+    stencil_filter.SetInputData(fh_pmma_id_pad.GetOutput())
+    stencil_filter.SetStencilData(stencil.GetOutput())
+    stencil_filter.ReverseStencilOff()
+    stencil_filter.SetBackgroundValue(outval)
+    stencil_filter.Update()
+
+    return stencil_filter.GetOutput()
+
+def femoralHeadPMMA_square(femoral_head_model_bounds, spacing, origin, inval, outval, thickness, pmma_mat_id):
     """Creates the image data for the femoral head PMMA cap.
     The arguments are the femoral head model bounds, image spacing, image origin, in value of pmma, out value for pmma, pmma thickness and pmma material ID.
     Returns the Femoral Head PMMA padded image.
@@ -1036,25 +1142,25 @@ def greaterTrochanterPMMA(greater_trochanter_model_bounds, spacing, origin, inva
     return gt_pmma_id_pad.GetOutput()
 
 
-#def Image2Mesh(vtk_image):
-#    """Mesh image data to hexahedral elements."""
-#    mesher = vtkbone.vtkboneImageToMesh()
-#    mesher.SetInputData(vtk_image)
-#    mesher.Update()
-#    message("Generated %d hexahedrons" % mesher.GetOutput().GetNumberOfCells())
-#   message("Generated %d nodes" % mesher.GetOutput().GetNumberOfPoints())
-#    return mesher.GetOutput()
+def Image2Mesh(vtk_image):
+    """Mesh image data to hexahedral elements."""
+    mesher = vtkbone.vtkboneImageToMesh()
+    mesher.SetInputData(vtk_image)
+    mesher.Update()
+    message("Generated %d hexahedrons" % mesher.GetOutput().GetNumberOfCells())
+    message("Generated %d nodes" % mesher.GetOutput().GetNumberOfPoints())
+    return mesher.GetOutput()
 
 
 def imageConnectivity(vtk_image):
-#    """Performd image connectivity filter"""
-#    conn = vtkbone.vtkboneImageConnectivityFilter()
-#    conn.SetInputData(vtk_image)
-#    conn.Update()
-#    return conn.GetOutput()
+    """Performd image connectivity filter"""
+    conn = vtkbone.vtkboneImageConnectivityFilter()
+    conn.SetInputData(vtk_image)
+    conn.Update()
+    return conn.GetOutput()
 
 
-#def imageResample(vtk_image, isotropic_voxel_size):
+def imageResample(vtk_image, isotropic_voxel_size):
     """Resample the input vtk image to isotropic voxel size as specified.
     The first argument is the input vtk Image Data.
     The second argument is the isotropic output voxel size.
@@ -1229,24 +1335,56 @@ def marchingCubes(vtk_image):
     return march.GetOutput()
 
 
-def maskThreshold(imageData, threshold_value):
-    """Applies the threshold value to the input image.
-    The first argument is the image. The second argument is the threshold value to be applied.
-    Returns the thresholded image region as image Data.
+def maskThreshold(imageData, threshold_values):
     """
-    thres = vtk.vtkImageThreshold()
-    thres.SetInputData(imageData)
-    thres.ThresholdBetween(threshold_value, threshold_value)
-    thres.ReplaceInOn()
-    thres.SetInValue(1)
-    thres.ReplaceOutOn()
-    thres.SetOutValue(0)
-    thres.SetOutputScalarTypeToUnsignedChar()
-    thres.Update()
-    return thres.GetOutput()
+    Applies a list of threshold values (or a single value) to the input image and combines the results,
+    assigning consecutive values for each threshold.
+
+    Parameters:
+    - imageData: vtkImageData, the input image.
+    - threshold_values: int or list of int, the threshold value(s) to apply.
+
+    Returns:
+    - Combined thresholded image as vtkImageData with consecutive values for each threshold.
+    """
+    # Ensure threshold_values is a list
+    if isinstance(threshold_values, int):
+        threshold_values = [threshold_values]
+
+    # Initialize a variable to hold the combined mask
+    combined_mask = None
+    
+    for i, threshold_value in enumerate(threshold_values, start=1):
+        message("Threshold Value: %d" % threshold_value)
+        
+        # Threshold the image for the current value
+        thres = vtk.vtkImageThreshold()
+        thres.SetInputData(imageData)
+        thres.ThresholdBetween(threshold_value, threshold_value)
+        thres.ReplaceInOn()
+        thres.SetInValue(i)  # Assign a unique value for this threshold
+        thres.ReplaceOutOn()
+        thres.SetOutValue(0)
+        thres.SetOutputScalarTypeToUnsignedChar()
+        thres.Update()
+
+        if combined_mask is None:
+            # First iteration: initialize combined mask
+            combined_mask = vtk.vtkImageData()
+            combined_mask.DeepCopy(thres.GetOutput())
+        else:
+            # Combine the current mask with the previous masks
+            math = vtk.vtkImageMathematics()
+            math.SetInput1Data(combined_mask)
+            math.SetInput2Data(thres.GetOutput())
+            math.SetOperationToAdd()  # Add the values to assign consecutive numbers
+            math.Update()
+            combined_mask.DeepCopy(math.GetOutput())
+
+    return combined_mask
 
 
-#def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):
+def materialTable(mesh, poissons_ratio, elastic_Emax, elastic_exponent, pmma_mat_id, pmma_E, pmma_v):
     """Defines the material table for the FE model.
     The first argument is the hexahedral mesh.
     The second argument is the bone poissons ratio.
@@ -1256,6 +1394,8 @@ def maskThreshold(imageData, threshold_value):
     The 6th is the pmma elastic modulus.
     The 7th is the pmma poissons ratio.
     Returns the Finite Element Material Table.
+
+    This does not work with PISTOIA postprocessing - Matthias Walle 01/2025
     """
     # Initialize the material table
     material_table = vtkbone.vtkboneMaterialTable()
@@ -1272,7 +1412,7 @@ def maskThreshold(imageData, threshold_value):
     # Determine maximum material ID: exclude PMMA
     values = vtk_to_numpy(mesh.GetCellData().GetScalars())
     max_id = int(max(values))
-    # message("Maximum ID: %d" % max_id)
+    message("Maximum ID: %d" % max_id)
 
     # Create array of Young's Modulus values
     bone_E = np.arange(1, max_id + 2, dtype=np.float32)
@@ -1287,11 +1427,11 @@ def maskThreshold(imageData, threshold_value):
         # Power law density-Elastic Modulus conversion. Requires Density in [g/cc], not [mg/cc].
         den_bin_step = 0.001
         den = i * den_bin_step
-        # message("Calculated density: %8.4f" % den)
+        message("Calculated density: %8.4f" % den)
         modulus = elastic_Emax * math.pow(den, elastic_exponent)
-        # message("Calculated Elastic Modulus: %8.4f" % modulus)
+        message("Calculated Elastic Modulus: %8.4f" % modulus)
         bone_E[i] = modulus
-        # message("ID:%d; Density(g/cc):%8.4f; Modulus(MPa):%8.4f" % (i, den, modulus))
+        message("ID:%d; Density(g/cc):%8.4f; Modulus(MPa):%8.4f" % (i, den, modulus))
 
     # Convert these numpy arrays to VTK arrays
     bone_E_vtk = numpy_to_vtk(bone_E, deep=True, array_type=vtk.VTK_FLOAT)
@@ -1305,6 +1445,225 @@ def maskThreshold(imageData, threshold_value):
     # Add the material array to the material table
     material_table.AddMaterial(1, bone_material_array)
     return material_table
+
+def density2materialID(density_image, n_bins=128, cort_mask=None):
+    """
+    Bins the density values from a VTK image into specified bins while keeping the background (0) unchanged.
+
+    Parameters:
+        density_image (vtkImageData): VTK image containing density values.
+        n_bins (int): Number of bins for density values.
+
+    Returns:
+        vtkImageData: Binned image with material IDs (0 for background, 1 to n_bins for other densities).
+        np.ndarray: Bin center values representing the densities for each bin.
+    """
+    # Extract the density values as a numpy array
+    density_array = vtk_to_numpy(density_image.GetPointData().GetScalars())
+    # Preserve the background (values equal to 0)
+    background_mask = density_array == 0
+
+    # Determine the density range, excluding background
+    density_nonzero = density_array[~background_mask]
+    density_min = np.min(density_nonzero)
+    density_max = np.max(density_nonzero)
+
+    # Create bin edges and bin centers
+    bin_edges = np.linspace(density_min, density_max, n_bins + 1)
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+    # Bin the non-background density values to create material IDs
+    binned_values = np.digitize(density_array, bin_edges, right=False)
+    binned_values = np.clip(binned_values, 1, n_bins)  # Ensure IDs are within 1 to n_bins
+
+    # Restore background values to 0
+    binned_values[background_mask] = 0
+
+    if cort_mask is not None:
+        cort_array = vtk_to_numpy(cort_mask.GetPointData().GetScalars())
+        binned_values[cort_array > 0] += n_bins
+        bin_centers = np.concatenate([bin_centers, bin_centers])  # Duplicate bin centers for cortical region
+
+    # Convert the binned values back to a VTK array
+    binned_vtk = numpy_to_vtk(binned_values, deep=True)
+    binned_image = vtk.vtkImageData()
+    binned_image.DeepCopy(density_image)
+    binned_image.GetPointData().SetScalars(binned_vtk)
+
+    return binned_image, bin_centers
+
+def resolve_material_func(name: str, module):
+    if name.startswith("constant_"):
+        try:
+            value = float(name.split("_")[1])
+            return module.constant(value)
+        except (IndexError, ValueError):
+            raise ValueError(f"Invalid constant definition: {name}")
+
+    elif name.startswith("power_"):
+        try:
+            _, A, b = name.split("_")
+            return module.power_law(float(A), float(b))
+        except (ValueError, IndexError):
+            raise ValueError(f"Invalid power law definition: {name} (expected format: power_A_B)")
+
+    elif name.startswith("linear_"):
+        try:
+            _, A, B = name.split("_")
+            return module.linear(float(A), float(B))
+        except (ValueError, IndexError):
+            raise ValueError(f"Invalid linear definition: {name} (expected format: linear_A_B)")
+
+    else:
+        try:
+            return getattr(module, name)
+        except AttributeError:
+            raise ValueError(f"Function '{name}' not found in module {module.__name__}")
+
+def add_bone_material(
+    material_table,
+    bin_centers,
+    elastic_E_func=None,
+    yield_comp_func=None,
+    yield_tens_func=None,
+    mu=0.3,
+    bin_range=(0, 128),
+    material_name="Bone",
+):
+    """
+    Adds linear or nonlinear bone materials to a vtkboneMaterialTable using function handles.
+
+    Parameters:
+        material_table (vtkboneMaterialTable): The material table to modify.
+        bin_centers (np.ndarray): The density values [mg/cc] used for binning.
+        elastic_E_func (callable): Function mapping density -> Young's modulus [MPa].
+        yield_comp_func (callable): (Optional) Function mapping density -> compressive yield stress [MPa].
+        yield_tens_func (callable): (Optional) Function mapping density -> tensile yield stress [MPa].
+        mu (float): Poisson's ratio (default: 0.3).
+        bin_range (tuple): Range of bin indices to assign these properties to.
+        material_name (str): Descriptive name for the material.
+
+    Returns:
+        vtkboneMaterialTable: The updated material table.
+    """
+
+    for i, rho in enumerate(bin_centers):
+        mat_id = bin_range[0] + i
+        E = elastic_E_func(rho) if elastic_E_func else 0.0
+
+        yc = yield_comp_func(rho) if yield_comp_func else None
+        yt = yield_tens_func(rho) if yield_tens_func else None
+
+        if yc is not None or yt is not None:
+            if yc is None:
+                yc = yt
+            if yt is None:
+                yt = yc
+            mat_name = f"MohrCoulomb_{material_name}_{mat_id}"
+            material = vtkbone.vtkboneMohrCoulombIsotropicMaterial()
+            material.SetYieldStrengths(yt, yc)
+            material.SetName(mat_name)
+        else:
+            mat_name = f"LinearIsotropic_{material_name}_{mat_id}"
+            material = vtkbone.vtkboneLinearIsotropicMaterial()
+            material.SetName(mat_name)
+
+        material.SetYoungsModulus(E)
+        material.SetPoissonsRatio(mu)
+
+        material_table.AddMaterial(mat_id, material)
+
+        print(f"{mat_name}: Density(g/cc):{rho/1000:.4f}; Modulus(MPa):{E:.4f}; "
+              f"Yield Strength (Comp):{yc} MPa; Yield Strength (Tens):{yt} MPa")
+    return material_table
+
+def add_bone_material_depreciated(material_table, bin_centers, elastic_Emax=10500, elastic_exponent=2.29, mu=0.3, 
+                                    bone_yield_compression=None, bone_yield_tension=None, bin_range=None, material_name='BoneMat'):
+    """
+    Adds Mohr-Coulomb elastoplastic bone material properties to a VTK material table based on density bins.
+
+    Parameters:
+        material_table (vtkbone.vtkboneMaterialTable): The material table to populate.
+        bin_centers (np.ndarray): Array of density values (in mg/ccm) for each bin.
+        elastic_Emax (float): Maximum elastic modulus (MPa).
+        elastic_exponent (float): Exponent for power-law calculation of modulus.
+        mu (float): Constant Poisson's ratio for all materials.
+        yield_strength_compressive (float): Yield strength (MPa) for compression.
+        yield_strength_tensile (float): Yield strength (MPa) for tension.
+
+    Returns:
+        vtkbone.vtkboneMaterialTable: The updated material table with Mohr-Coulomb bone properties.
+    """
+
+    # Apply bin range filtering if provided
+    if bin_range is not None:
+        if len(bin_range) != 2:
+            raise ValueError("bin_range must be a list or tuple with exactly two values [min_bin_idx, max_bin_idx].")
+        
+        min_bin_idx, max_bin_idx = bin_range
+        if min_bin_idx < 0 or max_bin_idx > len(bin_centers):
+            raise ValueError(f"bin_range indices must be within [0, {len(bin_centers)}]")
+
+        # Convert to zero-based indexing for slicing
+        bin_centers = bin_centers[min_bin_idx : max_bin_idx]
+
+    # Loop through each density bin
+    for i, density in enumerate(bin_centers, start=1):
+        # Calculate Young's modulus using the power-law formula (Converting density to g/ccm)
+        E = elastic_Emax * ((density / 1000) ** elastic_exponent)
+
+        print(f"ID:{i+bin_range[0]}; Density(g/cc):{density/1000:.4f}; Modulus(MPa):{E:.4f}; "
+              f"Yield Strength (Comp):{bone_yield_compression} MPa; Yield Strength (Tens):{bone_yield_tension} MPa")
+
+        # Create a Mohr-Coulomb elastoplastic material
+        if bone_yield_tension is not None and bone_yield_compression is not None:
+            bone_material = vtkbone.vtkboneMohrCoulombIsotropicMaterial()
+            bone_material.SetYieldStrengths(bone_yield_tension, bone_yield_compression)
+            bone_material.SetName(f"MohrCoulomb_{material_name}{i}")
+        else:
+            bone_material = vtkbone.vtkboneLinearIsotropicMaterial()
+            bone_material.SetName(f"LinearIsotropic_{material_name}{i}")
+
+        bone_material.SetYoungsModulus(E)
+        bone_material.SetPoissonsRatio(mu)
+
+        # Set a dynamic name for the material
+
+        # Add material to the table with an ID corresponding to the bin index
+        material_table.AddMaterial(i+bin_range[0], bone_material)
+
+    return material_table
+
+
+def add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v, pmma_yield_tension=None, pmma_yield_compression=None):
+    """
+    Adds a PMMA material to the provided material table.
+
+    Parameters:
+        material_table (vtkbone.vtkboneMaterialTable): The material table to populate.
+        pmma_mat_id (int): The material ID for PMMA.
+        pmma_E (float): Young's modulus for PMMA (MPa).
+        pmma_v (float): Poisson's ratio for PMMA.
+
+    Returns:
+        vtkbone.vtkboneMaterialTable: The updated material table with the PMMA material.
+    """
+    # Create PMMA material
+    if pmma_yield_tension is not None and pmma_yield_compression is not None:
+        pmma_material = vtkbone.vtkboneMohrCoulombIsotropicMaterial()
+        pmma_material.SetYieldStrengths(pmma_yield_tension, pmma_yield_compression)
+    else:
+        pmma_material = vtkbone.vtkboneLinearIsotropicMaterial()
+
+    pmma_material.SetName("PMMA")
+    pmma_material.SetYoungsModulus(pmma_E)
+    pmma_material.SetPoissonsRatio(pmma_v)
+
+    # Add the PMMA material to the material table
+    material_table.AddMaterial(pmma_mat_id, pmma_material)
+
+    return material_table
+
 
 
 def message(msg, *additionalLines):
@@ -1882,189 +2241,385 @@ def reapply_internal_calibration_from_txt(input_image_path, calib_txt_path, outp
 # 
 #     return final_image
 
-# def icEffectiveEnergy(HU_array, adipose, air, blood, bone, muscle, k2hpo4, cha, triglyceride, water):
-#     """Used to determine the scan effective energy for internal calibration.
-#     The first argument is the mean HU for each tissue.
-#     The remaining arguments are the tissue specific interpolated tables from icInterpolation.
-#     Returns the scan effective energy and calibration parameters as a dictionary.
-#     """
-#     energy_r2_values = pd.DataFrame(columns = ['Energy [keV]', 'R-Squared'])
-#     energy_r2_values['Energy [keV]'] = adipose['Energy [keV]']
+def writeNii(imageData, fileName, output_directory):
+    """Writes out an input image as a NIFTI file.
+    The first argument is the image Data. The second argument is the filename. The third argument is the output directory where the file is to be written to.
+    """
+    os.chdir(output_directory)
+    writer = vtk.vtkNIFTIImageWriter()
+    writer.SetInputData(imageData)
+    writer.SetFileName(fileName)
+    writer.Write()
+
+def applyInternalCalibration(imageData, cali_parameters):
+     """ Applies the internal calibration to the image.
+     The first argument is the image.
+     The second argument is a dictionary of the calibration parameters.
+     Returns the calibrated image in mg/cc.
+     """
+     ##
+     # Some parameters to have from the inputs
+     extent = imageData.GetExtent()
+     origin = imageData.GetOrigin()
+     spacing = imageData.GetSpacing()
+     voxel_volume_mm = spacing[0] * spacing[1] * spacing[2] # [mm^3]
+     voxel_volume_cm = voxel_volume_mm / 1000 # [cm^3]
+     HU_MassAtten_Slope = cali_parameters['HU-u/p Slope']
+     HU_MassAtten_Yint = cali_parameters['HU-u/p Y-Intercept']
+     HU_Den_Slope = cali_parameters['HU-Material Density Slope']
+     HU_Den_Yint = cali_parameters['HU-Material Density Y-Intercept']
+     Triglyceride_Mass_Atten = cali_parameters['Triglyceride u/p']
+     K2HPO4_Mass_Atten = cali_parameters['K2HPO4 u/p']
+ 
+     ##
+     # Create copies of the image data for Output density Images and convert to numpy arrays
+     # Mass Attenuation Reference Image
+     Mass_Atten_image = vtk.vtkImageData()
+     Mass_Atten_image.SetExtent(extent)
+     Mass_Atten_image.SetOrigin(origin)
+     Mass_Atten_image.SetSpacing(spacing)
+     Mass_Atten_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+     Mass_Atten_data = vtk2numpy(Mass_Atten_image)
+ 
+     # Archimedian Density Reference Image
+     Arch_den_image = vtk.vtkImageData()
+     Arch_den_image.SetExtent(extent)
+     Arch_den_image.SetOrigin(origin)
+     Arch_den_image.SetSpacing(spacing)
+     Arch_den_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+     Arch_den_data = vtk2numpy(Arch_den_image)
+ 
+     # Mass Attenuation Reference Image
+     Mass_image = vtk.vtkImageData()
+     Mass_image.SetExtent(extent)
+     Mass_image.SetOrigin(origin)
+     Mass_image.SetSpacing(spacing)
+     Mass_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+     Mass_data = vtk2numpy(Mass_image)
+ 
+     # K2HPO4 Density
+     K2HPO4_den_image = vtk.vtkImageData()
+     K2HPO4_den_image.SetExtent(extent)
+     K2HPO4_den_image.SetOrigin(origin)
+     K2HPO4_den_image.SetSpacing(spacing)
+     K2HPO4_den_image.AllocateScalars(vtk.VTK_FLOAT, 1)
+     K2HPO4_den_data = vtk2numpy(K2HPO4_den_image)
+ 
+     ##
+     # Convert image to NumPy
+     message("Converting image to NumPy...")
+     numpy_image = vtk2numpy(imageData)
+ 
+     ##
+     # Apply HU to Mass Attenuation Conversion
+     message("Converting image to mass attenuation equivalent...")
+     Mass_Atten_data[:,:,:] = ((HU_MassAtten_Slope * numpy_image) + HU_MassAtten_Yint)
+ 
+     # Apply HU to Archimedian Density Conversion
+     message("Converting image to Archimedian density equivalent...")
+     Arch_den_data[:,:,:] = ((HU_Den_Slope * numpy_image) + HU_Den_Yint)
+ 
+     # Convert Archimedian density to total mass equivalent
+     message("Converting Archimedian density equivalent to Mass equivalent image...")
+     Mass_data[:,:,:] = Arch_den_data * voxel_volume_cm
+ 
+     # Converting onverting to K2HPO4 Mass
+     message("Converting to K2HPO4 Mass Image...")
+     K2HPO4_mass_seg_data = np.zeros_like(Mass_data, dtype = 'h')
+ 
+     # Two component model to derive K2HPO4 mass image
+     K2HPO4_mass_seg_data = (Mass_data *((Mass_Atten_data - Triglyceride_Mass_Atten) / (K2HPO4_Mass_Atten - Triglyceride_Mass_Atten)))
+ 
+     # Converting mass images to density images
+     message("Converting K2HPO4 mass images to K2HPO4 density images...")
+     K2HPO4_den_data = K2HPO4_mass_seg_data / voxel_volume_cm * 1000 # *1000 to convert g to mg
+ 
+     # Convery Numpy images back to vtk Image
+     scalars = K2HPO4_den_data.flatten(order='C')
+     VTK_data = numpy_to_vtk(num_array=scalars, deep=True, array_type=vtk.VTK_FLOAT)
+     K2HPO4_den_image.GetPointData().SetScalars(VTK_data)
+ 
+     return K2HPO4_den_image
+
+def applyPhantomParameters(vtk_image, calibration_parameters):
+    """Uses image mathematics to apply image calibration.
+    The first argument is the vtk Image Data.
+    The second argument are the calibration parameters dictionary (slope, y-intercept).
+    Returns vtk Image Data in FLOAT data type.
+    """
+    cast = vtk.vtkImageCast()
+    cast.SetInputData(vtk_image)
+    cast.SetOutputScalarTypeToFloat()
+    cast.Update()
+
+    slope_image = vtk.vtkImageMathematics()
+    slope_image.SetInputConnection(0, cast.GetOutputPort())
+    slope_image.SetOperationToMultiplyByK()
+    slope_image.SetConstantK(calibration_parameters['Calibration Slope'])
+    slope_image.Update()
+
+    calibrated_image = vtk.vtkImageMathematics()
+    calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
+    calibrated_image.SetOperationToAddConstant()
+    calibrated_image.SetConstantC(calibration_parameters['Calibration Y-Intercept'])
+    calibrated_image.Update()
+
+    return calibrated_image.GetOutput()
+
+def bmd_CHAToAsh(vtk_image):
+    """Converts CHA density to ash density using equation from:
+    CHA density to ASH density relationship from Kaneko et al. 2004 J Biomech
+    'Mechanical properties, density and quantitative CT scan data of trabecular
+        bone with and without metastases'
+    The first argument is the density image.
+    Returns the Ash Density Image.
+    """
+    slope_image = vtk.vtkImageMathematics()
+    slope_image.SetInputData(0, vtk_image)
+    slope_image.SetOperationToMultiplyByK()
+    slope_image.SetConstantK(0.839)
+    slope_image.Update()
+
+    calibrated_image = vtk.vtkImageMathematics()
+    calibrated_image.SetInputConnection(0, slope_image.GetOutputPort())
+    calibrated_image.SetOperationToAddConstant()
+    calibrated_image.SetConstantC(69.8)
+    calibrated_image.Update()
+    return calibrated_image.GetOutput()
+
+def combineImageData_SLS(image, fh_pmma_id_pad, pmma_mat_id):
+    """Combines the 2 image data together to get final image.
+    The first argument is the original image data.
+    The second argument is the femoral head PMMA cap image.
+    The third argument is the greater trochanter PMMA cap image.
+    Returns the combined image data.
+    """
+    message("Padding the images to constant size...")
+    ##
+    # Pad all images so that they are the same size
+    fh_pad = vtk.vtkImageConstantPad()
+    fh_pad.SetInputData(fh_pmma_id_pad)
+    fh_pad.SetOutputWholeExtent(image.GetExtent())
+    fh_pad.SetConstant(0)
+    fh_pad.Update()
+
+    message("Combining PMMA Caps with Image Data...")
+    fh_logic = vtk.vtkImageLogic()
+    fh_logic.SetInput1Data(fh_pad.GetOutput())
+    fh_logic.SetInput2Data(image)
+    fh_logic.SetOperationToAnd()
+    fh_logic.SetOutputTrueValue(pmma_mat_id)
+    fh_logic.Update()
+
+    fh_math = vtk.vtkImageMathematics()
+    fh_math.SetInput1Data(fh_pad.GetOutput())
+    fh_math.SetInput2Data(fh_logic.GetOutput())
+    fh_math.SetOperationToSubtract()
+    fh_math.Update()
+
+    combo_image = vtk.vtkImageMathematics()
+    combo_image.SetInput1Data(fh_math.GetOutput())
+    combo_image.SetInput2Data(image)
+    combo_image.SetOperationToAdd()
+    combo_image.Update()
+
+    message("PMMA caps added.")
+    message("Creating final image...")
+    # Remove any negative values...
+    final_thres = vtk.vtkImageThreshold()
+    final_thres.SetInputData(combo_image.GetOutput())
+    final_thres.ThresholdByLower(0)
+    final_thres.ReplaceInOn()
+    final_thres.SetInValue(0)
+    final_thres.ReplaceOutOff()
+    final_thres.Update()
+    final_image = final_thres.GetOutput()
+
+    return final_image
+
+def icEffectiveEnergy(HU_array, adipose, air, blood, bone, muscle, k2hpo4, cha, triglyceride, water):
+    """Used to determine the scan effective energy for internal calibration.
+    The first argument is the mean HU for each tissue.
+    The remaining arguments are the tissue specific interpolated tables from icInterpolation.
+    Returns the scan effective energy and calibration parameters as a dictionary.
+    """
+    energy_r2_values = pd.DataFrame(columns = ['Energy [keV]', 'R-Squared'])
+    energy_r2_values['Energy [keV]'] = adipose['Energy [keV]']
+
+    for i in np.arange(1, len(adipose), 1):
+        attenuation = [
+        adipose.loc[i,'Mass Attenuation [cm2/g]'],
+        air.loc[i,'Mass Attenuation [cm2/g]'],
+        blood.loc[i,'Mass Attenuation [cm2/g]'],
+        bone.loc[i,'Mass Attenuation [cm2/g]'],
+        muscle.loc[i,'Mass Attenuation [cm2/g]']
+        ]
+
+        EE_lr = stats.linregress(HU_array, attenuation)
+        r_squared = EE_lr[2]**2
+        energy_r2_values.loc[i, 'R-Squared'] = r_squared
+
+    max_row = energy_r2_values[energy_r2_values['R-Squared'] == energy_r2_values['R-Squared'].max()]
+    max_r2 = energy_r2_values['R-Squared'].max()
+    index = max_row.index.values.astype(int)[0]
+    effective_energy = max_row.at[index, 'Energy [keV]']
+
+    # Determine the corresponding mass attenuation values for each material
+    adipose_EE = adipose.at[index, 'Mass Attenuation [cm2/g]']
+    air_EE = air.at[index, 'Mass Attenuation [cm2/g]']
+    blood_EE = blood.at[index, 'Mass Attenuation [cm2/g]']
+    bone_EE = bone.at[index, 'Mass Attenuation [cm2/g]']
+    muscle_EE = muscle.at[index, 'Mass Attenuation [cm2/g]']
+    k2hpo4_EE = k2hpo4.at[index, 'Mass Attenuation [cm2/g]']
+    cha_EE = cha.at[index, 'Mass Attenuation [cm2/g]']
+    triglyceride_EE = triglyceride.at[index, 'Mass Attenuation [cm2/g]']
+    water_EE = water.at[index, 'Mass Attenuation [cm2/g]']
+
+    # Create dictionary for output
+    dict = OrderedDict()
+    dict['Effective Energy [keV]'] = effective_energy
+    dict['Max R^2'] = max_r2
+    dict['Adipose u/p'] = adipose_EE
+    dict['Air u/p'] = air_EE
+    dict['Blood u/p'] = blood_EE
+    dict['Cortical Bone u/p'] = bone_EE
+    dict['Skeletal Muscle u/p'] = muscle_EE
+    dict['K2HPO4 u/p'] = k2hpo4_EE
+    dict['CHA u/p'] = cha_EE
+    dict['Triglyceride u/p'] = triglyceride_EE
+    dict['Water u/p'] = water_EE
+
+    return dict
+
+def icInterpolation(material_table):
+    """Used for internal calibration. Interpolates the material table for energy
+    levels 1-200 keV.The first argument is the reference material table.
+    Returns the interpolated material table for internal calibration.
+    """
+    energies = np.arange(1, 200.5, 0.5)
+    interp_table = interp.griddata(material_table['Energy [keV]'], material_table['Mass Attenuation [cm2/g]'], energies, method = 'linear')
+    interp_df = pd.DataFrame({'Energy [keV]':energies, 'Mass Attenuation [cm2/g]':interp_table})
+    return interp_df
+
+def icLinearRegression(x_values, y_values, slopeLabel, yintLabel):
+    """Function for linear regression of two values.
+    The first argument are the x values.
+    The second argument are the y values.
+    The third argument is the dictionary label for the slope.
+    The fourth argument is the dictionary ladel for the y-intercept
+    Returns the regression slope and y-intercept as dictionary.
+    """
+    linreg = stats.linregress(x_values, y_values)
+    dict = OrderedDict()
+    dict[slopeLabel] = linreg[0]
+    dict[yintLabel] = linreg[1]
+    return dict
+
+def imageHistogramMean(imageData):
+    """Creates a histogram of the input image data, ignoring zero values.
+    The first argument is the input image data.
+    Returns the mean value of the histogram.
+    """
+    accumulate = vtk.vtkImageAccumulate()
+    accumulate.SetInputData(imageData)
+    accumulate.IgnoreZeroOn()
+    accumulate.Update()
+    mean = accumulate.GetMean()
+    return mean
+
+def imageHistogram(imageData):
+    """Creates a histogram of the input image data, ignoring zero values.
+    Returns the mean value of the histogram.
+    """
+    accumulate = vtk.vtkImageAccumulate()
+    accumulate.SetInputData(imageData)
+    accumulate.IgnoreZeroOn()
+    accumulate.Update()
+    image_mean = accumulate.GetMean()[0] # First value in tuple is our result
+    image_sd = accumulate.GetStandardDeviation()[0]
+    image_min = accumulate.GetMin()[0]
+    image_max = accumulate.GetMax()[0]
+    image_voxel_count = accumulate.GetVoxelCount()
+    return [image_mean, image_sd, image_min, image_max, image_voxel_count]
+
+def icMaterialDensity(material_HU, material_attenuation, water_attenuation, water_density):
+    """Determines the apparent density for each material.
+    The first argument is the material HU from ROI.
+    The second argument is the material attenuation at the effective energy.
+    The third argument is water's attenuation at the effective energy.
+    The fourth argument is the assumed density of water at 1.0 g/cc.
+    Returns the material density.
+    """
+    output_density = (material_HU/1000*water_attenuation*water_density + water_attenuation*water_density)/material_attenuation
+    return output_density
+
+def phantomParameters(h2o_density, k2hpo4_density, phantom_HU):
+    """Determine the slope and y-intercept for the phantom calibration.
+    The first argument are the phantom specific H2O equivalent density values. The second
+    argument are the phantom specific K2HPO4 equivalent density values. The third
+    argument are the phantom rod mean HU values from the image and mask.
+    Returns the slope and y-intercept for the calibration as a float list.
+    """
+    y_values = np.subtract(phantom_HU, h2o_density)
+    x_values = k2hpo4_density
+    regression_parameters = stats.linregress(x_values, y_values)
+
+    # convert slope and y-intercept to CT parameters
+    sigma_ct = regression_parameters[0] - 0.2174
+    beta_ct = regression_parameters[1] + 999.6
+
+    # Determine calibration parameters
+    calibration_slope = 1/sigma_ct
+    calibration_yint = 1*beta_ct/sigma_ct
+    return {
+    'Calibration Slope':calibration_slope,
+    'Calibration Y-Intercept':calibration_yint
+    }
+
+def phantomParameters_bmas200(cha_density, phantom_HU):
+    """Determine the slope and y-intercept for the phantom calibration.
+    The first argument is the phantom specific cha equivalent density values. The second
+    argument are the phantom rod mean HU values from the image and mask.
+    Returns the slope and y-intercept for the calibration as a float list.
+    """
+    x_values = phantom_HU
+    y_values = cha_density
+    regression_parameters = stats.linregress(x_values, y_values)
+
+    # Determine calibration parameters
+    calibration_slope = regression_parameters[0]
+    calibration_yint = regression_parameters[1]
+    return {
+    'Calibration Slope':calibration_slope,
+    'Calibration Y-Intercept':calibration_yint
+    }
+
+def readDCM(fileDir):
+    """Reads a DICOM image from a directory.
+    The first argument is the image directory.
+    Returns the image as vtk Output Data.
+    """
+    image = vtk.vtkDICOMImageReader()
+    image.SetDirectoryName(fileDir)
+    image.Update()
+
+    flip = vtk.vtkImageFlip()
+    flip.SetInputConnection(image.GetOutputPort())
+    flip.SetFilteredAxis(1)
+    flip.Update()
+    flip2 = vtk.vtkImageFlip()
+    flip2.SetInputConnection(flip.GetOutputPort())
+    flip2.SetFilteredAxis(2)
+    flip2.Update()
+
+    return flip2.GetOutput()
 # 
-#     for i in np.arange(1, len(adipose), 1):
-#         attenuation = [
-#         adipose.loc[i,'Mass Attenuation [cm2/g]'],
-#         air.loc[i,'Mass Attenuation [cm2/g]'],
-#         blood.loc[i,'Mass Attenuation [cm2/g]'],
-#         bone.loc[i,'Mass Attenuation [cm2/g]'],
-#         muscle.loc[i,'Mass Attenuation [cm2/g]']
-#         ]
-# 
-#         EE_lr = stats.linregress(HU_array, attenuation)
-#         r_squared = EE_lr[2]**2
-#         energy_r2_values.loc[i, 'R-Squared'] = r_squared
-# 
-#     max_row = energy_r2_values[energy_r2_values['R-Squared'] == energy_r2_values['R-Squared'].max()]
-#     max_r2 = energy_r2_values['R-Squared'].max()
-#     index = max_row.index.values.astype(int)[0]
-#     effective_energy = max_row.at[index, 'Energy [keV]']
-# 
-#     # Determine the corresponding mass attenuation values for each material
-#     adipose_EE = adipose.at[index, 'Mass Attenuation [cm2/g]']
-#     air_EE = air.at[index, 'Mass Attenuation [cm2/g]']
-#     blood_EE = blood.at[index, 'Mass Attenuation [cm2/g]']
-#     bone_EE = bone.at[index, 'Mass Attenuation [cm2/g]']
-#     muscle_EE = muscle.at[index, 'Mass Attenuation [cm2/g]']
-#     k2hpo4_EE = k2hpo4.at[index, 'Mass Attenuation [cm2/g]']
-#     cha_EE = cha.at[index, 'Mass Attenuation [cm2/g]']
-#     triglyceride_EE = triglyceride.at[index, 'Mass Attenuation [cm2/g]']
-#     water_EE = water.at[index, 'Mass Attenuation [cm2/g]']
-# 
-#     # Create dictionary for output
-#     dict = OrderedDict()
-#     dict['Effective Energy [keV]'] = effective_energy
-#     dict['Max R^2'] = max_r2
-#     dict['Adipose u/p'] = adipose_EE
-#     dict['Air u/p'] = air_EE
-#     dict['Blood u/p'] = blood_EE
-#     dict['Cortical Bone u/p'] = bone_EE
-#     dict['Skeletal Muscle u/p'] = muscle_EE
-#     dict['K2HPO4 u/p'] = k2hpo4_EE
-#     dict['CHA u/p'] = cha_EE
-#     dict['Triglyceride u/p'] = triglyceride_EE
-#     dict['Water u/p'] = water_EE
-# 
-#     return dict
-#
-# def icInterpolation(material_table):
-#     """Used for internal calibration. Interpolates the material table for energy
-#     levels 1-200 keV.The first argument is the reference material table.
-#     Returns the interpolated material table for internal calibration.
-#     """
-#     energies = np.arange(1, 200.5, 0.5)
-#     interp_table = interp.griddata(material_table['Energy [keV]'], material_table['Mass Attenuation [cm2/g]'], energies, method = 'linear')
-#     interp_df = pd.DataFrame({'Energy [keV]':energies, 'Mass Attenuation [cm2/g]':interp_table})
-#     return interp_df
-# 
-# def icLinearRegression(x_values, y_values, slopeLabel, yintLabel):
-#     """Function for linear regression of two values.
-#     The first argument are the x values.
-#     The second argument are the y values.
-#     The third argument is the dictionary label for the slope.
-#     The fourth argument is the dictionary ladel for the y-intercept
-#     Returns the regression slope and y-intercept as dictionary.
-#     """
-#     linreg = stats.linregress(x_values, y_values)
-#     dict = OrderedDict()
-#     dict[slopeLabel] = linreg[0]
-#     dict[yintLabel] = linreg[1]
-#     return dict
-#
-# def imageHistogramMean(imageData):
-#     """Creates a histogram of the input image data, ignoring zero values.
-#     The first argument is the input image data.
-#     Returns the mean value of the histogram.
-#     """
-#     accumulate = vtk.vtkImageAccumulate()
-#     accumulate.SetInputData(imageData)
-#     accumulate.IgnoreZeroOn()
-#     accumulate.Update()
-#     mean = accumulate.GetMean()
-#     return mean
-# 
-# def imageHistogram(imageData):
-#     """Creates a histogram of the input image data, ignoring zero values.
-#     Returns the mean value of the histogram.
-#     """
-#     accumulate = vtk.vtkImageAccumulate()
-#     accumulate.SetInputData(imageData)
-#     accumulate.IgnoreZeroOn()
-#     accumulate.Update()
-#     image_mean = accumulate.GetMean()[0] # First value in tuple is our result
-#     image_sd = accumulate.GetStandardDeviation()[0]
-#     image_min = accumulate.GetMin()[0]
-#     image_max = accumulate.GetMax()[0]
-#     image_voxel_count = accumulate.GetVoxelCount()
-#     return [image_mean, image_sd, image_min, image_max, image_voxel_count]
-#
-# def icMaterialDensity(material_HU, material_attenuation, water_attenuation, water_density):
-#     """Determines the apparent density for each material.
-#     The first argument is the material HU from ROI.
-#     The second argument is the material attenuation at the effective energy.
-#     The third argument is water's attenuation at the effective energy.
-#     The fourth argument is the assumed density of water at 1.0 g/cc.
-#     Returns the material density.
-#     """
-#     output_density = (material_HU/1000*water_attenuation*water_density + water_attenuation*water_density)/material_attenuation
-#     return output_density
-#
-# def phantomParameters(h2o_density, k2hpo4_density, phantom_HU):
-#     """Determine the slope and y-intercept for the phantom calibration.
-#     The first argument are the phantom specific H2O equivalent density values. The second
-#     argument are the phantom specific K2HPO4 equivalent density values. The third
-#     argument are the phantom rod mean HU values from the image and mask.
-#     Returns the slope and y-intercept for the calibration as a float list.
-#     """
-#     y_values = np.subtract(phantom_HU, h2o_density)
-#     x_values = k2hpo4_density
-#     regression_parameters = stats.linregress(x_values, y_values)
-# 
-#     # convert slope and y-intercept to CT parameters
-#     sigma_ct = regression_parameters[0] - 0.2174
-#     beta_ct = regression_parameters[1] + 999.6
-# 
-#     # Determine calibration parameters
-#     calibration_slope = 1/sigma_ct
-#     calibration_yint = 1*beta_ct/sigma_ct
-#     return {
-#     'Calibration Slope':calibration_slope,
-#     'Calibration Y-Intercept':calibration_yint
-#     }
-# 
-# def phantomParameters_bmas200(cha_density, phantom_HU):
-#     """Determine the slope and y-intercept for the phantom calibration.
-#     The first argument is the phantom specific cha equivalent density values. The second
-#     argument are the phantom rod mean HU values from the image and mask.
-#     Returns the slope and y-intercept for the calibration as a float list.
-#     """
-#     x_values = phantom_HU
-#     y_values = cha_density
-#     regression_parameters = stats.linregress(x_values, y_values)
-# 
-#     # Determine calibration parameters
-#     calibration_slope = regression_parameters[0]
-#     calibration_yint = regression_parameters[1]
-#     return {
-#     'Calibration Slope':calibration_slope,
-#     'Calibration Y-Intercept':calibration_yint
-#     }
-#
-# def readDCM(fileDir):
-#     """Reads a DICOM image from a directory.
-#     The first argument is the image directory.
-#     Returns the image as vtk Output Data.
-#     """
-#     image = vtk.vtkDICOMImageReader()
-#     image.SetDirectoryName(fileDir)
-#     image.Update()
-# 
-#     flip = vtk.vtkImageFlip()
-#     flip.SetInputConnection(image.GetOutputPort())
-#     flip.SetFilteredAxis(1)
-#     flip.Update()
-#     flip2 = vtk.vtkImageFlip()
-#     flip2.SetInputConnection(flip.GetOutputPort())
-#     flip2.SetFilteredAxis(2)
-#     flip2.Update()
-# 
-#     return flip2.GetOutput()
-# 
-# def readNii(filename):
-#     """Reads a NIFTI image.
-#     The first argument is the image filename.
-#     Returns the Image as vtk Output Data
-#     """
-#     image = vtk.vtkNIFTIImageReader()
-#     image.SetFileName(filename)
-#     image.Update()
-#     return image.GetOutput()
+def readNii(filename):
+     """Reads a NIFTI image.
+     The first argument is the image filename.
+     Returns the Image as vtk Output Data
+     """
+     image = vtk.vtkNIFTIImageReader()
+     image.SetFileName(filename)
+     image.Update()
+     return image.GetOutput()

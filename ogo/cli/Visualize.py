@@ -147,7 +147,8 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
 
     extent = reader.GetOutput().GetExtent()
     ogo.message('  Extent: ' + ', '.join('{:d}'.format(i) for i in extent))
-    
+    ogo.message(f'Offscreen rendering: {offscreen}')
+ 
     ogo.message('Scanning for available labels:')
     labels = getLabels(reader.GetOutput())
 
