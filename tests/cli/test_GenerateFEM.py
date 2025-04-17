@@ -1,35 +1,44 @@
 import unittest
+from unittest import mock
+from ogo.cli import GenerateFEM
 
-from ogo.cli.GenerateFEM import vertebra, femur
 
-
-class Test_Vertebra(unittest.TestCase):
-
+class TestGenerateFEM(unittest.TestCase):
     def setUp(self) -> None:
-        """ Use this method to prep data or files for other tests, if necessary. """
         pass
 
     def tearDown(self) -> None:
-        """ Use this method to clean up after the tests, if necessary."""
         pass
 
-    @unittest.skip("Placeholder - add more tests here")
-    def test_placeholder(self) -> None:
-        """ ogo.cli.Test_GenerateFEM:Test_Vertebra """
-        pass
+    @mock.patch("ogo.cli.GenerateFEM.spine_compression_main")
+    def test_dispatch_to_vertebra(self, mock_spine):
+        """Test that 'vertebra' dispatches to spine_compression_main"""
+        test_args = [
+            "program",
+            "--model_type", "vertebra",
+            "--calibrated_image", "dummy_image.nii.gz",
+            "--bone_mask", "dummy_mask.nii.gz",
+            "--vertebral_body_label", "1",
+            "--vertebral_process_label", "2"
+        ]
+        with mock.patch("sys.argv", test_args):
+            GenerateFEM.main()
+            mock_spine.assert_called_once()
+
+    @mock.patch("ogo.cli.GenerateFEM.sideways_fall_main")
+    def test_dispatch_to_femur(self, mock_femur):
+        """Test that 'femur' dispatches to sideways_fall_main"""
+        test_args = [
+            "program",
+            "--model_type", "femur",
+            "--calibrated_image", "dummy_image.nii.gz",
+            "--bone_mask", "dummy_mask.nii.gz",
+            "--femur_side", "1"
+        ]
+        with mock.patch("sys.argv", test_args):
+            GenerateFEM.main()
+            mock_femur.assert_called_once()
 
 
-class Test_Femur(unittest.TestCase):
-
-    def setUp(self) -> None:
-        """ Use this method to prep data or files for other tests, if necessary. """
-        pass
-
-    def tearDown(self) -> None:
-        """ Use this method to clean up after the tests, if necessary."""
-        pass
-
-    @unittest.skip("Placeholder - add more tests here")
-    def test_placeholder(self) -> None:
-        """ ogo.cli.Test_GenerateFEM:Test_Femur """
-        pass
+if __name__ == "__main__":
+    unittest.main()

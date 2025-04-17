@@ -8,7 +8,7 @@ def main():
     """
     Wrapper function to run the vertebra or femur FE model setup.
     'One day we will have a better way to do this.' - Matthias Walle
-    
+
     - vertebra (OgoSpineCompressionFe):
         Required Arguments:
             - calibrated_image: Path to the *_K2HPO4.nii image file.
@@ -21,12 +21,11 @@ def main():
     - femur (ogoSidewaysFallFe):
         Required Arguments:
             - calibrated_image: Path to the *_K2HPO4.nii image file.
-            - bone_mask: Path to the *_MASK.nii bone mask image.
+            - bone_mask: Path to the *_MASK.nii image file.
             - --femur_side: 1 for left femur, 2 for right femur.
         Optional Arguments:
             - Refer to ogoSidewaysFallFe documentation for additional parameters.
     """
-    # Wrapper argument parsing
     parser = argparse.ArgumentParser(
         description=(
             "Wrapper to select vertebra or femur model setup.\n\n"
@@ -42,27 +41,16 @@ def main():
         required=True,
         help="Specify the model type to run: 'vertebra' or 'femur'.",
     )
-    parser.add_argument(
-        "remaining_args",
-        nargs=argparse.REMAINDER,
-        help=(
-            "Additional arguments for the selected model.\n"
-            "For vertebra, refer to OgoSpineCompressionFe.\n"
-            "For femur, refer to ogoSidewaysFallFe."
-        ),
-    )
-    args = parser.parse_args()
 
-    # Forward to the selected script
+    args, remaining_args = parser.parse_known_args()
+
     if args.model_type == "vertebra":
-        # Simulate calling OgoSpineCompressionFe directly
-        sys.argv = ["OgoSpineCompressionFe"] + args.remaining_args
+        sys.argv = ["OgoSpineCompressionFe"] + remaining_args
         spine_compression_main()
     elif args.model_type == "femur":
-        # Simulate calling ogoSidewaysFallFe directly
-        sys.argv = ["OgoSidewaysFallFe"] + args.remaining_args
+        sys.argv = ["OgoSidewaysFallFe"] + remaining_args
         sideways_fall_main()
 
 
 if __name__ == "__main__":
-    GenerateFE()
+    main()
