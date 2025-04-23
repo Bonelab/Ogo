@@ -6,6 +6,7 @@ click
 simpleitk
 numpy
 opencv-python
+matplotlib
 
 # Statistics
 scipy
