@@ -311,7 +311,7 @@ Example calls:
     # Setup argument parsing
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
-        prog="MergeLabels",
+        prog="ogoMergeLabels",
         description=description,
         epilog=epilog
     )
