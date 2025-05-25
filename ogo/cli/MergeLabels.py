@@ -266,7 +266,7 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
         ogo.message('        Try --add_multilabel option or --swap_labels?')
         os.sys.exit()
          
-    #ct_final = labelimagefilt.Execute(ct_final)
+    ct_final = labelimagefilt.Execute(ct_final)
     ogo.message('')
     ogo.message('Final image contains the following labels:')
     final_labels = get_labels(ct_final)
