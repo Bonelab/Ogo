@@ -52,11 +52,10 @@ Install
     # ... or straight HTTPS
     git clone https://github.com/Bonelab/Ogo.git
 
-    # I would recommend you create a virtual environment
-    #  using conda
-	conda create -n ogo -c numerics88 -c simpleitk -c conda-forge pandas simpleitk pbr nibabel nose six pyyaml python=3
+    # It is recommended to create a virtual environment using conda:
+    conda create -n ogo -c numerics88 -c simpleitk -c conda-forge pandas simpleitk pbr nibabel nose six pyyaml python=3
     
-	# Activate your conda environment, make sure you have conda installed on your system.
+    # Activate your conda environment, make sure you have conda installed on your system.
     # Best way to install conda is through anaconda
     conda activate ogo
     
