@@ -469,7 +469,7 @@ def get_cortical_bone(array, image_spacing):
     if (True):
         sorted_index_array = np.argsort(array)
         sorted_array = array[sorted_index_array]
-        n = 400  # number of top voxels
+        n = 899  # number of top voxels
         offset = 50  # voxels above offset in calculation
         rslt = sorted_array[-n - offset: -offset]
 
