@@ -476,7 +476,7 @@ def bmd_K2hpo4ToAsh(vtk_image):
     """
 
 
-def get_cortical_bone(array):
+def get_cortical_bone(array, image_spacing):
     sample_mean = 0
     sample_std = 0
     sample_count = 0
@@ -491,7 +491,7 @@ def get_cortical_bone(array):
         sample_mean = rslt
 
     # Method 2: Top voxels
-    if (False):
+    if (True):
         sorted_index_array = np.argsort(array)
         sorted_array = array[sorted_index_array]
         n = 899  # number of top voxels
@@ -506,13 +506,32 @@ def get_cortical_bone(array):
     # This method makes an effort to exclude them by only isolating the voxels in the bone that are most likely cortical bone (1000-1500 HU)
     # ... anything higher than 1500 is likely due to image artifact and probably isn't cortical bone. This is mostly applicable when taking from larger bones (femur, humerus,...?)
     # Disclaimer: this is arbitrary threshold chosen based off experience (aka I usually never see true cortical bone under 1000 and over 1500)... might need to be adjusted
-    if (True): 
+    if (False): 
         voxel_mask = (array >= 1000) & (array <= 1500)
         filtered_voxels = array[voxel_mask]
         sample_mean = np.mean(filtered_voxels)
         sample_std = np.std(filtered_voxels)
         sample_count = len(filtered_voxels) 
 
+
+    if (False): 
+    # METHOD 4: Taking the same volume. Samples the densest cortical region based on a fixed volume. 
+        volume_mm3 = 40.0
+        voxel_volume = image_spacing[0] * image_spacing[1] * image_spacing[2]  # mm³
+        n_voxels = int(np.round(volume_mm3 / voxel_volume))
+
+        if len(array) < n_voxels:
+            raise ValueError("Not enough voxels to sample the desired volume.")
+
+        sorted_index_array = np.argsort(array)
+        sorted_array = array[sorted_index_array]
+
+        rslt = sorted_array[-n_voxels:]
+
+        sample_mean = np.mean(rslt)
+        sample_std = np.std(rslt)
+        sample_count =  len(rslt)
+    
     return [sample_mean, sample_std, sample_count]
 
     """Returns the integer label for a given label string"""
