@@ -287,6 +287,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
     ogo.message('Reading input CT image to be calibrated:')
     ogo.message('      \"{}\"'.format(input_image))
     ct = sitk.ReadImage(input_image)
+    ct_size = ct.GetSpacing()
 
     # Read input mask
     if not os.path.isfile(input_mask):
@@ -334,7 +335,7 @@ def internal(input_image, input_mask, output_image, calib_file_name, useLabels, 
             else:
                 bone = sitk.BinaryThreshold(mask, L4_label, L4_label, 1, 0)
                 array = sitk.Mask(ct, bone)
-                [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()))
+                [bone_mean, bone_std, bone_count] = ogo.get_cortical_bone((sitk.GetArrayFromImage(array).ravel()), ct_size)
                 labels_data[label] = {'ID': value, 'mean': bone_mean, 'stdev': bone_std, 'count': bone_count,
                                       'marker': '(from bone seg.)'}
 
