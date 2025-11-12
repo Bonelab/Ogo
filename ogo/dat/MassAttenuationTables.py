@@ -23,6 +23,7 @@ The variable ``mass_attenuation_tables`` is defined containing:
     softtissue_table
     redmarrow_table
     yellowmarrow_table
+    spongiosa_table
     iodine_table
     calcium_table
 
@@ -52,6 +53,7 @@ The following material definitions came from [1]:
     Soft Tissue     SoftTissue            Tissue, Soft (ICRU-44)
     Red Marrow      RedMarrow             Skeleton Red Marrow Adult (ICRU-46)
     Yellow Marrow   YellowMarrow          Skeleton Yellow Marrow Adult (ICRU-46)
+    Spongiosa       Spongiosa             Skeleton Spongiosa Adult (ICRU-46)
     Iodine          Iodine                Iodine
     Calcium         Calcium               Calcium
     =============== ===================== ==========================
@@ -1193,6 +1195,78 @@ yellowmarrow_data = np.array([[
 ]])
 yellowmarrow_data[0, :] = yellowmarrow_data[0, :] * 1000
 
+spongiosa_data = np.array([[
+    1.00000E-02,
+    1.50000E-02,
+    2.00000E-02,
+    3.00000E-02,
+    4.00000E-02,
+    5.00000E-02,
+    6.00000E-02,
+    8.00000E-02,
+    1.00000E-01,
+    1.50000E-01,
+    2.00000E-01,
+    3.00000E-01,
+    4.00000E-01,
+    5.00000E-01,
+    6.00000E-01,
+    8.00000E-01,
+    1.00000E+00,
+    1.50000E+00,
+    2.00000E+00,
+    3.00000E+00,
+    4.00000E+00,
+    5.00000E+00,
+    6.00000E+00,
+    8.00000E+00,
+    1.00000E+01,
+    1.50000E+01,
+    2.00000E+01,
+    3.00000E+01,
+    4.00000E+01,
+    5.00000E+01,
+    6.00000E+01,
+    8.00000E+01,
+    1.00000E+02
+], [
+    1.21000E-00,
+    3.85000E-01,
+    1.76000E-01,
+    6.63000E-02,
+    3.88000E-02,
+    2.86000E-02,
+    2.83000E-02,
+    1.95000E-02,
+    1.75000E-02,
+    1.49000E-02,
+    1.35000E-02,
+    1.16000E-02,
+    1.04000E-02,
+    9.45000E-03,
+    8.74000E-03,
+    7.67000E-03,
+    6.89000E-03,
+    5.61000E-03,
+    4.82000E-03,
+    3.88000E-03,
+    3.33000E-03,
+    2.98000E-03,
+    2.73000E-03,
+    2.40000E-03,
+    2.21000E-03,
+    1.95000E-03,
+    1.83000E-03,
+    1.74000E-03,
+    1.72000E-03,
+    1.72000E-03,
+    1.73000E-03,
+    1.76000E-03,
+    1.79000E-03
+]])
+spongiosa_data[0, :] = spongiosa_data[0, :] * 1000
+
+
 iodine_data = np.array([[
     1.00E-03,
     1.04E-03,
@@ -1565,6 +1639,7 @@ names = [
     'softtissue',
     'redmarrow',
     'yellowmarrow',
+    'spongiosa',
     'iodine',
     'calcium'
 ]
