@@ -53,7 +53,7 @@ Install
     git clone https://github.com/Bonelab/Ogo.git
 
     # It is recommended to create a virtual environment using conda:
-    conda create -n ogo -c numerics88 -c conda-forge pandas nibabel pyyaml python=3
+    conda create -n ogo -c numerics88 -c conda-forge pandas nibabel pyyaml vtkbone python=3
     
     # Activate your conda environment, make sure you have conda installed on your system.
     # Best way to install conda is through anaconda
@@ -191,6 +191,17 @@ with the :code:`ogo` environment activated.
      - interactive visualization tool or offscreen rendering in 2D or 3D
    * - :code:`ogodcm2nii`
      - convert DICOM files to NIfTI images (deprecated)
+	 
+	 
+Additional Resources
+=================
+Segmentation: 
+
+- Pretrained nnU-Net model for 3D segmentation of CT reference tissues for phantomless calibration: https://zenodo.org/records/15238423. This model segments adipose, autochthonous (paraspinal) muscles, gluteal muscles, aorta and common iliac arteries.
+- Pretrained nnU-Net model for 3D semantic segmentation of vertebral bodies and spinous processes (posterior spinal elements): https://zenodo.org/records/15238176 
+- :code:`ogo.util.seg_air.py` is a custom script for segmenting air from CT scans
+ 
+
 
 Developer Notes
 ===============
