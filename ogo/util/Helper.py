@@ -1374,7 +1374,7 @@ def maskThreshold(imageData, threshold_values):
     combined_mask = None
     
     for i, threshold_value in enumerate(threshold_values, start=1):
-        message("Threshold Value: %d" % threshold_value)
+        #message("Threshold Value: %d" % threshold_value)
         
         # Threshold the image for the current value
         thres = vtk.vtkImageThreshold()
