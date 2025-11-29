@@ -66,8 +66,6 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, custom_la
         if output_filename:
             ogo.message('No labels specified. Building list...')
         labels = np.unique(array).tolist()
-        print(labels)
-        #labels = np.unique(array)
 
     # Remove label 0 from list (background)
     if labels[0] == 0:
@@ -117,6 +115,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, custom_la
         parameters_dict['Integral BMC [mg]'] = '{:.3f}'.format(bmd_outcomes['Integral BMC [mg]'])
         parameters_dict['Bone Volume [mm^3]'] = '{:.3f}'.format(bmd_outcomes['Bone Volume [mm^3]'])
         parameters_dict['Bone Volume [cm^3]'] = '{:.3f}'.format(bmd_outcomes['Bone Volume [cm^3]'])
+        parameters_dict['SNR'] = '{:.3f}'.format(bmd_outcomes['SNR'])
 
         if output_filename:
             if idx == 0 and not noheader:
@@ -180,7 +179,7 @@ ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz --labels 7 8 9 10
                         help='Custom labels of type ITKSnap (*.txt) (Default: OgoMasterLabels)')
     parser.add_argument('--noheader', action='store_true', help='Suppress printing header (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
-    print()
+    #print()
 
     # Parse and display
     args = parser.parse_args()

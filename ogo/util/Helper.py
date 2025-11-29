@@ -627,9 +627,17 @@ def bmd_metrics(vtk_image):
     """
     spacing = vtk_image.GetSpacing()
     numpy_image = vtk2numpy(vtk_image)
+    nonzero_data = numpy_image[numpy_image != 0]
     voxel_count = np.count_nonzero(numpy_image)
     voxel_volume = spacing[0] * spacing[1] * spacing[2]  # [mm^3]
     voxel_volume2 = voxel_volume / 1000  # [cm^3]
+    
+    mean_signal = np.mean(nonzero_data)
+    std_noise = np.std(nonzero_data)
+    if mean_signal == 0:
+      signal_to_noise = 0
+    else:
+      signal_to_noise = mean_signal / std_noise
 
     # BMD measures
     BMD_total = numpy_image.sum()  # [mg/cc K2HPO4]
@@ -645,7 +653,8 @@ def bmd_metrics(vtk_image):
         'Integral BMD [mg/cc]': BMD_AVG,
         'Integral BMC [mg]': BMC,
         'Bone Volume [mm^3]': VOLUME_mm,
-        'Bone Volume [cm^3]': VOLUME_cm
+        'Bone Volume [cm^3]': VOLUME_cm,
+        'SNR': signal_to_noise
     }
 
 
