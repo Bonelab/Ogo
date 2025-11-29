@@ -399,6 +399,40 @@ def infoNIFTI(reader):
     print('!> {:30s} = {}'.format('NIFTIHeader', reader.GetNIFTIHeader()))
     print(guard)
 
+def custom_labelsDict(file_path):
+    """Takes a labels file that is used from ITKSnap and returns a DICT
+    """
+    labels_dict = {}
+    labels_hdr = ''
+    
+    # Get the header
+    try:
+        with open(file_path, 'r') as file:
+            for line in file:
+                # Process each line 
+                # The 'line' variable will contain the current line, including the newline character '\n'
+                # You might want to strip whitespace, including the newline, using .strip()
+                #processed_line = line.strip()
+                if line.startswith("#"): # header information
+                  labels_hdr += line
+                else: # labels
+                  info = line.split()
+                  ind = int(info[0])
+                  rgb = [int(info[1]), int(info[2]), int(info[3])]
+                  alpha = float(info[4])
+                  vis = int(info[5])
+                  idx = int(info[6])
+                  lab = (line.split('\"')[1]).strip() # tricky as we need to include spaces in the label name
+                  labels_dict[ind]={"RGB":rgb,"A":alpha,"VIS":vis,"IDX":idx,"LABEL":lab}
+                  #print(ind,rgb,alpha,vis,idx,lab)
+
+    except FileNotFoundError:
+        print(f"Error: The file '{file_path}' was not found.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    return labels_dict,labels_hdr
+
 
 def applyMask(imageData, maskData):
     """Applies the mask to the image.

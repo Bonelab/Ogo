@@ -22,12 +22,15 @@ script_version = 2.0
 
 
 # Start Script
-def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader, overwrite=False):
+def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, custom_labels=None, noheader=False, overwrite=False):
     if output_filename:
         ogo.message("Start of Script...")
 
-    # Master list of labels
-    labelsDict = lb.labels_dict
+    if custom_labels:
+      [labelsDict,labelsHdr] = ogo.custom_labelsDict(custom_labels)
+    else:
+      # Master list of labels
+      labelsDict = lb.labels_dict
 
     # Check if output exists and should overwrite
     ogo.pass_check_if_output_exists(output_filename,overwrite)
@@ -62,7 +65,9 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
     if labels[0] == 0:
         if output_filename:
             ogo.message('No labels specified. Building list...')
-        labels = np.unique(array)
+        labels = np.unique(array).tolist()
+        print(labels)
+        #labels = np.unique(array)
 
     # Remove label 0 from list (background)
     if labels[0] == 0:
@@ -78,7 +83,7 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, noheader,
             os.sys.exit()
         #        if (str(labels[idx]) not in labelsDict):
         if labels[idx] not in labelsDict:
-            print("ERROR: Label {:d} does not exist in master list of labels.".format(labels[idx]))
+            print("ERROR: Label {:d} does not exist in list of labels.".format(labels[idx]))
             os.sys.exit()
         if output_filename:
             ogo.message('!> label {:3d} {:12s} --> {:d} voxels'.format(labels[idx], labelsDict[labels[idx]]['LABEL'],
@@ -171,6 +176,8 @@ ogoAnalyzeBMD image_k2hpo4.nii mask.nii.gz --labels 7 8 9 10
                         help='Specify list of labels; space separated (e.g. 1 2 3) (Default: report all available)')
     parser.add_argument('--output_filename', default=None, metavar='TEXTFILE',
                         help='Output file name (*.txt) (Default: dump to screen)')
+    parser.add_argument('--custom_labels', default=None, metavar='TEXTFILE',
+                        help='Custom labels of type ITKSnap (*.txt) (Default: OgoMasterLabels)')
     parser.add_argument('--noheader', action='store_true', help='Suppress printing header (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     print()
