@@ -10,6 +10,7 @@ import sys
 import os
 import argparse
 import math
+import copy
 import SimpleITK as sitk
 import numpy as np
 from ogo.dat.MassAttenuationTables import mass_attenuation_tables
@@ -17,110 +18,149 @@ from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 import ogo.util.spectral_util as md
 
-def CalculateLinearAttenuation(energy, mass_concentration, material, measured_ctn, header, delimiter, description, quiet):
+def print_dict(d):
+  keys = d.keys()
+  for k in keys:
+    print('  {:10s}: {:30s}'.format('material',k))
+    print('     {:>30s}: {:12.4f} {}'.format('energy',d[k]['energy'],'keV'))
+    print('     {:>30s}: {:12.4f} {}'.format('mass_density',d[k]['mass_density'],'g/cm3'))
+    print('     {:>30s}: {:12.4f} {}'.format('mass_concentration',d[k]['mass_concentration'],'g/cm3'))
+    print('     {:>30s}: {:12.4f} {}'.format('mass_attenuation',d[k]['mass_attenuation'],'cm2/g'))
+    print('     {:>30s}: {:12.4f} {}'.format('icru_mass_density',d[k]['icru_mass_density'],'g/cm3'))
+    print('     {:>30s}: {:12.4f} {}'.format('mu',d[k]['mu'],'/cm'))
+    print('     {:>30s}: {:12.4f} {}'.format('ctn',d[k]['ctn'],'HU'))
   
+def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, header=False, delimiter=',', description='', quiet=False):
+  
+  # Initialize variables
   entry = []
-  
-  # Check that input values are valid
-  if energy<30 or energy>200:
-    os.sys.exit('[ERROR] Energy must be between 30 and 200 keV.')
-  if mass_concentration<=0:
-    os.sys.exit('[ERROR] Mass concentration must be positive.')
-  density = md.mass_density()[material]
-  if mass_concentration > density and (not quiet):
-    ogo.message('[WARNING] Mass concentration greater than density not physically possible.')
-  
-  # Calculate error if a CT value is provided?
-  if measured_ctn is not None:
+  choices=['adipose','air','blood','bone','calcium','cha','k2hpo4','muscle','water','softtissue','redmarrow','yellowmarrow','spongiosa','iodine']
+  linear_attenuation_dict = {}
+  material_dict = {
+    'energy':0.0,
+    'mass_density':0.0,
+    'mass_concentration':0.0,
+    'mass_attenuation':0.0,
+    'icru_mass_density':0.0,
+    'mu':0.0,
+    'ctn':0.0
+  }
+  if ctn_measured is not None:
     calculate_error = True
   else:
     calculate_error = False
-    
-  # Look up mass attenuations from NIST of our material and reference material water
-  mass_attenuation_of_material = md.interpolate_mass_attenuation(material,energy)
-  mass_attenuation_of_water = md.interpolate_mass_attenuation('water',energy)
   
-  mass_density_water = md.mass_density()['water'] # from NIST; rho_water = 1.0 g/cm3
-  mass_concentration_water = md.mass_density()['water'] # from NIST; rho_water = 1.0 g/cm3
+  # Check inputs
+  if energy<30 or energy>200:
+    os.sys.exit('[ERROR] Energy is expected to be between 30 and 200 keV.')
+  if not material:
+    os.sys.exit('[ERROR] At least one ICRU material must be defined.')
+  if not mass_density:
+    os.sys.exit('[ERROR] At least one mass concentration must be defined.')
+  if len(material) != len(mass_density):
+    os.sys.exit('[ERROR] N_material = {} and N_mass_density = {}.\n'.format(len(material),len(mass_density))+
+                '        Every ICRU material needs a mass concentration defined.')
+  for mat in material:
+    if mat not in choices:
+      os.sys.exit('[ERROR] Material is not valid: {}'.format(mat))
+    linear_attenuation_dict[mat] = copy.deepcopy(material_dict)                   # initialize dictionary
+    linear_attenuation_dict[mat]['energy'] = energy
+   
+  # Determine mass_concentration
+  for idx,input_mass_density in enumerate(mass_density):
+    mat = material[idx]
+    if input_mass_density<0:
+      os.sys.exit('[ERROR] Invalid mass density. Cannot be negative: {}'.format(input_mass_density))
+    icru_density = md.mass_density()[material[idx]]
+    mass_concentration = (input_mass_density / icru_density)
+    linear_attenuation_dict[mat]['mass_density'] = input_mass_density
+    linear_attenuation_dict[mat]['icru_mass_density'] = icru_density
+    linear_attenuation_dict[mat]['mass_concentration'] = mass_concentration
+    if mass_concentration > 1.0:
+      os.sys.exit('[ERROR] Material = {}, ICRU density = {:.3f}, mass_density = {:.3f}\n'.format(mat,icru_density,input_mass_density) +
+                  '        Mass concentration {} cannot be greater than its ICRU density.'.format(mass_concentration))
+
+  # Look up mass attenuations from NIST
+  for mat in material:
+    mass_attenuation = md.interpolate_mass_attenuation(mat,energy)
+    linear_attenuation_dict[mat]['mass_attenuation'] = mass_attenuation
   
-  # Calculate the linear attenuations knowing mass concentration
-  mu_material = mass_attenuation_of_material * mass_concentration
-  mu_water = mass_attenuation_of_water * mass_concentration_water
+  # Calculate linear attenuation
+  mu_final = 0.0
+  for mat in material:
+    #mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['mass_concentration']
+    mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['mass_density']
+    linear_attenuation_dict[mat]['mu'] = mu
+    mu_final += mu
+  
+  mu_water = md.interpolate_mass_attenuation('water',energy) # we need this to convert to CT numbers
   
   # Calculate the CT number (HU)
-  ctn_material = round(md.mu_to_ct_number(mu_material,mu_water))
-  ctn_water = round(md.mu_to_ct_number(mu_water,mu_water))
+  for mat in material:
+    mu = linear_attenuation_dict[mat]['mu']
+    ctn = round(md.mu_to_ct_number(mu,mu_water))
+    linear_attenuation_dict[mat]['ctn'] = ctn
   
-  # Calculate total linear attenuation and CT number
-  mu_final = mu_material + mu_water
+  # CT number based on total linear attenuation
   ctn_final = round(md.mu_to_ct_number(mu_final,mu_water))
-  
-  # Get the calculated mu (and CT number) 
-  #mu_final = mass_attenuation_of_material * mass_concentration + mu_water * md.mass_density()['water'] * 0.97
-  #mu_final = mass_attenuation_of_material * mass_concentration
-  #ctn_final = round(md.mu_to_ct_number(mu_final,mu_water))
 
-  # Calculate error
-  if measured_ctn is not None:
-    measured_mu = md.ct_number_to_mu(measured_ctn,mu_water)
-    mu_delta =  mu_final - measured_mu
-    mu_error = (mu_delta)/measured_mu * 100.0
-    ct_delta =  ctn_final - measured_ctn
-    if measured_ctn != 0:
-      ct_error = (ct_delta)/measured_ctn * 100.0
+  # Calculate error if a CT value is provided?
+  if calculate_error:
+    mu_measured = md.ct_number_to_mu(ctn_measured,mu_water)
+    mu_delta =  mu_final - mu_measured
+    mu_percent_error = (mu_delta)/mu_measured * 100.0
+    ctn_delta =  ctn_final - ctn_measured
+    if ctn_measured != 0:
+      ctn_percent_error = (ctn_delta)/ctn_measured * 100.0
     
-  # Gather results
+  # Print results to screen
   if not quiet:
-    ogo.message('Input:')
-    ogo.message('  {:30s} = {:12.4f} [keV]'.format("energy",energy))
-    ogo.message('  {:30s} = {:12.4f} [g/cm3]'.format("mass_concentration",mass_concentration))
-    ogo.message('  {:30s} = {:>12s}'.format("material",material))
-    ogo.message('Lookup and calculations:')
-    ogo.message('  {:30s} = {:12.4f} [/cm]'.format('mass attenuation of {}'.format(material),mass_attenuation_of_material))
-    ogo.message('  {:30s} = {:12.4f} [/cm]'.format('mass attenuation of {}'.format('water'),mass_attenuation_of_water))
-    ogo.message('  {:30s} = {:12.4f} [g/cm3]'.format('mass density of {}'.format(material),density))
-    ogo.message('  {:30s} = {:12.4f} [g/cm3]'.format('mass density of {}'.format('water'),mass_density_water))
-    ogo.message('  {:30s} = {:12.4f} [g/cm3]'.format('mass concentration of {}'.format(material),mass_concentration))
-    ogo.message('  {:30s} = {:12.4f} [g/cm3]'.format('mass concentration of {}'.format('water'),mass_concentration_water))
-    ogo.message('  {:30s} = {:12.4f} [/cm]'.format('mu of {:s} at {} keV'.format(material,energy),mu_material))
-    ogo.message('  {:30s} = {:12.4f} [/cm]'.format('mu of {:s} at {} keV'.format('water',energy),mu_water))
-    ogo.message('  {:30s} = {:12.4f} [/cm]'.format('CTn of {:s} at {} keV'.format(material,energy),ctn_material))
-    ogo.message('  {:30s} = {:12.4f} [/cm]'.format('CTn of {:s} at {} keV'.format('water',energy),ctn_water))
-    ogo.message('Results:')
-    ogo.message('  {:30s} = {:12.4f} [/cm]'.format('mu_final ({:s})'.format(material),mu_final))
-    ogo.message('  {:30s} = {:12d} [HU]'.format('ctn_final ({:s})'.format(material),ctn_final))
+    print('--------------------------------------------------------------------------------')
+    print('Materials:')
+    print('--------------------------------------------------------------------------------')
+    print_dict(linear_attenuation_dict)
+    print('--------------------------------------------------------------------------------')
+    print('Summed material results:')
+    print('--------------------------------------------------------------------------------')
+    print('     {:>30s}: {:12.4f} [/cm]'.format('mu',mu_final))
+    print('     {:>30s}: {:12.4f} [HU]'.format('ctn',ctn_final))
+    print('     {:>30s}: {:s}'.format('description',description))
     if calculate_error:
-      ogo.message('Comparison to observed:')
-      ogo.message('  {:30s} = {:12.1f} [HU]'.format('measured_ctn',measured_ctn))
-      ogo.message('  {:30s} = {:12.4f} [/cm]'.format('converted to mu',measured_mu))
-      ogo.message('  {:30s} = {:12.4f} [/cm]'.format('mu_delta',mu_delta))
-      ogo.message('  {:30s} = {:12.4f} [HU]'.format('ct_delta',ct_delta))
-      ogo.message('  {:30s} = {:12.4f} %'.format('mu_percent_error',mu_error))
-      if measured_ctn != 0:
-        ogo.message('  {:30s} = {:12.4f} %'.format('ct_percent_error',ct_error))
-      else:
-        ogo.message('  {:30s} = {:>12s}'.format('ct_percent_error','n/a'))
-    if description is not None:
-      ogo.message('  {:30s} = {:>12s}'.format('description',description))
+      print('--------------------------------------------------------------------------------')
+      print('Error calculations:')
+      print('--------------------------------------------------------------------------------')
+      print('     {:>30s}: {:12.1f} [HU]'.format('CT number',ctn_measured))
+      print('     {:>30s}: {:12.4f} [HU]'.format('delta',ctn_delta))
+      print('     {:>30s}: {:12.4f} [%]'.format('error',ctn_percent_error))
+      print('')
+      print('     {:>30s}: {:12.4f} [/cm]'.format('mu from CT number',mu_measured))
+      print('     {:>30s}: {:12.4f} [/cm]'.format('delta',mu_delta))
+      print('     {:>30s}: {:12.4f} [%]'.format('error',mu_percent_error))
+      print('--------------------------------------------------------------------------------')
   
   # Primary outcomes only
-  if description is not None:
-    entry.append( ['description', '{:s}'.format(description),'TXT'] )
+  entry.append( ['description', '{:s}'.format(description),'TXT'] )
   entry.append( ['energy', '{:.4f}'.format(energy), '[keV]'] )
-  entry.append( ['mass_concentration', '{:.4f}'.format(mass_concentration), '[g/cm3]'] )
-  entry.append( ['material', '{:s}'.format(material), '[name]'] )
+  for idx,mat in enumerate(material):
+    entry.append( ['material'+'_{}'.format(idx), '{:s}'.format(mat), '[]'] )
+    entry.append( ['mass_density'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_density']), '[g/cm3]'] )
+    entry.append( ['mass_concentration'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_concentration']), '[g/cm3]'] )
+    entry.append( ['mass_attenuation'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_attenuation']), '[cm2/g]'] )
+    entry.append( ['icru_mass_density'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['icru_mass_density']), '[g/cm3]'] )
+    entry.append( ['mu'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mu']), '[/cm]'] )
+    entry.append( ['ctn'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['ctn']), '[HU]'] )
   entry.append( ['mu_final', '{:.4f}'.format(mu_final), '[/cm]'] )
   entry.append( ['ctn_final', '{:d}'.format(ctn_final), '[/cm]'] )
   if calculate_error:
-    entry.append( ['measured_ctn', '{:.1f}'.format(measured_ctn), '[HU]'] )
-    entry.append( ['measured_mu', '{:.4f}'.format(measured_mu), '[/cm]'] )
-    entry.append( ['mu_delta', '{:.4f}'.format(mu_delta), '[/cm]'] )
-    entry.append( ['ct_delta', '{:.4f}'.format(ct_delta), '[H]'] )
-    entry.append( ['mu_percent_error', '{:.4f}'.format(mu_error), '[%]'] )  
-    if measured_ctn != 0:
-      entry.append( ['ct_percent_error', '{:.4f}'.format(ct_error), '[%]'] )  
+    entry.append( ['ctn_measured', '{:.1f}'.format(ctn_measured), '[HU]'] )
+    entry.append( ['ctn_delta', '{:.4f}'.format(ctn_delta), '[H]'] )
+    if ctn_measured != 0:
+      entry.append( ['ctn_percent_error', '{:.4f}'.format(ctn_percent_error), '[%]'] )  
     else:
-      entry.append( ['ct_percent_error', 'n/a', '[%]'] )  
+      entry.append( ['ctn_percent_error', 'n/a', '[%]'] )  
+    entry.append( ['mu_measured', '{:.4f}'.format(mu_measured), '[/cm]'] )
+    entry.append( ['mu_delta', '{:.4f}'.format(mu_delta), '[/cm]'] )
+    entry.append( ['mu_percent_error', '{:.4f}'.format(mu_percent_error), '[%]'] )  
   
   # Output results for stdout
   if quiet:
@@ -135,22 +175,44 @@ def CalculateLinearAttenuation(energy, mass_concentration, material, measured_ct
   
 def main():
   description = '''
-  Given the mass concentration of an ICRU-defined material and the X-ray
-  energy of the virtual monoenergetic image (VMI) calculate the expected
+  Given the mass density of an ICRU-defined material and the X-ray 
+  energy of the virtual monoenergetic image (VMI) calculate the expected 
   linear attenuation.
   
-  If the linear attenuation measured from a scan is provided then the 
-  error relative to the calculated value will be provided.
+  If multiple materials are defined (e.g., HA and water) then the 
+  calculated linear attenuation will be the summed result. 
+  
+  If the CT number measured in Hounsfield units is provided from the
+  scan then the error relative to the theoretical value will be output.
+  
+  Valid ICRU materials are:
+    adipose
+    air
+    blood
+    bone
+    calcium
+    cha
+    k2hpo4
+    muscle
+    water
+    softtissue
+    redmarrow
+    yellowmarrow
+    spongiosa
+    iodine
   
   Use quiet mode for output to STDOUT.
 
 '''
   epilog = '''
 Example calls: 
-  ogoCalculateLinearAttenuation cha 50.0 0.200
-  ogoCalculateLinearAttenuation cha 100 0.202 --measured_ctn 186
-  ogoCalculateLinearAttenuation water 90 1.0 --measured_ctn 0
-  ogoCalculateLinearAttenuation cha 100 0.202 --measured_ctn 542 -d "PCD_ESP_120kV_080keV_Br40_04Th"
+  ogoCalculateLinearAttenuation 80 --material cha 0.202 --quiet
+  ogoCalculateLinearAttenuation 80 --material cha water \\
+                                   --mass_density 0.202 0.972
+  ogoCalculateLinearAttenuation 80 --material cha water \\
+                                   --mass_density 0.202 0.972 \\
+                                   --ctn_measured 236 \\
+                                   -d "PCD_ESP_120kV_080keV_Br40_04Th"
   
 '''
 
@@ -161,37 +223,22 @@ Example calls:
       description=description,
       epilog=epilog
   )
-  parser.add_argument('material',
-                      default='bone',
-                      metavar='Material', 
-                      choices=[
-                        'adipose',
-                        'air',
-                        'blood',
-                        'bone',
-                        'calcium',
-                        'cha',
-                        'k2hpo4',
-                        'muscle',
-                        'water',
-                        'softtissue',
-                        'redmarrow',
-                        'yellowmarrow',
-                        'spongiosa',
-                        'iodine'
-                      ],
-                      help='Specify ICRU material (bone, muscle, cha, etc)')
   parser.add_argument('energy',
                       type=float, 
                       default=50.0, 
                       metavar='Energy', 
                       help='Energy of the scan (keV)')
-  parser.add_argument('mass_concentration',
-                      type=float, 
-                      default=1.0, 
-                      metavar='Concentration', 
-                      help='Mass concentration (g/cm3)')
-  parser.add_argument('--measured_ctn', 
+  parser.add_argument('--material', 
+                      nargs='*', 
+                      default=[], 
+                      metavar='MAT1 MAT2', 
+                      help='Specify ICRU materials (bone, muscle, cha, etc)')
+  parser.add_argument('--mass_density', 
+                      type=float, nargs='*', 
+                      default=[], 
+                      metavar='MASS1 MASS2', 
+                      help='Specify mass density for each material (g/cm3)')
+  parser.add_argument('--ctn_measured', 
                       type=float, 
                       default=None, 
                       metavar='CTN', 
@@ -205,7 +252,7 @@ Example calls:
                       help="""Delimiter character (default: tab, '\\t')""")
   parser.add_argument ("--description", "-d",
                       metavar='TXT', 
-                      default = None,
+                      default = '',
                       help="""Description to pass to output (e.g., filename) (default: %(default)s)""")
   parser.add_argument("--quiet", 
                       action='store_true', 
