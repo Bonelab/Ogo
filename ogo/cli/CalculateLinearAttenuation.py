@@ -9,13 +9,8 @@
 import sys
 import os
 import argparse
-import math
 import copy
-import SimpleITK as sitk
-import numpy as np
-from ogo.dat.MassAttenuationTables import mass_attenuation_tables
 from ogo.util.echo_arguments import echo_arguments
-import ogo.util.Helper as ogo
 import ogo.util.spectral_util as md
 
 def print_dict(d):

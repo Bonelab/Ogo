@@ -18,100 +18,111 @@ from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 import ogo.util.spectral_util as md
 
-def print_dict(d):
-  keys = d.keys()
-  for k in keys:
-    print('  {:10s}: {:30s}'.format('material',k))
-    print('     {:>30s}: {:12.4f} {}'.format('energy',d[k]['energy'],'keV'))
-    print('     {:>30s}: {:12.4f} {}'.format('mass_density',d[k]['mass_density'],'g/cm3'))
-    print('     {:>30s}: {:12.4f} {}'.format('mass_concentration',d[k]['mass_concentration'],'g/cm3'))
-    print('     {:>30s}: {:12.4f} {}'.format('mass_attenuation',d[k]['mass_attenuation'],'cm2/g'))
-    print('     {:>30s}: {:12.4f} {}'.format('icru_mass_density',d[k]['icru_mass_density'],'g/cm3'))
-    print('     {:>30s}: {:12.4f} {}'.format('mu',d[k]['mu'],'/cm'))
-    print('     {:>30s}: {:12.4f} {}'.format('ctn',d[k]['ctn'],'HU'))
-  
-def MaterialDecomposition(energy, material, mass_density, ctn_measured, header=False, delimiter=',', description='', quiet=False):
+def MaterialDecomposition(images, energies, materials, quiet, overwrite):
   
   # Initialize variables
-  entry = []
   choices=['adipose','air','blood','bone','calcium','cha','k2hpo4','muscle','water','softtissue','redmarrow','yellowmarrow','spongiosa','iodine']
-  linear_attenuation_dict = {}
-  material_dict = {
-    'energy':0.0,
-    'mass_density':0.0,
-    'mass_concentration':0.0,
-    'mass_attenuation':0.0,
-    'icru_mass_density':0.0,
-    'mu':0.0,
-    'ctn':0.0
-  }
-  if ctn_measured is not None:
-    calculate_error = True
-  else:
-    calculate_error = False
   
-  # Check inputs
-  if energy<30 or energy>200:
-    os.sys.exit('[ERROR] Energy is expected to be between 30 and 200 keV.')
-  if not material:
-    os.sys.exit('[ERROR] At least one ICRU material must be defined.')
-  if not mass_density:
-    os.sys.exit('[ERROR] At least one mass concentration must be defined.')
-  if len(material) != len(mass_density):
-    os.sys.exit('[ERROR] N_material = {} and N_mass_density = {}.\n'.format(len(material),len(mass_density))+
-                '        Every ICRU material needs a mass concentration defined.')
-  for mat in material:
-    if mat not in choices:
-      os.sys.exit('[ERROR] Material is not valid: {}'.format(mat))
-    linear_attenuation_dict[mat] = copy.deepcopy(material_dict)                   # initialize dictionary
-    linear_attenuation_dict[mat]['energy'] = energy
-   
-  # Determine mass_concentration
-  for idx,input_mass_density in enumerate(mass_density):
-    mat = material[idx]
-    if input_mass_density<0:
-      os.sys.exit('[ERROR] Invalid mass density. Cannot be negative: {}'.format(input_mass_density))
-    icru_density = md.mass_density()[material[idx]]
-    mass_concentration = (input_mass_density / icru_density)
-    linear_attenuation_dict[mat]['mass_density'] = input_mass_density
-    linear_attenuation_dict[mat]['icru_mass_density'] = icru_density
-    linear_attenuation_dict[mat]['mass_concentration'] = mass_concentration
-    if mass_concentration > 1.0:
-      os.sys.exit('[ERROR] Material = {}, ICRU density = {:.3f}, mass_density = {:.3f}\n'.format(mat,icru_density,input_mass_density) +
-                  '        Mass concentration {} cannot be greater than its ICRU density.'.format(mass_concentration))
+  # Check that input images exist and are type NIfTI
+  for image in images:
+    if not os.path.isfile(image):
+      os.sys.exit('[ERROR] Cannot find file \"{}\"'.format(image))
+    if not (image.lower().endswith('.nii') or image.lower().endswith('.nii.gz')):
+      os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(image))
+  
+  # Check that the energies are in a valid range and not equal
+  for energy in energies:
+    if energy<40 or energy>190:
+      os.sys.exit('[ERROR] Energies must be between 40 and 190 keV.')
+  if energies[0] == energies[1]:
+    os.sys.exit('[ERROR] Energies cannot be equal.')
 
-  # Look up mass attenuations from NIST
-  for mat in material:
-    mass_attenuation = md.interpolate_mass_attenuation(mat,energy)
-    linear_attenuation_dict[mat]['mass_attenuation'] = mass_attenuation
-  
-  # Calculate linear attenuation
-  mu_final = 0.0
-  for mat in material:
-    #mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['mass_concentration']
-    mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['mass_density']
-    linear_attenuation_dict[mat]['mu'] = mu
-    mu_final += mu
-  
-  mu_water = md.interpolate_mass_attenuation('water',energy) # we need this to convert to CT numbers
-  
-  # Calculate the CT number (HU)
-  for mat in material:
-    mu = linear_attenuation_dict[mat]['mu']
-    ctn = round(md.mu_to_ct_number(mu,mu_water))
-    linear_attenuation_dict[mat]['ctn'] = ctn
-  
-  # CT number based on total linear attenuation
-  ctn_final = round(md.mu_to_ct_number(mu_final,mu_water))
+  # Check that the materials are valid
+  if len(materials)<2 or len(materials)>3:
+    os.sys.exit('[ERROR] Only 2- or 3-material decomposition is valid.')
+  for material in materials:
+    if material not in choices:
+      os.sys.exit('[ERROR] Material is not valid: {}'.format(material))
 
-  # Calculate error if a CT value is provided?
-  if calculate_error:
-    mu_measured = md.ct_number_to_mu(ctn_measured,mu_water)
-    mu_delta =  mu_final - mu_measured
-    mu_percent_error = (mu_delta)/mu_measured * 100.0
-    ctn_delta =  ctn_final - ctn_measured
-    if ctn_measured != 0:
-      ctn_percent_error = (ctn_delta)/ctn_measured * 100.0
+  # Look up mass attenuations of materials
+  mass_attenuations=[]
+  for material in materials:
+    for energy in energies:
+      mass_attenuations.append(md.interpolate_mass_attenuation(material,energy))
+
+  if not quiet:
+    ogo.message('Energies:          [' + ', '.join('{:.4f}'.format(i) for i in energies) + ']')
+    ogo.message('Materials:         [' + ', '.join('{:s}'.format(i) for i in materials) + ']')
+    ogo.message('Mass_attenuations: [' + ', '.join('{:.4f}'.format(i) for i in mass_attenuations) + ']')
+    ogo.message('')
+    
+  # Read in CT data
+  ct1 = sitk.ReadImage(images[0])
+  if not quiet:
+    ogo.message('Reading image 1: {:s}'.format(images[0]))
+    ogo.message('      dimension: {:d}'.format(ct1.GetDimension()))
+    ogo.message('           type: {:s}'.format(ct1.GetPixelIDTypeAsString()))
+    ogo.message('           size: [' + ', '.join('{:d}'.format(i) for i in ct1.GetSize()) + ']')
+    ogo.message('         origin: [' + ', '.join('{:.2f}'.format(i) for i in ct1.GetOrigin()) + ']')
+    ogo.message('        spacing: [' + ', '.join('{:.2f}'.format(i) for i in ct1.GetSpacing()) + ']')
+    ogo.message('      direction: [' + ', '.join('{:.1f}'.format(i) for i in ct1.GetDirection()) + ']')
+    ogo.message('')
+    
+  ct2 = sitk.ReadImage(images[1])
+  if not quiet:
+    ogo.message('Reading image 2: {:s}'.format(images[1]))
+    ogo.message('      dimension: {:d}'.format(ct2.GetDimension()))
+    ogo.message('           type: {:s}'.format(ct2.GetPixelIDTypeAsString()))
+    ogo.message('           size: [' + ', '.join('{:d}'.format(i) for i in ct2.GetSize()) + ']')
+    ogo.message('         origin: [' + ', '.join('{:.2f}'.format(i) for i in ct2.GetOrigin()) + ']')
+    ogo.message('        spacing: [' + ', '.join('{:.2f}'.format(i) for i in ct2.GetSpacing()) + ']')
+    ogo.message('      direction: [' + ', '.join('{:.1f}'.format(i) for i in ct2.GetDirection()) + ']')
+    ogo.message('')
+    
+  # Check dimensions of images are the same and pixel type
+  if ct1.GetDimension() != ct2.GetDimension():
+    os.sys.exit('[ERROR] CT input files are not the same dimensions.')
+  if ct1.GetSize() != ct2.GetSize():
+    os.sys.exit('[ERROR] CT input files are not the same sizes.')
+  if ct1.GetPixelID() != sitk.sitkInt16:
+    ogo.message('[WARNING] Unexpected CT data type: {}'.format(ct1.GetPixelIDTypeAsString()))
+  if ct2.GetPixelID() != sitk.sitkInt16:
+    ogo.message('[WARNING] Unexpected CT data type: {}'.format(ct2.GetPixelIDTypeAsString()))
+  if ct1.GetOrigin() != ct2.GetOrigin():
+    ogo.message('[WARNING] Origin of CT images differ.')
+  if ct1.GetSpacing() != ct2.GetSpacing():
+    ogo.message('[WARNING] Spacing of CT images differ.')
+  if ct1.GetDirection() != ct2.GetDirection():
+    ogo.message('[WARNING] Direction of CT images differ.')
+    
+  # Simple ITK image to numpy array
+  np_ct1 = sitk.GetArrayFromImage(ct1)
+  np_ct2 = sitk.GetArrayFromImage(ct2)
+  
+  dims = [ct1.GetSize()[2],ct1.GetSize()[1],ct1.GetSize()[0]]
+  
+  # Flatten
+  np_ct1_flattened=np_ct1.reshape(-1)
+  
+  # Do material decomposition here...
+  
+  # Reshape
+  reshaped_np_ct1 = np_ct1_flattened.reshape(dims)
+  
+  # Numpy array to simple ITK image
+  ct_material1 = sitk.GetImageFromArray(reshaped_np_ct1)
+  ct_material1.SetOrigin(ct1.GetOrigin())
+  ct_material1.SetSpacing(ct1.GetSpacing())
+  ct_material1.SetDirection(ct1.GetDirection())
+  if not quiet:
+    ogo.message('[IMPORTANT] Origin, spacing and direction are taken from image 1.')
+  
+  output_image = 'test.nii.gz'
+  ogo.message('Writing output to file {}'.format(output_image))
+  sitk.WriteImage(ct_material1, output_image)
+  
+  
+  exit()
     
   # Print results to screen
   if not quiet:
@@ -175,15 +186,13 @@ def MaterialDecomposition(energy, material, mass_density, ctn_measured, header=F
   
 def main():
   description = '''
-  Given the mass density of an ICRU-defined material and the X-ray 
-  energy of the virtual monoenergetic image (VMI) calculate the expected 
-  linear attenuation.
+  Performs material decomposition based on a pair of CT virtual 
+  monoenergetic images (VMIs). 
   
-  If multiple materials are defined (e.g., HA and water) then the 
-  calculated linear attenuation will be the summed result. 
+  Typical use is 2-material decomposition into water and HA or a
+  3-material decomposition into HA, water and adipose.
   
-  If the CT number measured in Hounsfield units is provided from the
-  scan then the error relative to the theoretical value will be output.
+  Input images are expected to be CT numbers in Hounsfield units.
   
   Valid ICRU materials are:
     adipose
@@ -201,18 +210,20 @@ def main():
     spongiosa
     iodine
   
-  Use quiet mode for output to STDOUT.
-
 '''
   epilog = '''
 Example calls: 
-  ogoMaterialDecomposition 80 --material cha 0.202 --quiet
-  ogoMaterialDecomposition 80 --material cha water \\
-                                   --mass_density 0.202 0.972
-  ogoMaterialDecomposition 80 --material cha water \\
-                                   --mass_density 0.202 0.972 \\
-                                   --ctn_measured 236 \\
-                                   -d "PCD_ESP_120kV_080keV_Br40_04Th"
+  ogoMaterialDecomposition image1.nii.gz image2.nii.gz \\ 
+                           50 80 \\
+                           cha water
+  ogoMaterialDecomposition im1.nii.gz im2.nii.gz \\ 
+                           50 80 \\
+                           cha water adipose
+                
+  cd /Users/skboyd/Desktop/erlangen/pcct/models/img/                         
+  ogoMaterialDecomposition PCD_ESP_140kV_040keV_Br40_04Th_10Slices.nii.gz \\
+                           PCD_ESP_140kV_090keV_Br40_04Th_10Slices.nii.gz \\
+                           40 90 cha water
   
 '''
 
@@ -223,40 +234,28 @@ Example calls:
       description=description,
       epilog=epilog
   )
-  parser.add_argument('energy',
+  parser.add_argument('images',
+                      metavar='Filename Filename', 
+                      nargs=2, 
+                      help='CT VMI images (*.nii.gz)')
+  parser.add_argument('energies', 
                       type=float, 
-                      default=50.0, 
-                      metavar='Energy', 
-                      help='Energy of the scan (keV)')
-  parser.add_argument('--material', 
+                      default=[], 
+                      nargs=2, 
+                      metavar='keV keV', 
+                      help='Energies of images (40 to 190 keV)')
+  parser.add_argument('materials', 
                       nargs='*', 
                       default=[], 
-                      metavar='MAT1 MAT2', 
-                      help='Specify ICRU materials (bone, muscle, cha, etc)')
-  parser.add_argument('--mass_density', 
-                      type=float, nargs='*', 
-                      default=[], 
-                      metavar='MASS1 MASS2', 
-                      help='Specify mass density for each material (g/cm3)')
-  parser.add_argument('--ctn_measured', 
-                      type=float, 
-                      default=None, 
-                      metavar='CTN', 
-                      help='Measured CT number in HU')
-  parser.add_argument('--header', '-H',
-                      action="store_true",
-                      help="""Print a header line first (default: %(default)s)""")
-  parser.add_argument ("--delimiter",
-                      metavar='VAL', 
-                      default = "\t",
-                      help="""Delimiter character (default: tab, '\\t')""")
-  parser.add_argument ("--description", "-d",
-                      metavar='TXT', 
-                      default = '',
-                      help="""Description to pass to output (e.g., filename) (default: %(default)s)""")
+                      metavar='MAT1 MAT2 (MAT3)', 
+                      help='Specify 2 or 3 ICRU materials (cha, water, adipose)')
   parser.add_argument("--quiet", 
                       action='store_true', 
                       help='Overwrite output without asking')
+  parser.add_argument("--overwrite", 
+                      action='store_true',
+                      default=False,
+                      help='Overwrite output files without asking (default: %(default)s)')
   # Parse and display
   args = parser.parse_args()
   if not args.quiet:
