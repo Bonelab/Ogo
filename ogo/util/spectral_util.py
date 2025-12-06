@@ -10,11 +10,10 @@ import sys
 import os
 import argparse
 import math
-import SimpleITK as sitk
 import numpy as np
 from ogo.dat.MassAttenuationTables import mass_attenuation_tables
-from ogo.util.echo_arguments import echo_arguments
-import ogo.util.Helper as ogo
+#from ogo.util.echo_arguments import echo_arguments
+#import ogo.util.Helper as ogo
 
 def mass_density():  # mass_density, g/cm3
   rho = {
@@ -106,3 +105,89 @@ def interpolate_mass_attenuation(material="water",keV=90):
   mass_attenuation = np.interp(keV,xp,fp)
     
   return mass_attenuation
+
+def solve_system_equations(A=np.ones((2,2)), B=np.ones(2), use_numpy=False):
+  """Solve a system of equations
+  
+  This is used for material decomposition in spectral 
+  imaging.
+  
+  It can produce a solution using two possible methods:
+  
+  1. It uses the Numpy linear algebra solver.
+  
+  2. Uses Cramer's Rule to solve a system of equations. 
+  
+  Using Cramer's rule only is only valid for either 2x2 
+  or 3x3 systems of equations. Its results are less
+  stable if the determinant of A is near zero.
+  
+  
+  
+  AX = B, where
+  
+  ⎡ a b ⎤⎡ x ⎤ = ⎡ e ⎤
+  ⎣ c d ⎦⎣ y ⎦   ⎣ f ⎦
+  
+  ⎡ a b c ⎤⎡ x ⎤   ⎡ j ⎤
+  ⎜ d e f ⎟⎜ y ⎟ = ⎜ k ⎟
+  ⎣ g h i ⎦⎣ z ⎦   ⎣ l ⎦
+  
+  """
+  
+  if use_numpy:
+    a = np.array(A)
+    b = np.array(B)
+    X = np.linalg.solve(a, b)
+    return X
+  
+  size = len(A)
+
+  if size < 2 or size > 3:
+    raise ValueError("Matrix size must be 2 or 3.")
+    
+  if size == 2:
+    a = A[0,0]
+    b = A[0,1]
+    c = A[1,0]
+    d = A[1,1]
+    e = B[0]
+    f = B[1]
+    D = a*d - b*c
+    Dx = d*e - f*b
+    Dy = a*f - c*e
+    
+    x = Dx / D
+    y = Dy / D
+    
+    return np.array([x,y])
+    
+  if size == 3:
+    a = A[0,0]
+    b = A[0,1]
+    c = A[0,2]
+    d = A[1,0]
+    e = A[1,1]
+    f = A[1,2]
+    g = A[2,0]
+    h = A[2,1]
+    i = A[2,2]
+    j = B[0]
+    k = B[1]
+    l = B[2]
+    D =  a*(e*i - f*h) - b*(d*i - f*g) + c*(d*h - e*g)
+    #if D==0:
+    #  print('ERROR: Determinant is zero.')
+    #  return np.zeros(3)
+      
+#    D =  np.linalg.det(A)
+    Dx = j*(e*i - f*h) - b*(k*i - f*l) + c*(k*h - e*l)
+    Dy = a*(k*i - f*l) - j*(d*i - f*g) + c*(d*l - g*k)
+    Dz = a*(e*l - h*k) - b*(d*l - g*k) + j*(d*h - e*g)
+
+    x = Dx / D
+    y = Dy / D
+    z = Dz / D
+    
+    return np.array([x,y,z])
+  

@@ -1,5 +1,5 @@
 # /------------------------------------------------------------------------------+
-# | 7-NOV-2025                                                                  |
+# | 5-DEC-2025                                                                  |
 # | Copyright (c) Bone Imaging Laboratory                                        |
 # | All rights reserved                                                          |
 # | bonelab@ucalgary.ca                                                          |
@@ -30,7 +30,7 @@ def print_dict(d):
     print('     {:>30s}: {:12.4f} {}'.format('mu',d[k]['mu'],'/cm'))
     print('     {:>30s}: {:12.4f} {}'.format('ctn',d[k]['ctn'],'HU'))
   
-def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, header=False, delimiter=',', description='', quiet=False):
+def MaterialDecomposition(energy, material, mass_density, ctn_measured, header=False, delimiter=',', description='', quiet=False):
   
   # Initialize variables
   entry = []
@@ -206,10 +206,10 @@ def main():
 '''
   epilog = '''
 Example calls: 
-  ogoCalculateLinearAttenuation 80 --material cha 0.202 --quiet
-  ogoCalculateLinearAttenuation 80 --material cha water \\
+  ogoMaterialDecomposition 80 --material cha 0.202 --quiet
+  ogoMaterialDecomposition 80 --material cha water \\
                                    --mass_density 0.202 0.972
-  ogoCalculateLinearAttenuation 80 --material cha water \\
+  ogoMaterialDecomposition 80 --material cha water \\
                                    --mass_density 0.202 0.972 \\
                                    --ctn_measured 236 \\
                                    -d "PCD_ESP_120kV_080keV_Br40_04Th"
@@ -219,7 +219,7 @@ Example calls:
   # Setup argument parsing
   parser = argparse.ArgumentParser(
       formatter_class=argparse.RawTextHelpFormatter,
-      prog="ogoCalculateLinearAttenuation",
+      prog="ogoMaterialDecomposition",
       description=description,
       epilog=epilog
   )
@@ -260,10 +260,10 @@ Example calls:
   # Parse and display
   args = parser.parse_args()
   if not args.quiet:
-    print(echo_arguments('CalculateLinearAttenuation', vars(args)))
+    print(echo_arguments('MaterialDecomposition', vars(args)))
 
   # Run program
-  CalculateLinearAttenuation(**vars(args))
+  MaterialDecomposition(**vars(args))
 
 if __name__ == '__main__':
     main()
