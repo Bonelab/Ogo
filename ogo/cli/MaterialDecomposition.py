@@ -1,5 +1,5 @@
 # /------------------------------------------------------------------------------+
-# | 5-DEC-2025                                                                  |
+# | 5-DEC-2025                                                                   |
 # | Copyright (c) Bone Imaging Laboratory                                        |
 # | All rights reserved                                                          |
 # | bonelab@ucalgary.ca                                                          |
@@ -18,10 +18,21 @@ from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 import ogo.util.spectral_util as md
 
-def MaterialDecomposition(images, energies, materials, quiet, overwrite):
+# Just used to do some debugging
+def print_pattern(pattern):
+  basename,dirname,name,ext = md.parse_filename(pattern)
+  print('{:>20s}: {:s}'.format('INPUT', pattern))
+  print('{:>20s}: {:s}'.format('basename', basename))
+  print('{:>20s}: {:s}'.format('dirname', dirname))
+  print('{:>20s}: {:s}'.format('name', name))
+  print('{:>20s}: {:s}'.format('ext', ext))
+  
+def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet, overwrite):
   
   # Initialize variables
   choices=['adipose','air','blood','bone','calcium','cha','k2hpo4','muscle','water','softtissue','redmarrow','yellowmarrow','spongiosa','iodine']
+  
+  no_print_str = '--suppressed--'
   
   # Check that input images exist and are type NIfTI
   for image in images:
@@ -51,15 +62,51 @@ def MaterialDecomposition(images, energies, materials, quiet, overwrite):
       mass_attenuations.append(md.interpolate_mass_attenuation(material,energy))
 
   if not quiet:
-    ogo.message('Energies:          [' + ', '.join('{:.4f}'.format(i) for i in energies) + ']')
+    ogo.message('Low energy image at {:.1f} keV:'.format(energies[0]))
+    basename,dirname,name,ext = md.parse_filename(images[0])
+    ogo.message('  {:s}'.format(name+ext))
+    ogo.message('')
+    ogo.message('High energy image at {:.1f} keV:'.format(energies[1]))
+    basename,dirname,name,ext = md.parse_filename(images[1])
+    ogo.message('  {:s}'.format(name+ext))
+    ogo.message('')
     ogo.message('Materials:         [' + ', '.join('{:s}'.format(i) for i in materials) + ']')
+    ogo.message('')
     ogo.message('Mass_attenuations: [' + ', '.join('{:.4f}'.format(i) for i in mass_attenuations) + ']')
     ogo.message('')
     
-  # Read in CT data
+  # Define output filenames and check for overwrite
+  ofiles = []
+  if pattern is not None:
+    basename,dirname,name,ext = md.parse_filename(pattern)
+    if not ext:
+      ext='.nii.gz'
+    if dirname and not os.path.isdir(os.path.dirname(pattern)):
+      os.sys.exit('[ERROR] Output directory does not exist: {}'.format(os.path.dirname(pattern)))
+  else:
+    basename,dirname,name,ext = md.parse_filename(images[0])
+  
+  for material in materials:
+    if material not in suppress:
+      ofiles.append(name + '_' + '{}mat'.format(len(materials)) + '_' + material + ext)
+    else:
+      ofiles.append(no_print_str)
+
+  for ofile in ofiles:
+    if os.path.isfile(ofile) and not overwrite:
+        result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(ofile))
+        if result.lower() not in ['y', 'yes']:
+            ogo.message('Not overwriting. Exiting...')
+            os.sys.exit()
+    
+  # Read in CT data ---------------------------------------------------------------------------------
+  if not quiet:
+    ogo.message('Input files')
   ct1 = sitk.ReadImage(images[0])
   if not quiet:
-    ogo.message('Reading image 1: {:s}'.format(images[0]))
+    ogo.message('      low image: {:s}'.format(os.path.basename(images[0])))
+    ogo.message('         energy: {:.1f}'.format(energies[0]))
+    ogo.message('      directory: {:s}'.format(os.path.dirname(images[0])))
     ogo.message('      dimension: {:d}'.format(ct1.GetDimension()))
     ogo.message('           type: {:s}'.format(ct1.GetPixelIDTypeAsString()))
     ogo.message('           size: [' + ', '.join('{:d}'.format(i) for i in ct1.GetSize()) + ']')
@@ -70,7 +117,8 @@ def MaterialDecomposition(images, energies, materials, quiet, overwrite):
     
   ct2 = sitk.ReadImage(images[1])
   if not quiet:
-    ogo.message('Reading image 2: {:s}'.format(images[1]))
+    ogo.message('     high image: {:s}'.format(os.path.basename(images[1])))
+    ogo.message('      directory: {:s}'.format(os.path.dirname(images[1])))
     ogo.message('      dimension: {:d}'.format(ct2.GetDimension()))
     ogo.message('           type: {:s}'.format(ct2.GetPixelIDTypeAsString()))
     ogo.message('           size: [' + ', '.join('{:d}'.format(i) for i in ct2.GetSize()) + ']')
@@ -88,109 +136,149 @@ def MaterialDecomposition(images, energies, materials, quiet, overwrite):
     ogo.message('[WARNING] Unexpected CT data type: {}'.format(ct1.GetPixelIDTypeAsString()))
   if ct2.GetPixelID() != sitk.sitkInt16:
     ogo.message('[WARNING] Unexpected CT data type: {}'.format(ct2.GetPixelIDTypeAsString()))
-  if ct1.GetOrigin() != ct2.GetOrigin():
-    ogo.message('[WARNING] Origin of CT images differ.')
-  if ct1.GetSpacing() != ct2.GetSpacing():
-    ogo.message('[WARNING] Spacing of CT images differ.')
-  if ct1.GetDirection() != ct2.GetDirection():
-    ogo.message('[WARNING] Direction of CT images differ.')
-    
-  # Simple ITK image to numpy array
-  np_ct1 = sitk.GetArrayFromImage(ct1)
-  np_ct2 = sitk.GetArrayFromImage(ct2)
+  if (ct1.GetOrigin() != ct2.GetOrigin() or 
+      ct1.GetSpacing() != ct2.GetSpacing() or 
+      ct1.GetDirection() != ct2.GetDirection()):
+    ogo.message('[WARNING] Origin, Spacing or Direction are different for input images.')
+    ogo.message('          Output settings are taken from image 1 input.')
+
+  origin = ct1.GetOrigin()
+  spacing = ct1.GetSpacing()
+  direction = ct1.GetDirection()
   
-  dims = [ct1.GetSize()[2],ct1.GetSize()[1],ct1.GetSize()[0]]
-  
-  # Flatten
-  np_ct1_flattened=np_ct1.reshape(-1)
-  
-  # Do material decomposition here...
-  
-  # Reshape
-  reshaped_np_ct1 = np_ct1_flattened.reshape(dims)
-  
-  # Numpy array to simple ITK image
-  ct_material1 = sitk.GetImageFromArray(reshaped_np_ct1)
-  ct_material1.SetOrigin(ct1.GetOrigin())
-  ct_material1.SetSpacing(ct1.GetSpacing())
-  ct_material1.SetDirection(ct1.GetDirection())
   if not quiet:
-    ogo.message('[IMPORTANT] Origin, spacing and direction are taken from image 1.')
-  
-  output_image = 'test.nii.gz'
-  ogo.message('Writing output to file {}'.format(output_image))
-  sitk.WriteImage(ct_material1, output_image)
-  
-  
-  exit()
+    odir = os.path.dirname(ofiles[0])
+    if not odir: odir='.'
+    ogo.message('Output files')
+    for idx, ofile in enumerate(ofiles):
+      ogo.message('{:>15s}: {:s}'.format(materials[idx],os.path.basename(ofile)))
+    ogo.message('{:>15s}: {:s}'.format('DIR',odir))
+    ogo.message('')
     
-  # Print results to screen
-  if not quiet:
-    print('--------------------------------------------------------------------------------')
-    print('Materials:')
-    print('--------------------------------------------------------------------------------')
-    print_dict(linear_attenuation_dict)
-    print('--------------------------------------------------------------------------------')
-    print('Summed material results:')
-    print('--------------------------------------------------------------------------------')
-    print('     {:>30s}: {:12.4f} [/cm]'.format('mu',mu_final))
-    print('     {:>30s}: {:12.4f} [HU]'.format('ctn',ctn_final))
-    print('     {:>30s}: {:s}'.format('description',description))
-    if calculate_error:
-      print('--------------------------------------------------------------------------------')
-      print('Error calculations:')
-      print('--------------------------------------------------------------------------------')
-      print('     {:>30s}: {:12.1f} [HU]'.format('CT number',ctn_measured))
-      print('     {:>30s}: {:12.4f} [HU]'.format('delta',ctn_delta))
-      print('     {:>30s}: {:12.4f} [%]'.format('error',ctn_percent_error))
-      print('')
-      print('     {:>30s}: {:12.4f} [/cm]'.format('mu from CT number',mu_measured))
-      print('     {:>30s}: {:12.4f} [/cm]'.format('delta',mu_delta))
-      print('     {:>30s}: {:12.4f} [%]'.format('error',mu_percent_error))
-      print('--------------------------------------------------------------------------------')
+  # Convert SimpleITK images to numpy arrays and flatten them to 1D
+  np_low = sitk.GetArrayFromImage(ct1)
+  np_low_flattened=np_low.reshape(-1)
+
+  np_high = sitk.GetArrayFromImage(ct2)
+  np_high_flattened=np_high.reshape(-1)
   
-  # Primary outcomes only
-  entry.append( ['description', '{:s}'.format(description),'TXT'] )
-  entry.append( ['energy', '{:.4f}'.format(energy), '[keV]'] )
-  for idx,mat in enumerate(material):
-    entry.append( ['material'+'_{}'.format(idx), '{:s}'.format(mat), '[]'] )
-    entry.append( ['mass_density'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_density']), '[g/cm3]'] )
-    entry.append( ['mass_concentration'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_concentration']), '[g/cm3]'] )
-    entry.append( ['mass_attenuation'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_attenuation']), '[cm2/g]'] )
-    entry.append( ['icru_mass_density'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['icru_mass_density']), '[g/cm3]'] )
-    entry.append( ['mu'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mu']), '[/cm]'] )
-    entry.append( ['ctn'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['ctn']), '[HU]'] )
-  entry.append( ['mu_final', '{:.4f}'.format(mu_final), '[/cm]'] )
-  entry.append( ['ctn_final', '{:d}'.format(ctn_final), '[/cm]'] )
-  if calculate_error:
-    entry.append( ['ctn_measured', '{:.1f}'.format(ctn_measured), '[HU]'] )
-    entry.append( ['ctn_delta', '{:.4f}'.format(ctn_delta), '[H]'] )
-    if ctn_measured != 0:
-      entry.append( ['ctn_percent_error', '{:.4f}'.format(ctn_percent_error), '[%]'] )  
-    else:
-      entry.append( ['ctn_percent_error', 'n/a', '[%]'] )  
-    entry.append( ['mu_measured', '{:.4f}'.format(mu_measured), '[/cm]'] )
-    entry.append( ['mu_delta', '{:.4f}'.format(mu_delta), '[/cm]'] )
-    entry.append( ['mu_percent_error', '{:.4f}'.format(mu_percent_error), '[%]'] )  
+  original_shape = np_low.shape
   
-  # Output results for stdout
-  if quiet:
-    # Print the output
-    entry = list(zip(*entry))
-    out = sys.stdout
-    if header:
-        out.write (delimiter.join(entry[0]) + "\n")
-        out.write (delimiter.join(entry[2]) + "\n")
-    out.write (delimiter.join(entry[1]) + "\n")
+  # Convert images from CT number to linear attenuation
+  mu_water_low = md.interpolate_mass_attenuation('water',energies[0])
+  mu_water_high = md.interpolate_mass_attenuation('water',energies[1])
+  
+  np_low_flattened_mu = md.ct_number_to_mu(np_low_flattened,mu_water_low)
+  np_high_flattened_mu = md.ct_number_to_mu(np_high_flattened,mu_water_high)
+  
+  # 2-material decomposition ------------------------------------------------------------------------
+  if len(materials)==2:
+    ogo.message('Performing 2-material decomposition without calibration phantom.')
+    ogo.message('  Materials are: [' + ', '.join('{}'.format(i) for i in materials) + ']')
+    ogo.message('  No calibration phantom used.')
+    ogo.message('')
     
+    # AX = B, where
+    # 
+    # ⎡ a b ⎤⎡ rho_mat1 ⎤ = ⎡ e ⎤
+    # ⎣ c d ⎦⎣ rho_mat2 ⎦   ⎣ f ⎦
+    
+    A_matrix = np.array(mass_attenuations).reshape(2, 2)
+    B_matrix = np.vstack((np_low_flattened_mu,np_high_flattened_mu))
+    
+    solution = md.solve_system_equations(A_matrix,B_matrix,True)
+    
+    # Reshape
+    np_ct_material1 = solution[0,:].reshape(original_shape)
+    np_ct_material2 = solution[1,:].reshape(original_shape)
+    
+    # Create SimpleITK images
+    ct_material1 = sitk.GetImageFromArray(np_ct_material1)
+    ct_material1.SetOrigin(origin)
+    ct_material1.SetSpacing(spacing)
+    ct_material1.SetDirection(direction)
+    
+    ct_material2 = sitk.GetImageFromArray(np_ct_material2)
+    ct_material2.SetOrigin(origin)
+    ct_material2.SetSpacing(spacing)
+    ct_material2.SetDirection(direction)
+    
+    # Write output
+    ogo.message('Writing output')
+    if ofiles[0] is not no_print_str:
+      ogo.message('  {}'.format(ofiles[0]))
+      sitk.WriteImage(ct_material1, ofiles[0])
+    if ofiles[1] is not no_print_str:
+      ogo.message('  {}'.format(ofiles[1]))
+      sitk.WriteImage(ct_material2, ofiles[1])
+
+  # 3-material decomposition ------------------------------------------------------------------------
+  if len(materials)==3:
+    ogo.message('Performing 3-material decomposition without calibration phantom.')
+    ogo.message('  Materials are: [' + ', '.join('{}'.format(i) for i in materials) + ']')
+    ogo.message('  No calibration phantom used.')
+    ogo.message('')
+    
+    # AX = B, where
+    # 
+    # ⎡ a b c ⎤⎡ rho_mat1 ⎤   ⎡ j ⎤
+    # ⎜ d e f ⎟⎜ rho_mat2 ⎟ = ⎜ k ⎟
+    # ⎣ g h i ⎦⎣ rho_mat3 ⎦   ⎣ l ⎦
+    
+    A_matrix = np.array(mass_attenuations).reshape(2, 3)
+    A_matrix = np.append(A_matrix, np.array([[1, 1, 1]]), axis=0) # Add 1's for third equation
+
+    B_matrix = np.vstack((np_low_flattened_mu,np_high_flattened_mu,np.ones(np_low_flattened_mu.size))) # Add 1's for third equation
+    
+    solution = md.solve_system_equations(A_matrix,B_matrix,True)
+    
+    # Reshape
+    np_ct_material1 = solution[0,:].reshape(original_shape)
+    np_ct_material2 = solution[1,:].reshape(original_shape)
+    np_ct_material3 = solution[2,:].reshape(original_shape)
+    
+    # Create SimpleITK images
+    ct_material1 = sitk.GetImageFromArray(np_ct_material1)
+    ct_material1.SetOrigin(origin)
+    ct_material1.SetSpacing(spacing)
+    ct_material1.SetDirection(direction)
+    
+    ct_material2 = sitk.GetImageFromArray(np_ct_material2)
+    ct_material2.SetOrigin(origin)
+    ct_material2.SetSpacing(spacing)
+    ct_material2.SetDirection(direction)
+    
+    ct_material3 = sitk.GetImageFromArray(np_ct_material3)
+    ct_material3.SetOrigin(origin)
+    ct_material3.SetSpacing(spacing)
+    ct_material3.SetDirection(direction)
+    
+    # Write output
+    ogo.message('Writing output')
+    if ofiles[0] is not no_print_str:
+      ogo.message('  {}'.format(ofiles[0]))
+      sitk.WriteImage(ct_material1, ofiles[0])
+    if ofiles[1] is not no_print_str:
+      ogo.message('  {}'.format(ofiles[1]))
+      sitk.WriteImage(ct_material2, ofiles[1])
+    if ofiles[2] is not no_print_str:
+      ogo.message('  {}'.format(ofiles[2]))
+      sitk.WriteImage(ct_material2, ofiles[2])
+  
+  ogo.message('')
+  ogo.message('Done.')
+  
   
 def main():
   description = '''
-  Performs material decomposition based on a pair of CT virtual 
-  monoenergetic images (VMIs). 
+  Performs material decomposition based on a pair of images
+  representing LOW and HIGH acquisitions. These can be from VMIs
+  or any other LOW/HIGH pair.
   
   Typical use is 2-material decomposition into water and HA or a
-  3-material decomposition into HA, water and adipose.
+  3-material decomposition into HA, water and adipose. However
+  any combinations can be employed, although do this at your own
+  risk.
   
   Input images are expected to be CT numbers in Hounsfield units.
   
@@ -209,6 +297,15 @@ def main():
     yellowmarrow
     spongiosa
     iodine
+    
+  An output image is generated for two or three materials 
+  depending on type type of composition. The default output
+  filename has the suffix material added to it (e.g., _cha,
+  _water, _adipose). Use the PATTERN option if a new directory
+  and base filename is preferred. 
+  
+  Suppress writing an output image by specifying which 
+  material(s).
   
 '''
   epilog = '''
@@ -220,11 +317,31 @@ Example calls:
                            50 80 \\
                            cha water adipose
                 
-  cd /Users/skboyd/Desktop/erlangen/pcct/models/img/                         
-  ogoMaterialDecomposition PCD_ESP_140kV_040keV_Br40_04Th_10Slices.nii.gz \\
-                           PCD_ESP_140kV_090keV_Br40_04Th_10Slices.nii.gz \\
-                           40 90 cha water
+  ogoMaterialDecomposition \\
+    PCD_HIPQC_120kV_060KEV_LOW_Qr40_04Th_10Slices.nii.gz \\
+    PCD_HIPQC_120kV_084KEV_HGH_Qr40_04Th_10Slices.nii.gz \\
+    60 84 cha water adipose --pattern PCD_HIPQC_120kV.nii.gz
   
+  ogoMaterialDecomposition \\
+    PCD_HIPQC_120kV_060KEV_LOW_Qr40_04Th_10Slices.nii.gz \\
+    PCD_HIPQC_120kV_084KEV_HGH_Qr40_04Th_10Slices.nii.gz \\
+    60 84 cha water --pattern PCD_HIPQC_120kV.nii.gz
+  
+  ogoMaterialDecomposition \\
+    PCD_ESP_140kV_040keV_Br40_04Th_10Slices.nii.gz \\
+    PCD_ESP_140kV_090keV_Br40_04Th_10Slices.nii.gz \\
+    40 90 cha water --pattern ./PCD_ESP_140kV.nii.gz
+  
+  
+  cd /Users/skboyd/Desktop/erlangen/pcct/models/img/                         
+  cd /Users/skboyd/Desktop/erlangen/pcct/scratch/                         
+  ogoMaterialDecomposition /Users/skboyd/Desktop/erlangen/pcct/scratch/PCD_ESP_140kV_040keV_Br40_04Th_10Slices.nii.gz \\
+                           /Users/skboyd/Desktop/erlangen/pcct/scratch/PCD_ESP_140kV_090keV_Br40_04Th_10Slices.nii.gz \\
+                           40 90 cha water
+  ogoMaterialDecomposition \\
+  PCD_HIPQC_120kV_060KEV_LOW_Qr40_04Th_10Slices.nii.gz \\
+  PCD_HIPQC_120kV_084KEV_HGH_Qr40_04Th_10Slices.nii.gz \\
+  60 84 cha water --pattern PCD_HIPQC_120kV.nii..gz --overwrite
 '''
 
   # Setup argument parsing
@@ -237,18 +354,27 @@ Example calls:
   parser.add_argument('images',
                       metavar='Filename Filename', 
                       nargs=2, 
-                      help='CT VMI images (*.nii.gz)')
+                      help='CT low and high images (*.nii.gz)')
   parser.add_argument('energies', 
                       type=float, 
                       default=[], 
                       nargs=2, 
                       metavar='keV keV', 
-                      help='Energies of images (40 to 190 keV)')
+                      help='Energies of low and high images (40 to 190 keV)')
   parser.add_argument('materials', 
                       nargs='*', 
                       default=[], 
                       metavar='MAT1 MAT2 (MAT3)', 
-                      help='Specify 2 or 3 ICRU materials (cha, water, adipose)')
+                      help='Specify 2 or 3 ICRU materials (HA, water, adipose)')
+  parser.add_argument("--pattern", 
+                      default=None, 
+                      metavar='FILE', 
+                      help='Directory and filename pattern.')
+  parser.add_argument('--suppress', 
+                      nargs='*', 
+                      default=[], 
+                      metavar='MAT1 MAT2 (MAT3)', 
+                      help='File outputs to suppress (e.g., HA, water, adipose)')
   parser.add_argument("--quiet", 
                       action='store_true', 
                       help='Overwrite output without asking')

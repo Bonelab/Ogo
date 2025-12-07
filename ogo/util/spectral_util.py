@@ -190,4 +190,18 @@ def solve_system_equations(A=np.ones((2,2)), B=np.ones(2), use_numpy=False):
     z = Dz / D
     
     return np.array([x,y,z])
+
+def parse_filename(filename):
+  """Parses a filename into parts
+
+  Useful for extracting directory, filename,
+  full filename without extension, and extension."""
+
+  basename = os.path.basename(filename) # remove
+  dirname = os.path.dirname(filename) # remove
+  name, ext = os.path.splitext(filename)
+  if 'gz' in ext:
+      name = os.path.splitext(name)[0]  # Manages files with double extension
+      ext = '.nii' + ext
   
+  return basename,dirname,name,ext
