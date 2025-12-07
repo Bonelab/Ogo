@@ -88,7 +88,7 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
   
   for material in materials:
     if material not in suppress:
-      ofiles.append(name + '_' + '{}mat'.format(len(materials)) + '_' + material + ext)
+      ofiles.append(name + '_' + '{}'.format(len(materials)) + material + ext)
     else:
       ofiles.append(no_print_str)
 
@@ -300,9 +300,13 @@ def main():
     
   An output image is generated for two or three materials 
   depending on type type of composition. The default output
-  filename has the suffix material added to it (e.g., _cha,
-  _water, _adipose). Use the PATTERN option if a new directory
-  and base filename is preferred. 
+  filename has the suffix decomposition type (2 or 3) and 
+  material added to it. For example, _2cha, _2water or possibly
+  _3cha, _3water, _3adipose.
+
+  Use the PATTERN option if a new directory and base filename 
+  is preferred, otherwise output is written to same directory
+  as input images and same base filename with suffix. 
   
   Suppress writing an output image by specifying which 
   material(s).
@@ -310,13 +314,8 @@ def main():
 '''
   epilog = '''
 Example calls: 
-  ogoMaterialDecomposition image1.nii.gz image2.nii.gz \\ 
-                           50 80 \\
-                           cha water
-  ogoMaterialDecomposition im1.nii.gz im2.nii.gz \\ 
-                           50 80 \\
-                           cha water adipose
-                
+  ogoMaterialDecomposition im1.nii im2.nii 40 80 cha water
+  
   ogoMaterialDecomposition \\
     PCD_HIPQC_120kV_060KEV_LOW_Qr40_04Th_10Slices.nii.gz \\
     PCD_HIPQC_120kV_084KEV_HGH_Qr40_04Th_10Slices.nii.gz \\
@@ -332,16 +331,11 @@ Example calls:
     PCD_ESP_140kV_090keV_Br40_04Th_10Slices.nii.gz \\
     40 90 cha water --pattern ./PCD_ESP_140kV.nii.gz
   
-  
-  cd /Users/skboyd/Desktop/erlangen/pcct/models/img/                         
-  cd /Users/skboyd/Desktop/erlangen/pcct/scratch/                         
-  ogoMaterialDecomposition /Users/skboyd/Desktop/erlangen/pcct/scratch/PCD_ESP_140kV_040keV_Br40_04Th_10Slices.nii.gz \\
-                           /Users/skboyd/Desktop/erlangen/pcct/scratch/PCD_ESP_140kV_090keV_Br40_04Th_10Slices.nii.gz \\
-                           40 90 cha water
   ogoMaterialDecomposition \\
-  PCD_HIPQC_120kV_060KEV_LOW_Qr40_04Th_10Slices.nii.gz \\
-  PCD_HIPQC_120kV_084KEV_HGH_Qr40_04Th_10Slices.nii.gz \\
-  60 84 cha water --pattern PCD_HIPQC_120kV.nii..gz --overwrite
+    PCD_ESP_140kV_040keV_Br40_04Th_10Slices.nii.gz \\
+    PCD_ESP_140kV_090keV_Br40_04Th_10Slices.nii.gz \\
+    40 90 cha water adipose --pattern ./PCD_ESP_140kV.nii.gz
+  
 '''
 
   # Setup argument parsing
@@ -365,7 +359,7 @@ Example calls:
                       nargs='*', 
                       default=[], 
                       metavar='MAT1 MAT2 (MAT3)', 
-                      help='Specify 2 or 3 ICRU materials (HA, water, adipose)')
+                      help='Specify 2 or 3 ICRU materials (eg. cha, water, adipose)')
   parser.add_argument("--pattern", 
                       default=None, 
                       metavar='FILE', 
