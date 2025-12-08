@@ -83,7 +83,6 @@ def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, hea
   # Calculate linear attenuation
   mu_final = 0.0
   for mat in material:
-    #mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['mass_concentration']
     mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['mass_density']
     linear_attenuation_dict[mat]['mu'] = mu
     mu_final += mu

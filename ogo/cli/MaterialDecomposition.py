@@ -61,6 +61,11 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     for energy in energies:
       mass_attenuations.append(md.interpolate_mass_attenuation(material,energy))
 
+  # Look up ICRU mass densitiesof materials
+  mass_densities=[]
+  for material in materials:
+    mass_densities.append(md.mass_density()[material])
+
   if not quiet:
     ogo.message('Low energy image at {:.1f} keV:'.format(energies[0]))
     basename,dirname,name,ext = md.parse_filename(images[0])
@@ -72,7 +77,9 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     ogo.message('')
     ogo.message('Materials:         [' + ', '.join('{:s}'.format(i) for i in materials) + ']')
     ogo.message('')
-    ogo.message('Mass_attenuations: [' + ', '.join('{:.4f}'.format(i) for i in mass_attenuations) + ']')
+    ogo.message('Mass attenuations: [' + ', '.join('{:.4f}'.format(i) for i in mass_attenuations) + ']')
+    ogo.message('')
+    ogo.message('Mass densities:    [' + ', '.join('{:.4f}'.format(i) for i in mass_densities) + ']')
     ogo.message('')
     
   # Define output filenames and check for overwrite
@@ -192,6 +199,10 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     np_ct_material1 = solution[0,:].reshape(original_shape)
     np_ct_material2 = solution[1,:].reshape(original_shape)
     
+    # Multiply by mass densities
+    np_ct_material1 = np_ct_material1 * mass_densities[0]
+    np_ct_material2 = np_ct_material2 * mass_densities[1]
+    
     # Create SimpleITK images
     ct_material1 = sitk.GetImageFromArray(np_ct_material1)
     ct_material1.SetOrigin(origin)
@@ -223,10 +234,11 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     # 
     # ⎡ a b c ⎤⎡ rho_mat1 ⎤   ⎡ j ⎤
     # ⎜ d e f ⎟⎜ rho_mat2 ⎟ = ⎜ k ⎟
-    # ⎣ g h i ⎦⎣ rho_mat3 ⎦   ⎣ l ⎦
+    # ⎣ g h i ⎦⎣ rho_mat3 ⎦   ⎣ 1 ⎦
     
-    A_matrix = np.array(mass_attenuations).reshape(2, 3)
-    A_matrix = np.append(A_matrix, np.array([[1, 1, 1]]), axis=0) # Add 1's for third equation
+    A_matrix = np.array(mass_attenuations).reshape(2, 3) # Mass attenuations
+    eq3 = np.array([[1.0/mass_densities[0], 1.0/mass_densities[1], 1.0/mass_densities[2]]]) # Inverse mass density
+    A_matrix = np.append(A_matrix, eq3, axis=0)
 
     B_matrix = np.vstack((np_low_flattened_mu,np_high_flattened_mu,np.ones(np_low_flattened_mu.size))) # Add 1's for third equation
     
@@ -236,6 +248,11 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     np_ct_material1 = solution[0,:].reshape(original_shape)
     np_ct_material2 = solution[1,:].reshape(original_shape)
     np_ct_material3 = solution[2,:].reshape(original_shape)
+    
+    # Multiply by mass densities
+    np_ct_material1 = np_ct_material1 * mass_densities[0]
+    np_ct_material2 = np_ct_material2 * mass_densities[1]
+    np_ct_material3 = np_ct_material3 * mass_densities[2]
     
     # Create SimpleITK images
     ct_material1 = sitk.GetImageFromArray(np_ct_material1)
@@ -271,9 +288,9 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
   
 def main():
   description = '''
-  Performs material decomposition based on a pair of images
-  representing LOW and HIGH acquisitions. These can be from VMIs
-  or any other LOW/HIGH pair.
+  Performs image-space material decomposition based on a pair of 
+  images representing LOW and HIGH acquisitions. These can be 
+  from VMIs or any other LOW/HIGH pair.
   
   Typical use is 2-material decomposition into water and HA or a
   3-material decomposition into HA, water and adipose. However
