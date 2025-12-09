@@ -205,3 +205,18 @@ def parse_filename(filename):
       ext = '.nii' + ext
   
   return basename,dirname,name,ext
+
+def print_matrix(matrix):
+  for row in matrix:
+      for element in row:
+          print(f"{element:4d}", end=" ") # Adjust the '4d' for desired spacing
+      print() # Newline after each row
+
+def print_matrix(matrix):
+  for row in matrix:
+      if len(row)>6:
+        row = row[:6]
+      for element in row:
+          print(f"{element:4.4e}", end=" ") # Adjust the '4d' for desired spacing
+      print() # Newline after each row
+  

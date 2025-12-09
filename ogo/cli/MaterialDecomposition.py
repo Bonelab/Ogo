@@ -57,8 +57,8 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
 
   # Look up mass attenuations of materials
   mass_attenuations=[]
-  for material in materials:
-    for energy in energies:
+  for energy in energies:
+    for material in materials:
       mass_attenuations.append(md.interpolate_mass_attenuation(material,energy))
 
   # Look up ICRU mass densitiesof materials
@@ -180,17 +180,26 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
   
   # 2-material decomposition ------------------------------------------------------------------------
   if len(materials)==2:
-    ogo.message('Performing 2-material decomposition without calibration phantom.')
-    ogo.message('  Materials are: [' + ', '.join('{}'.format(i) for i in materials) + ']')
-    ogo.message('  No calibration phantom used.')
-    ogo.message('')
+    if not quiet:
+      ogo.message('Performing 2-material decomposition without calibration phantom.')
+      ogo.message('  Materials are: [' + ', '.join('{}'.format(i) for i in materials) + ']')
+      ogo.message('  No calibration phantom used.')
+      ogo.message('')
     
-    # AX = B, where
+    # Ax = b, where
     # 
     # ⎡ a b ⎤⎡ rho_mat1 ⎤ = ⎡ e ⎤
     # ⎣ c d ⎦⎣ rho_mat2 ⎦   ⎣ f ⎦
     
     A_matrix = np.array(mass_attenuations).reshape(2, 2)
+
+    if not quiet:
+      condition_A = np.linalg.cond(A_matrix)
+      ogo.message('  Condition of A: {:12.4e}'.format(condition_A))
+      if condition_A>10:
+        ogo.message('  [WARNING] Condition of A is high!')
+      ogo.message('')
+    
     B_matrix = np.vstack((np_low_flattened_mu,np_high_flattened_mu))
     
     solution = md.solve_system_equations(A_matrix,B_matrix,True)
@@ -198,10 +207,6 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     # Reshape
     np_ct_material1 = solution[0,:].reshape(original_shape)
     np_ct_material2 = solution[1,:].reshape(original_shape)
-    
-    # Multiply by mass densities
-    np_ct_material1 = np_ct_material1 * mass_densities[0]
-    np_ct_material2 = np_ct_material2 * mass_densities[1]
     
     # Create SimpleITK images
     ct_material1 = sitk.GetImageFromArray(np_ct_material1)
@@ -215,22 +220,26 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     ct_material2.SetDirection(direction)
     
     # Write output
-    ogo.message('Writing output')
+    if not quiet:
+      ogo.message('Writing output')
     if ofiles[0] is not no_print_str:
-      ogo.message('  {}'.format(ofiles[0]))
+      if not quiet:
+        ogo.message('  {}'.format(ofiles[0]))
       sitk.WriteImage(ct_material1, ofiles[0])
     if ofiles[1] is not no_print_str:
-      ogo.message('  {}'.format(ofiles[1]))
+      if not quiet:
+        ogo.message('  {}'.format(ofiles[1]))
       sitk.WriteImage(ct_material2, ofiles[1])
 
   # 3-material decomposition ------------------------------------------------------------------------
   if len(materials)==3:
-    ogo.message('Performing 3-material decomposition without calibration phantom.')
-    ogo.message('  Materials are: [' + ', '.join('{}'.format(i) for i in materials) + ']')
-    ogo.message('  No calibration phantom used.')
-    ogo.message('')
+    if not quiet:
+      ogo.message('Performing 3-material decomposition without calibration phantom.')
+      ogo.message('  Materials are: [' + ', '.join('{}'.format(i) for i in materials) + ']')
+      ogo.message('  No calibration phantom used.')
+      ogo.message('')
     
-    # AX = B, where
+    # Ax = b, where
     # 
     # ⎡ a b c ⎤⎡ rho_mat1 ⎤   ⎡ j ⎤
     # ⎜ d e f ⎟⎜ rho_mat2 ⎟ = ⎜ k ⎟
@@ -239,7 +248,14 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     A_matrix = np.array(mass_attenuations).reshape(2, 3) # Mass attenuations
     eq3 = np.array([[1.0/mass_densities[0], 1.0/mass_densities[1], 1.0/mass_densities[2]]]) # Inverse mass density
     A_matrix = np.append(A_matrix, eq3, axis=0)
-
+    
+    if not quiet:
+      condition_A = np.linalg.cond(A_matrix)
+      ogo.message('  Condition of A: {:12.4e}'.format(condition_A))
+      if condition_A>10:
+        ogo.message('  [WARNING] Condition of A is high!')
+      ogo.message('')
+    
     B_matrix = np.vstack((np_low_flattened_mu,np_high_flattened_mu,np.ones(np_low_flattened_mu.size))) # Add 1's for third equation
     
     solution = md.solve_system_equations(A_matrix,B_matrix,True)
@@ -248,12 +264,7 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     np_ct_material1 = solution[0,:].reshape(original_shape)
     np_ct_material2 = solution[1,:].reshape(original_shape)
     np_ct_material3 = solution[2,:].reshape(original_shape)
-    
-    # Multiply by mass densities
-    np_ct_material1 = np_ct_material1 * mass_densities[0]
-    np_ct_material2 = np_ct_material2 * mass_densities[1]
-    np_ct_material3 = np_ct_material3 * mass_densities[2]
-    
+        
     # Create SimpleITK images
     ct_material1 = sitk.GetImageFromArray(np_ct_material1)
     ct_material1.SetOrigin(origin)
@@ -271,19 +282,24 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     ct_material3.SetDirection(direction)
     
     # Write output
-    ogo.message('Writing output')
+    if not quiet:
+      ogo.message('Writing output')
     if ofiles[0] is not no_print_str:
-      ogo.message('  {}'.format(ofiles[0]))
+      if not quiet:
+        ogo.message('  {}'.format(ofiles[0]))
       sitk.WriteImage(ct_material1, ofiles[0])
     if ofiles[1] is not no_print_str:
-      ogo.message('  {}'.format(ofiles[1]))
+      if not quiet:
+        ogo.message('  {}'.format(ofiles[1]))
       sitk.WriteImage(ct_material2, ofiles[1])
     if ofiles[2] is not no_print_str:
-      ogo.message('  {}'.format(ofiles[2]))
-      sitk.WriteImage(ct_material2, ofiles[2])
+      if not quiet:
+        ogo.message('  {}'.format(ofiles[2]))
+      sitk.WriteImage(ct_material3, ofiles[2])
   
-  ogo.message('')
-  ogo.message('Done.')
+  if not quiet:
+    ogo.message('')
+    ogo.message('Done.')
   
   
 def main():
