@@ -12,6 +12,7 @@ import argparse
 import math
 import numpy as np
 from ogo.dat.MassAttenuationTables import mass_attenuation_tables
+from scipy.interpolate import CubicSpline
 #from ogo.util.echo_arguments import echo_arguments
 #import ogo.util.Helper as ogo
 
@@ -85,7 +86,9 @@ def phantom_linear_fit(x=[1,2,3],y=[6,20,32]):
   return [m,b]
   
 def interpolate_mass_attenuation(material="water",keV=90):
-  """Interpolate the mass attenuation based on NIST tables
+  """Interpolate the mass attenuation based on NIST tables.
+  
+  Cubic interpolation is implemented. Minimum keV is 30.
   
   The published NIST mass attenuation [cm2/g] as a function 
   of photon energy [keV] for key materials are interpolated  
@@ -96,14 +99,20 @@ def interpolate_mass_attenuation(material="water",keV=90):
     raise Exception("interpolate_mass_attenuation: Material {} is not available in current NIST tables.".format(material))
   
   table = mass_attenuation_tables[table_name]
+  
+  # Diagnostic range is > 30 keV 
+  table = table[table['Energy [keV]'] >= 30]
+
   fp = table['Mass Attenuation [cm2/g]'].to_numpy()
   xp = table['Energy [keV]'].to_numpy()
 
   if keV < xp.min() or keV > xp.max():
     raise Exception("interpolate_mass_attenuation: Input keV {} is not in range of NIST table.".format(keV))
 
-  mass_attenuation = np.interp(keV,xp,fp)
-    
+  #mass_attenuation = np.interp(keV,xp,fp) # linear interpolation
+  spl = CubicSpline(xp,fp)
+  mass_attenuation = spl(keV)
+  
   return mass_attenuation
 
 def solve_system_equations(A=np.ones((2,2)), B=np.ones(2), use_numpy=False):
