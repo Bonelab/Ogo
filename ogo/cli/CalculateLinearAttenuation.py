@@ -18,22 +18,23 @@ def print_dict(d):
   for k in keys:
     print('  {:10s}: {:30s}'.format('material',k))
     print('     {:>30s}: {:12.4f} {}'.format('energy',d[k]['energy'],'keV'))
-    print('     {:>30s}: {:12.4f} {}'.format('mass_density',d[k]['mass_density'],'g/cm3'))
+    print('     {:>30s}: {:12.4f} {}'.format('volume_fraction',d[k]['volume_fraction'],''))
     print('     {:>30s}: {:12.4f} {}'.format('mass_concentration',d[k]['mass_concentration'],'g/cm3'))
     print('     {:>30s}: {:12.4f} {}'.format('mass_attenuation',d[k]['mass_attenuation'],'cm2/g'))
     print('     {:>30s}: {:12.4f} {}'.format('icru_mass_density',d[k]['icru_mass_density'],'g/cm3'))
     print('     {:>30s}: {:12.4f} {}'.format('mu',d[k]['mu'],'/cm'))
     print('     {:>30s}: {:12.4f} {}'.format('ctn',d[k]['ctn'],'HU'))
   
-def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, header=False, delimiter=',', description='', quiet=False):
+def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, header=False, delimiter=',', description='', quiet=False):
   
   # Initialize variables
   entry = []
+  inferred_volume_fraction = False
   choices=['adipose','air','blood','bone','calcium','cha','k2hpo4','muscle','water','softtissue','redmarrow','yellowmarrow','spongiosa','iodine']
   linear_attenuation_dict = {}
   material_dict = {
     'energy':0.0,
-    'mass_density':0.0,
+    'volume_fraction':0.0,
     'mass_concentration':0.0,
     'mass_attenuation':0.0,
     'icru_mass_density':0.0,
@@ -50,29 +51,36 @@ def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, hea
     os.sys.exit('[ERROR] Energy is expected to be between 30 and 200 keV.')
   if not material:
     os.sys.exit('[ERROR] At least one ICRU material must be defined.')
-  if not mass_density:
-    os.sys.exit('[ERROR] At least one mass concentration must be defined.')
-  if len(material) != len(mass_density):
-    os.sys.exit('[ERROR] N_material = {} and N_mass_density = {}.\n'.format(len(material),len(mass_density))+
-                '        Every ICRU material needs a mass concentration defined.')
+  if volume_fraction:
+    if sum(volume_fraction)>1.0:
+      os.sys.exit('[ERROR] Total volume fraction defined cannot be greater than 1.0.')
+  if len(material) != len(volume_fraction):
+    if (len(material) == 1) and (not volume_fraction):
+      volume_fraction = [1.0] # only one material defined, so we know volume_fraction is 1.0
+    elif len(material) > 1 and (len(material)-len(volume_fraction))==1:
+      volume_fraction.append(1.0 - sum(volume_fraction)) # one less volume_fraction defined, so we assume its value
+      inferred_volume_fraction = True
+    else:
+      os.sys.exit('[ERROR] N_material = {} and N_volume_fraction = {}.\n'.format(len(material),len(volume_fraction))+
+                '        Every ICRU material needs a volume fraction defined.')
   for mat in material:
     if mat not in choices:
       os.sys.exit('[ERROR] Material is not valid: {}'.format(mat))
     linear_attenuation_dict[mat] = copy.deepcopy(material_dict)                   # initialize dictionary
     linear_attenuation_dict[mat]['energy'] = energy
    
-  # Determine mass_concentration
-  for idx,input_mass_density in enumerate(mass_density):
+  # Determine mass_concentration from known volume fractions of ICRU materials
+  for idx,input_volume_fraction in enumerate(volume_fraction):
     mat = material[idx]
-    if input_mass_density<0:
-      os.sys.exit('[ERROR] Invalid mass density. Cannot be negative: {}'.format(input_mass_density))
+    if input_volume_fraction<0:
+      os.sys.exit('[ERROR] Invalid volume fraction. Cannot be negative: {}'.format(input_volume_fraction))
     icru_density = md.mass_density()[material[idx]]
-    mass_concentration = (input_mass_density / icru_density)
-    linear_attenuation_dict[mat]['mass_density'] = input_mass_density
+    mass_concentration = (input_volume_fraction * icru_density)
+    linear_attenuation_dict[mat]['volume_fraction'] = input_volume_fraction
     linear_attenuation_dict[mat]['icru_mass_density'] = icru_density
     linear_attenuation_dict[mat]['mass_concentration'] = mass_concentration
-    if mass_concentration > 1.0:
-      os.sys.exit('[ERROR] Material = {}, ICRU density = {:.3f}, mass_density = {:.3f}\n'.format(mat,icru_density,input_mass_density) +
+    if mass_concentration > icru_density:
+      os.sys.exit('[ERROR] Material = {}, ICRU density = {:.3f}, volume_fraction = {:.3f}\n'.format(mat,icru_density,input_volume_fraction) +
                   '        Mass concentration {} cannot be greater than its ICRU density.'.format(mass_concentration))
 
   # Look up mass attenuations from NIST
@@ -83,7 +91,7 @@ def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, hea
   # Calculate linear attenuation
   mu_final = 0.0
   for mat in material:
-    mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['mass_density']
+    mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['icru_mass_density'] * linear_attenuation_dict[mat]['volume_fraction']
     linear_attenuation_dict[mat]['mu'] = mu
     mu_final += mu
   
@@ -113,9 +121,12 @@ def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, hea
     print('Materials:')
     print('--------------------------------------------------------------------------------')
     print_dict(linear_attenuation_dict)
+    if inferred_volume_fraction:
+      print('     {:>44s}'.format('Note that volume fraction of this materials is inferred.'))
     print('--------------------------------------------------------------------------------')
     print('Summed material results:')
     print('--------------------------------------------------------------------------------')
+    print('     {:>30s}: {:12.4f} [1]'.format('total_volume_fraction',sum(volume_fraction)))
     print('     {:>30s}: {:12.4f} [/cm]'.format('mu',mu_final))
     print('     {:>30s}: {:12.4f} [HU]'.format('ctn',ctn_final))
     print('     {:>30s}: {:s}'.format('description',description))
@@ -137,7 +148,7 @@ def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, hea
   entry.append( ['energy', '{:.4f}'.format(energy), '[keV]'] )
   for idx,mat in enumerate(material):
     entry.append( ['material'+'_{}'.format(idx), '{:s}'.format(mat), '[]'] )
-    entry.append( ['mass_density'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_density']), '[g/cm3]'] )
+    entry.append( ['volume_fraction'+'_{}'.format(idx), '{:.4f}'.format(100.0 * linear_attenuation_dict[mat]['volume_fraction']), '[%]'] )
     entry.append( ['mass_concentration'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_concentration']), '[g/cm3]'] )
     entry.append( ['mass_attenuation'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_attenuation']), '[cm2/g]'] )
     entry.append( ['icru_mass_density'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['icru_mass_density']), '[g/cm3]'] )
@@ -169,12 +180,29 @@ def CalculateLinearAttenuation(energy, material, mass_density, ctn_measured, hea
   
 def main():
   description = '''
-  Given the mass density of an ICRU-defined material and the X-ray 
+  Given the volume fractions of ICRU-defined materials and the X-ray 
   energy of the virtual monoenergetic image (VMI) calculate the expected 
   linear attenuation.
   
   If multiple materials are defined (e.g., HA and water) then the 
-  calculated linear attenuation will be the summed result. 
+  calculated linear attenuation sum of the parts.
+  
+  The total volume fractions must sum to 1. For an HA insert, the volume 
+  fraction is based on its partial density of pure HA and the ICRU total
+  density. Here are some examples:
+  
+    101.7 mg HA/cm3 insert: HA volume fraction is 101.7 / 3160.0 = 0.0322
+    202.0 mg HA/cm3 insert: HA volume fraction is 202.0 / 3160.0 = 0.0639
+  
+  Knowing the volume fraction of the inserts from the certifications, 
+  we can calculate the volume fraction of the water materials as:
+  
+    101.7 mg HA/cm3 insert: water volume fraction is 1 - 0.0322 = 0.9678
+    202.0 mg HA/cm3 insert: water volume fraction is 1 - 0.0639 = 0.9361
+    
+  If the number of volume fractions is 1 less than the number of materials
+  then we assume that the remaining volume fraction is for the material that
+  was undefined. Usually this would be the water component of an HA phantom.
   
   If the CT number measured in Hounsfield units is provided from the
   scan then the error relative to the theoretical value will be output.
@@ -200,13 +228,13 @@ def main():
 '''
   epilog = '''
 Example calls: 
-  ogoCalculateLinearAttenuation 80 --material cha 0.202 --quiet
-  ogoCalculateLinearAttenuation 80 --material cha water \\
-                                   --mass_density 0.202 0.972
-  ogoCalculateLinearAttenuation 80 --material cha water \\
-                                   --mass_density 0.202 0.972 \\
-                                   --ctn_measured 236 \\
-                                   -d "PCD_ESP_120kV_080keV_Br40_04Th"
+  ogoCalculateLinearAttenuation 140 --material cha 0.202 --quiet
+  ogoCalculateLinearAttenuation 140 --material cha water \\
+                                    --volume_fraction 0.202 0.972
+  ogoCalculateLinearAttenuation 140 --material cha water \\
+                                    --volume_fraction 0.202 \\
+                                    --ctn_measured 135 \\
+                                    -d "PCD_ESP_120kV_140keV_Br40_04Th"
   
 '''
 
@@ -227,11 +255,11 @@ Example calls:
                       default=[], 
                       metavar='MAT1 MAT2', 
                       help='Specify ICRU materials (bone, muscle, cha, etc)')
-  parser.add_argument('--mass_density', 
+  parser.add_argument('--volume_fraction', 
                       type=float, nargs='*', 
                       default=[], 
-                      metavar='MASS1 MASS2', 
-                      help='Specify mass density for each material (g/cm3)')
+                      metavar='f1 f2', 
+                      help='Specify volume fraction for each material (sum to 1)')
   parser.add_argument('--ctn_measured', 
                       type=float, 
                       default=None, 
