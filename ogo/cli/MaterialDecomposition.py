@@ -61,7 +61,7 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
     for material in materials:
       mass_attenuations.append(md.interpolate_mass_attenuation(material,energy))
 
-  # Look up ICRU mass densitiesof materials
+  # Look up ICRU mass densities of materials
   mass_densities=[]
   for material in materials:
     mass_densities.append(md.mass_density()[material])
