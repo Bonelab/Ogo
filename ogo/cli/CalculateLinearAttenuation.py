@@ -228,7 +228,7 @@ def main():
 '''
   epilog = '''
 Example calls: 
-  ogoCalculateLinearAttenuation 140 --material cha 0.202 --quiet
+  ogoCalculateLinearAttenuation 140 --material cha --quiet
   ogoCalculateLinearAttenuation 140 --material cha water \\
                                     --volume_fraction 0.202 0.972
   ogoCalculateLinearAttenuation 140 --material cha water \\

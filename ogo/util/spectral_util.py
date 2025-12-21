@@ -6,15 +6,10 @@
 # +------------------------------------------------------------------------------+
 
 # Imports
-import sys
 import os
-import argparse
-import math
 import numpy as np
 from ogo.dat.MassAttenuationTables import mass_attenuation_tables
 from scipy.interpolate import CubicSpline
-#from ogo.util.echo_arguments import echo_arguments
-#import ogo.util.Helper as ogo
 
 def mass_density():  # mass_density, g/cm3
   rho = {
