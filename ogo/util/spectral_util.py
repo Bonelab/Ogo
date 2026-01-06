@@ -5,222 +5,200 @@
 # | bonelab@ucalgary.ca                                                          |
 # +------------------------------------------------------------------------------+
 
-# Imports
 import os
 import numpy as np
 from ogo.dat.MassAttenuationTables import mass_attenuation_tables
 from scipy.interpolate import CubicSpline
+from scipy.interpolate import UnivariateSpline
+
 
 def mass_density():  # mass_density, g/cm3
   rho = {
-    'adipose':9.500E-01, #9.3 to 9.7 in ICRU46
-    'air':1.205E-03,
-    'blood':1.060E+00,
-    'bone':1.920E+00,
-    'calcium':1.550E+00,
-    'cha':3.160E+00,
-    'k2hpo4':2.440E+00,
-    'muscle':1.050E+00,
-    'water':1.000E+00,
-    'softtissue':1.000E+00,
-    'redmarrow':1.030E+00,
-    'yellowmarrow':0.980E+00,
-    'spongiosa':1.180E+00,
-    'iodine':4.930
-    }
+    "adipose": 9.500E-01,  # 9.3 to 9.7 in ICRU46
+    "air": 1.205E-03,
+    "blood": 1.060E+00,
+    "bone": 1.920E+00,
+    "calcium": 1.550E+00,
+    "cha": 3.160E+00,
+    "k2hpo4": 2.440E+00,
+    "muscle": 1.050E+00,
+    "water": 1.000E+00,
+    "softtissue": 1.000E+00,
+    "redmarrow": 1.030E+00,
+    "yellowmarrow": 0.980E+00,
+    "spongiosa": 1.180E+00,
+    "iodine": 4.930,
+  }
   return rho
 
-def ct_number_to_mu(hu=0.0,mu_water=1.0):
-  """Convert CT number in HU to linear attenuation coefficient 
 
-  Converts the CT number measured in Hounsfield units, hu, 
-  into the linear attenuation coefficient, mu. The linear
-  attenuation coefficient of water is required.
-  
-  mu = mu_water * (hu/1000 + 1)
+def ct_number_to_mu(hu=0.0, mu_water=1.0):
+  """Convert CT number in HU to linear attenuation coefficient."""
+  return mu_water * hu / 1000.0 + mu_water
+
+
+def mu_to_ct_number(mu=0.0, mu_water=1.0):
+  """Convert linear attenuation coefficient to CT number in HU."""
+  return (mu - mu_water) / mu_water * 1000.0
+
+
+def mu_from_mass_attenuation_coefficient(mu_rho=1.0, rho=1.0):
+  """Convert mass attenuation coefficient [cm^2/g] to linear attenuation [cm^-1]."""
+  return mu_rho * rho
+
+
+def phantom_linear_fit(x=[1, 2, 3], y=[6, 20, 32]):
+  """Determine linear fit of density to Hounsfield units.
+
+  x: densities (dependent), y: CT numbers (independent). Requires at least two points.
   """
-  return mu_water*hu/1000.0 + mu_water
+  if len(x) != len(y):
+    raise ValueError(
+      "phantom_linear_fit: Number of dependent and independent variables must be equal."
+    )
 
-def mu_to_ct_number(mu=0.0,mu_water=1.0):
-  """Convert linear attenuation coefficient to CT number in HU
+  if len(x) < 2:
+    raise ValueError("phantom_linear_fit: Number of rods must be two or more.")
 
-  Converts the linear attenuation coefficient, mu, into 
-  CT number measured in Hounsfield units. The linear
-  attenuation coefficient of water is required.
-  
-  CT_number = (mu - mu_water)/mu_water * 1000
-  """
-  return (mu - mu_water)/mu_water*1000.0
-
-def mu_from_mass_attenuation_coefficient(mu_rho = 1.0, mass_density = 1.0):
-  """Convert the mass attenuation coefficient to mu
-  
-  Converts the mass attenuation coefficient, mu/rho [cm2/g] to
-  linear attenuation coefficient, mu [cm^-1] by dividing by
-  mass density, rho [g/cm3]
-  """
-  return (mu_rho * mass_density)
-  
-def phantom_linear_fit(x=[1,2,3],y=[6,20,32]):
-  """Determine linear fit of density to Hounsfield units
-
-  The dependent variable, x, includes the mass density of
-  the phantom rods and the independent variable, y, is the 
-  CT number in Hounsfield units of the rods. A minimum of
-  two rods is required."""
-
-  if (len(x) != len(y)):
-    raise Exception("phantom_linear_fit: Number of dependent and independent variables must be equal.")
-    
-  if (len(x) <2):
-    raise Exception("phantom_linear_fit: Number of rods must be two or more.")
-    
   deg = 1
-  [m,b] = np.polyfit(x, y, deg)
+  m, b = np.polyfit(x, y, deg)
+  return [m, b]
 
-  return [m,b]
-  
-def interpolate_mass_attenuation(material="water",keV=90):
-  """Interpolate the mass attenuation based on NIST tables.
-  
-  Cubic interpolation is implemented. Minimum keV is 30.
-  
-  The published NIST mass attenuation [cm2/g] as a function 
-  of photon energy [keV] for key materials are interpolated  
-  at a given photon energy."""
-  
+
+def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoothing_factor=None):
+  """Interpolate mass attenuation [cm2/g] from NIST tables at given energy (keV).
+
+  method: 'linear', 'cubic', or 'log-log' (uses a univariate spline in log-log space).
+  smoothing_factor: smoothing parameter 's' for UnivariateSpline when using 'log-log'.
+                    If None, s=0 (interpolating spline).
+  """
+  method_norm = method.lower().replace("_", "").replace("-", "")
+  if method_norm not in {"linear", "cubic", "loglog"}:
+    raise ValueError("interpolate_mass_attenuation: method must be 'linear', 'cubic' or 'log-log'.")
+
   table_name = material + "_table"
   if table_name not in mass_attenuation_tables.keys():
-    raise Exception("interpolate_mass_attenuation: Material {} is not available in current NIST tables.".format(material))
-  
+    raise ValueError(
+      f"interpolate_mass_attenuation: Material {material} is not available in current NIST tables."
+    )
+
   table = mass_attenuation_tables[table_name]
-  
-  # Diagnostic range is > 30 keV 
-  table = table[table['Energy [keV]'] >= 30]
+  table = table[table["Energy [keV]"] >= 30]  # diagnostic range > 30 keV
 
-  fp = table['Mass Attenuation [cm2/g]'].to_numpy()
-  xp = table['Energy [keV]'].to_numpy()
+  fp = table["Mass Attenuation [cm2/g]"].to_numpy()
+  xp = table["Energy [keV]"].to_numpy()
 
-  if keV < xp.min() or keV > xp.max():
-    raise Exception("interpolate_mass_attenuation: Input keV {} is not in range of NIST table.".format(keV))
+  keV_arr = np.asarray(keV)
+  if np.any(keV_arr < xp.min()) or np.any(keV_arr > xp.max()):
+    raise ValueError(
+      f"interpolate_mass_attenuation: Input keV {keV} is not in range of NIST table."
+    )
 
-  #mass_attenuation = np.interp(keV,xp,fp) # linear interpolation
-  spl = CubicSpline(xp,fp)
-  mass_attenuation = spl(keV)
-  
-  return mass_attenuation
+  if method_norm == "linear":
+    return np.interp(keV_arr, xp, fp)
 
-def solve_system_equations(A=np.ones((2,2)), B=np.ones(2), use_numpy=False):
-  """Solve a system of equations
-  
-  This is used for material decomposition in spectral 
-  imaging.
-  
-  It can produce a solution using two possible methods:
-  
-  1. It uses the Numpy linear algebra solver.
-  
-  2. Uses Cramer's Rule to solve a system of equations. 
-  
-  Using Cramer's rule only is only valid for either 2x2 
-  or 3x3 systems of equations. Its results are less
-  stable if the determinant of A is near zero.
-  
-  
-  
-  AX = B, where
-  
-  ⎡ a b ⎤⎡ x ⎤ = ⎡ e ⎤
-  ⎣ c d ⎦⎣ y ⎦   ⎣ f ⎦
-  
-  ⎡ a b c ⎤⎡ x ⎤   ⎡ j ⎤
-  ⎜ d e f ⎟⎜ y ⎟ = ⎜ k ⎟
-  ⎣ g h i ⎦⎣ z ⎦   ⎣ l ⎦
-  
-  """
-  
+  if method_norm == "cubic":
+    spl = CubicSpline(xp, fp)
+    return spl(keV_arr)
+
+  # method_norm == "loglog" -> perform interpolation in log-log space using UnivariateSpline
+  if np.any(xp <= 0) or np.any(fp <= 0) or np.any(keV_arr <= 0):
+    raise ValueError("interpolate_mass_attenuation: log-log interpolation requires positive energies and values.")
+
+
+  log_xp = np.log(xp)
+  log_fp = np.log(fp)
+  log_keV = np.log(keV_arr)
+
+  s = 0 if smoothing_factor is None else float(smoothing_factor)
+  spline = UnivariateSpline(log_xp, log_fp, s=s, k=3)
+  log_result = spline(log_keV)
+  return np.exp(log_result)
+
+
+def solve_system_equations(A=np.ones((2, 2)), B=np.ones(2), use_numpy=False):
+  """Solve AX = B. Supports numpy solver or Cramer's rule for 2x2 and 3x3 systems."""
   if use_numpy:
     a = np.array(A)
     b = np.array(B)
     X = np.linalg.solve(a, b)
     return X
-  
-  size = len(A)
 
+  size = len(A)
   if size < 2 or size > 3:
     raise ValueError("Matrix size must be 2 or 3.")
-    
+
   if size == 2:
-    a = A[0,0]
-    b = A[0,1]
-    c = A[1,0]
-    d = A[1,1]
+    a = A[0, 0]
+    b = A[0, 1]
+    c = A[1, 0]
+    d = A[1, 1]
     e = B[0]
     f = B[1]
-    D = a*d - b*c
-    Dx = d*e - f*b
-    Dy = a*f - c*e
-    
+    D = a * d - b * c
+    Dx = d * e - f * b
+    Dy = a * f - c * e
+
     x = Dx / D
     y = Dy / D
-    
-    return np.array([x,y])
-    
+    return np.array([x, y])
+
   if size == 3:
-    a = A[0,0]
-    b = A[0,1]
-    c = A[0,2]
-    d = A[1,0]
-    e = A[1,1]
-    f = A[1,2]
-    g = A[2,0]
-    h = A[2,1]
-    i = A[2,2]
+    a = A[0, 0]
+    b = A[0, 1]
+    c = A[0, 2]
+    d = A[1, 0]
+    e = A[1, 1]
+    f = A[1, 2]
+    g = A[2, 0]
+    h = A[2, 1]
+    i = A[2, 2]
     j = B[0]
     k = B[1]
     l = B[2]
-    D =  a*(e*i - f*h) - b*(d*i - f*g) + c*(d*h - e*g)
-    #if D==0:
-    #  print('ERROR: Determinant is zero.')
-    #  return np.zeros(3)
-      
-#    D =  np.linalg.det(A)
-    Dx = j*(e*i - f*h) - b*(k*i - f*l) + c*(k*h - e*l)
-    Dy = a*(k*i - f*l) - j*(d*i - f*g) + c*(d*l - g*k)
-    Dz = a*(e*l - h*k) - b*(d*l - g*k) + j*(d*h - e*g)
+    D = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+    Dx = j * (e * i - f * h) - b * (k * i - f * l) + c * (k * h - e * l)
+    Dy = a * (k * i - f * l) - j * (d * i - f * g) + c * (d * l - g * k)
+    Dz = a * (e * l - h * k) - b * (d * l - g * k) + j * (d * h - e * g)
 
     x = Dx / D
     y = Dy / D
     z = Dz / D
-    
-    return np.array([x,y,z])
+    return np.array([x, y, z])
+
 
 def parse_filename(filename):
-  """Parses a filename into parts
+  """Parse filename into basename, dirname, name (without extension), and extension.
+  Handles single extensions (.jpg, .nii, .tar) and common double/extensions (.nii.gz, .tar.gz, .tar.bz2).
+  """
+  filename = str(filename)
+  basename = os.path.basename(filename)
+  dirname = os.path.dirname(filename)
 
-  Useful for extracting directory, filename,
-  full filename without extension, and extension."""
+  root, ext = os.path.splitext(basename)
+  ext = ext.lower()
 
-  basename = os.path.basename(filename) # remove
-  dirname = os.path.dirname(filename) # remove
-  name, ext = os.path.splitext(filename)
-  if 'gz' in ext:
-      name = os.path.splitext(name)[0]  # Manages files with double extension
-      ext = '.nii' + ext
-  
-  return basename,dirname,name,ext
+  # common compressed suffixes that indicate a double extension
+  compressed_suffixes = {".gz", ".bz2", ".xz", ".zip"}
+  if ext in compressed_suffixes:
+    root2, ext2 = os.path.splitext(root)
+    if ext2:
+      ext = ext2.lower() + ext
+      root = root2
 
-def print_matrix(matrix):
+  return basename, dirname, root, ext
+
+
+def print_matrix(matrix, max_cols=6, float_fmt="{:12.4e}"):
+  """Print matrix rows (truncate to max_cols). Handles ints and floats uniformly."""
   for row in matrix:
-      for element in row:
-          print(f"{element:4d}", end=" ") # Adjust the '4d' for desired spacing
-      print() # Newline after each row
-
-def print_matrix(matrix):
-  for row in matrix:
-      if len(row)>6:
-        row = row[:6]
-      for element in row:
-          print(f"{element:4.4e}", end=" ") # Adjust the '4d' for desired spacing
-      print() # Newline after each row
-  
+    row_to_print = row[:max_cols] if len(row) > max_cols else row
+    for element in row_to_print:
+      if isinstance(element, (int, np.integer)):
+        print(f"{element:4d}", end=" ")
+      else:
+        try:
+          print(float_fmt.format(float(element)), end=" ")
+        except Exception:
+          print(str(element), end=" ")
+    print()

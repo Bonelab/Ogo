@@ -1,5 +1,5 @@
 # /------------------------------------------------------------------------------+
-# | 7-NOV-2025                                                                  |
+# | 7-NOV-2025                                                                   |
 # | Copyright (c) Bone Imaging Laboratory                                        |
 # | All rights reserved                                                          |
 # | bonelab@ucalgary.ca                                                          |
@@ -85,7 +85,7 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, 
 
   # Look up mass attenuations from NIST
   for mat in material:
-    mass_attenuation = md.interpolate_mass_attenuation(mat,energy)
+    mass_attenuation = md.interpolate_mass_attenuation(mat,energy,'log-log',1e-6)
     linear_attenuation_dict[mat]['mass_attenuation'] = mass_attenuation
   
   # Calculate linear attenuation
@@ -95,7 +95,7 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, 
     linear_attenuation_dict[mat]['mu'] = mu
     mu_final += mu
   
-  mu_water = md.interpolate_mass_attenuation('water',energy) # we need this to convert to CT numbers
+  mu_water = md.interpolate_mass_attenuation('water',energy,'log-log',1e-6) # we need this to convert to CT numbers
   
   # Calculate the CT number (HU)
   for mat in material:
