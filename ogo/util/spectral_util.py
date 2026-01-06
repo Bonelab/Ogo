@@ -71,6 +71,8 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
   method: 'linear', 'cubic', or 'log-log' (uses a univariate spline in log-log space).
   smoothing_factor: smoothing parameter 's' for UnivariateSpline when using 'log-log'.
                     If None, s=0 (interpolating spline).
+
+  Default method is 'cubic'.
   """
   method_norm = method.lower().replace("_", "").replace("-", "")
   if method_norm not in {"linear", "cubic", "loglog"}:
@@ -83,7 +85,27 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
     )
 
   table = mass_attenuation_tables[table_name]
-  table = table[table["Energy [keV]"] >= 30]  # diagnostic range > 30 keV
+
+  # truncate table at material K-edge for selected materials
+  material_key = material.lower()
+  k_edges = {
+    "iodine": 33.169,  # I K-edge ~33.17 keV
+    "calcium": 3.99,   # Ca K-edge ~4.04 keV, but we use a conservative estimate
+    "cha": 3.99,       # calcium hydroxyapatite ~ Ca K-edge
+    "bone": 3.99       # bone dominated by Ca K-edge
+  }
+
+  if material_key in k_edges:
+    k = float(k_edges[material_key])
+    xp_min = float(table["Energy [keV]"].min())
+    xp_max = float(table["Energy [keV]"].max())
+    if k > xp_max:
+      raise ValueError(
+        f"interpolate_mass_attenuation: K-edge {k} keV for material {material} is outside table energy range [{xp_min}, {xp_max}]."
+      )
+    # only apply truncation if K-edge is above the current minimum
+    if k > xp_min:
+      table = table[table["Energy [keV]"] >= k]
 
   fp = table["Mass Attenuation [cm2/g]"].to_numpy()
   xp = table["Energy [keV]"].to_numpy()
@@ -91,7 +113,7 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
   keV_arr = np.asarray(keV)
   if np.any(keV_arr < xp.min()) or np.any(keV_arr > xp.max()):
     raise ValueError(
-      f"interpolate_mass_attenuation: Input keV {keV} is not in range of NIST table."
+      f"interpolate_mass_attenuation: Input keV {keV} is below k-edge and cannot be interpreted from NIST table for material {material}."
     )
 
   if method_norm == "linear":
