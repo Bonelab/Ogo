@@ -85,7 +85,7 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, 
 
   # Look up mass attenuations from NIST
   for mat in material:
-    mass_attenuation = md.interpolate_mass_attenuation(mat,energy,'log-log',1e-6)
+    mass_attenuation = md.interpolate_mass_attenuation(mat,energy,method='log-log',smoothing_factor=1e-6)
     linear_attenuation_dict[mat]['mass_attenuation'] = mass_attenuation
   
   # Calculate linear attenuation

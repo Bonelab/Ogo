@@ -42,9 +42,9 @@ def mu_to_ct_number(mu=0.0, mu_water=1.0):
   return (mu - mu_water) / mu_water * 1000.0
 
 
-def mu_from_mass_attenuation_coefficient(mu_rho=1.0, rho=1.0):
+def mu_from_mass_attenuation_coefficient(mu_rho=1.0, mass_density=1.0):
   """Convert mass attenuation coefficient [cm^2/g] to linear attenuation [cm^-1]."""
-  return mu_rho * rho
+  return mu_rho * mass_density
 
 
 def phantom_linear_fit(x=[1, 2, 3], y=[6, 20, 32]):
@@ -95,11 +95,13 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
     )
 
   if method_norm == "linear":
-    return np.interp(keV_arr, xp, fp)
+    result = np.interp(keV_arr, xp, fp)
+    return result.item() if keV_arr.ndim == 0 else result
 
   if method_norm == "cubic":
     spl = CubicSpline(xp, fp)
-    return spl(keV_arr)
+    result = spl(keV_arr)
+    return result.item() if np.ndim(keV_arr) == 0 else result
 
   # method_norm == "loglog" -> perform interpolation in log-log space using UnivariateSpline
   if np.any(xp <= 0) or np.any(fp <= 0) or np.any(keV_arr <= 0):
@@ -113,7 +115,8 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
   s = 0 if smoothing_factor is None else float(smoothing_factor)
   spline = UnivariateSpline(log_xp, log_fp, s=s, k=3)
   log_result = spline(log_keV)
-  return np.exp(log_result)
+  result = np.exp(log_result)
+  return result.item() if keV_arr.ndim == 0 else result
 
 
 def solve_system_equations(A=np.ones((2, 2)), B=np.ones(2), use_numpy=False):
