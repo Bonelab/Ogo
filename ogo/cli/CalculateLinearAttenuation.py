@@ -25,7 +25,7 @@ def print_dict(d):
     print('     {:>30s}: {:12.4f} {}'.format('mu',d[k]['mu'],'/cm'))
     print('     {:>30s}: {:12.4f} {}'.format('ctn',d[k]['ctn'],'HU'))
 
-def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, header=False, delimiter=',', description='', quiet=False):
+def CalculateLinearAttenuation(energy, material, volume_fraction, icru_mass_density,ctn_measured, header=False, delimiter=',', description='', quiet=False):
   
   # Initialize variables
   entry = []
@@ -54,6 +54,13 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, 
   if volume_fraction:
     if sum(volume_fraction)>1.0:
       os.sys.exit('[ERROR] Total volume fraction defined cannot be greater than 1.0.')
+  if icru_mass_density:
+    if len(icru_mass_density) != len(material):
+      os.sys.exit('[ERROR] N_material = {} and N_icru_mass_density = {}.\n'.format(len(material), len(icru_mass_density)) +
+                  '        Every material needs an ICRU mass density defined.')
+    for rho in icru_mass_density:
+      if rho <= 0.0:
+        os.sys.exit('[ERROR] Invalid ICRU mass density. Must be positive: {}'.format(rho))
   if len(material) != len(volume_fraction):
     if (len(material) == 1) and (not volume_fraction):
       volume_fraction = [1.0] # only one material defined, so we know volume_fraction is 1.0
@@ -74,7 +81,10 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, 
     mat = material[idx]
     if input_volume_fraction<0:
       os.sys.exit('[ERROR] Invalid volume fraction. Cannot be negative: {}'.format(input_volume_fraction))
-    icru_density = md.mass_density()[material[idx]]
+    if icru_mass_density:
+      icru_density = icru_mass_density[idx]
+    else:
+      icru_density = md.mass_density()[material[idx]]
     mass_concentration = (input_volume_fraction * icru_density)
     linear_attenuation_dict[mat]['volume_fraction'] = input_volume_fraction
     linear_attenuation_dict[mat]['icru_mass_density'] = icru_density
@@ -179,7 +189,8 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, 
     
   
 def main():
-  description = '''
+  # Build description including dynamic ICRU mass densities
+  base_description = '''
   Given the volume fractions of ICRU-defined materials and the X-ray 
   energy of the virtual monoenergetic image (VMI) calculate the expected 
   linear attenuation.
@@ -206,26 +217,23 @@ def main():
   
   If the CT number measured in Hounsfield units is provided from the
   scan then the error relative to the theoretical value will be output.
-  
-  Valid ICRU materials are:
-    adipose
-    air
-    blood
-    bone
-    calcium
-    cha
-    k2hpo4
-    muscle
-    water
-    softtissue
-    redmarrow
-    yellowmarrow
-    spongiosa
-    iodine
-  
-  Use quiet mode for output to STDOUT.
 
+  The ICRU-defined mass density can be overridden by specifying with the
+  ICRU argument. There must be a mass density defined for each material.
 '''
+  materials_list = [
+    'adipose','air','blood','bone','calcium','cha','k2hpo4',
+    'muscle','water','softtissue','redmarrow','yellowmarrow',
+    'spongiosa','iodine'
+  ]
+  # Query ICRU mass densities
+  densities = md.mass_density()
+  mat_lines = ['\n  Valid ICRU materials are (mass_density in g/cm3):']
+  for m in materials_list:
+    d = densities.get(m, float('nan'))
+    mat_lines.append(f'    {m:14s}: {d:.4f}')
+  mat_lines.append('\n  Use quiet mode for output to STDOUT.\n')
+  description = base_description + '\n'.join(mat_lines)
   epilog = '''
 Example calls: 
   ogoCalculateLinearAttenuation 140 --material cha --quiet
@@ -259,6 +267,11 @@ Example calls:
                       default=[], 
                       metavar='f1 f2', 
                       help='Specify volume fraction for each material (sum to 1)')
+  parser.add_argument('--icru_mass_density', 
+                      type=float, nargs='*', 
+                      default=[], 
+                      metavar='rho1 rho2', 
+                      help='Override ICRU mass density for each material (g/cm3)')
   parser.add_argument('--ctn_measured', 
                       type=float, 
                       default=None, 
