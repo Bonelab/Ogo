@@ -24,7 +24,7 @@ def print_dict(d):
     print('     {:>30s}: {:12.4f} {}'.format('icru_mass_density',d[k]['icru_mass_density'],'g/cm3'))
     print('     {:>30s}: {:12.4f} {}'.format('mu',d[k]['mu'],'/cm'))
     print('     {:>30s}: {:12.4f} {}'.format('ctn',d[k]['ctn'],'HU'))
-  
+
 def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, header=False, delimiter=',', description='', quiet=False):
   
   # Initialize variables
@@ -95,7 +95,7 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, ctn_measured, 
     linear_attenuation_dict[mat]['mu'] = mu
     mu_final += mu
   
-  mu_water = md.interpolate_mass_attenuation('water',energy,'log-log',1e-6) # we need this to convert to CT numbers
+  mu_water = md.interpolate_mass_attenuation('water',energy,method='log-log',smoothing_factor=1e-6) # we need this to convert to CT numbers
   
   # Calculate the CT number (HU)
   for mat in material:
@@ -234,8 +234,7 @@ Example calls:
   ogoCalculateLinearAttenuation 140 --material cha water \\
                                     --volume_fraction 0.202 \\
                                     --ctn_measured 135 \\
-                                    -d "PCD_ESP_120kV_140keV_Br40_04Th"
-  
+                                    -d "PCD_ESP_120kV_140keV_Br40_04Th
 '''
 
   # Setup argument parsing

@@ -86,13 +86,16 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
 
   table = mass_attenuation_tables[table_name]
 
-  # truncate table at material K-edge for selected materials
+  # truncate table at material K-edge for selected materials (we need to be conservative to avoid interpolation errors)
   material_key = material.lower()
   k_edges = {
-    "iodine": 33.169,  # I K-edge ~33.17 keV
-    "calcium": 3.99,   # Ca K-edge ~4.04 keV, but we use a conservative estimate
-    "cha": 3.99,       # calcium hydroxyapatite ~ Ca K-edge
-    "bone": 3.99       # bone dominated by Ca K-edge
+    "iodine": 34.5,  # I K-edge ~33.17 keV
+    "calcium": 4.5,   # Ca K-edge ~4.04 keV, but we use a conservative estimate
+    "cha": 4.5,       # calcium hydroxyapatite ~ Ca K-edge
+    "bone": 4.5,      # bone dominated by Ca K-edge
+    "air": 3.5,       # air ~3.2 keV
+    "muscle": 4.0,   # muscle - we seem to have an issue with our NIST data not monotonically increasing at values below 4 keV
+    "adipose": 3.0  # adipose - we seem to have an issue with our NIST data not monotonically increasing at values below 3 keV
   }
 
   if material_key in k_edges:
@@ -104,6 +107,7 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
         f"interpolate_mass_attenuation: K-edge {k} keV for material {material} is outside table energy range [{xp_min}, {xp_max}]."
       )
     # only apply truncation if K-edge is above the current minimum
+    # note that a problem with this code is that there are two mass attenuations at a given energy, and so we discard both. This affects, for example, iodine at 33 keV.
     if k > xp_min:
       table = table[table["Energy [keV]"] >= k]
 
@@ -113,7 +117,7 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
   keV_arr = np.asarray(keV)
   if np.any(keV_arr < xp.min()) or np.any(keV_arr > xp.max()):
     raise ValueError(
-      f"interpolate_mass_attenuation: Input keV {keV} is below k-edge and cannot be interpreted from NIST table for material {material}."
+      f"interpolate_mass_attenuation: Input keV {keV} is below or close to k-edge and cannot be interpreted from NIST table for material {material}."
     )
 
   if method_norm == "linear":
