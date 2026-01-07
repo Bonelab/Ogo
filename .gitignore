@@ -102,3 +102,4 @@ ENV/
 .mypy_cache/
 ogo/util/.DS_Store
 ogo/util/graphcuts/.DS_Store
+ogo/.vscode/launch.json
