@@ -231,7 +231,7 @@ def main():
   mat_lines = ['\n  Valid ICRU materials are (mass_density in g/cm3):']
   for m in materials_list:
     d = densities.get(m, float('nan'))
-    mat_lines.append(f'    {m:14s}: {d:.4f}')
+    mat_lines.append(f'    {m:14s}: {d:.6f}')
   mat_lines.append('\n  Use quiet mode for output to STDOUT.\n')
   description = base_description + '\n'.join(mat_lines)
   epilog = '''
