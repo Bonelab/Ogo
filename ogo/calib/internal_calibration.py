@@ -189,14 +189,14 @@ class InternalCalibration(StandardCalibration):
 
         def _get_mass_attenuation_at_index(idx):
             """Return the mass attenuation array at a given index"""
-            return [self._subset([
+            return self._subset([
                 self._interpolate_tables['adipose_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['air_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['blood_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['bone_table'].loc[idx, 'Mass Attenuation [cm2/g]'],  # noqa: E501
                 self._interpolate_tables['muscle_table'].loc[idx, 'Mass Attenuation [cm2/g]']  # noqa: E501
             ])
-            ]
+            
 
         # Measured HU values
         HU = self._subset([
