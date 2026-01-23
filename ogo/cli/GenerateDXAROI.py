@@ -42,7 +42,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     projectionFilt = sitk.SumProjectionImageFilter()
     projectionFilt.SetProjectionDimension(1)
     ct_projection = projectionFilt.Execute(cropped_ct)
-    sitk.WriteImage(ct_projection, output_path_image)
+    #sitk.WriteImage(ct_projection, output_path_image)
 
     mask_projectionFilt = sitk.BinaryProjectionImageFilter() 
     mask_projectionFilt.SetProjectionDimension(1)
@@ -63,6 +63,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     if region == "femoral_neck_3D":
 
         helper.message("Isolating femoral neck region in 3D...")
+        sitk.WriteImage(cropped_ct, output_path_image)
         mask_np = sitk.GetArrayFromImage(cropped_mask)
         masked_cropped_ct = sitk.Mask(cropped_ct, cropped_mask)
         masked_cropped_ct_np = sitk.GetArrayFromImage(masked_cropped_ct)
@@ -91,9 +92,46 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
         # Convert back to SimpleITK image and save
         edges_3d_sitk = sitk.GetImageFromArray(edges_3d)
         edges_3d_sitk.CopyInformation(cropped_mask)
+        sitk.WriteImage(edges_3d_sitk, output_path_mask.replace('.nii.gz', '_cannyedge.nii.gz'))
+        helper.message("3D Canny edge detection completed and saved.")
+        helper.message("Starting Hough transform in 3D to isolate femoral neck region...")
 
-        helper.message('Writing out 3D edge detection result to: {}'.format(output_path_mask))
-        sitk.WriteImage(edges_3d_sitk, output_path_mask)
+        # Create 3D Hough circle mask for all slices
+        hough_circles_3d = np.zeros_like(edges_3d, dtype=np.uint8)
+        hough_radius_to_try = np.arange(10,45,1)
+        
+        # Only process top half of proximal femur (second half of axial region)
+        top_half_start = edges_3d.shape[0] // 2
+        
+        for i in range(edges_3d.shape[1]):
+            edges_slice = edges_3d[top_half_start:, i, :]
+            
+            # Only process left half of the image
+            left_half_end = edges_slice.shape[1] // 2
+            edges_slice_left = edges_slice[:, :left_half_end]
+            
+            # Only process slices with sufficient edge data
+            if np.sum(edges_slice_left) > 20:
+                try:
+                    hough_res = hough_circle(edges_slice_left, hough_radius_to_try)
+                    accums, cx, cy, radii = hough_circle_peaks(hough_res, hough_radius_to_try, total_num_peaks=1)
+                    
+                    if len(cx) > 0:
+                        # Draw circles on the mask for this slice
+                        for center_y, center_x, radius in zip(cy, cx, radii):
+                            circy, circx = disk((center_y, center_x), int(radius), shape=edges_slice_left.shape)
+                            # Adjust y indices back to full 3D coordinates
+                            circy_full = circy + top_half_start
+                            hough_circles_3d[circy_full, i, circx] = 1
+                except:
+                    pass
+        
+        # Save hough circles mask
+        hough_circles_3d_sitk = sitk.GetImageFromArray(hough_circles_3d)
+        hough_circles_3d_sitk.CopyInformation(cropped_mask)
+        sitk.WriteImage(hough_circles_3d_sitk, output_path_mask.replace('.nii.gz', '_houghcircles.nii.gz'))
+        helper.message("Hough circle mask created and saved.")
+    
         
     if region == "FE":
         mask_numpy = sitk.GetArrayFromImage(mask)  
