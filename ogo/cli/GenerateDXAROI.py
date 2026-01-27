@@ -2,24 +2,19 @@ import sys
 import os
 import argparse
 import SimpleITK as sitk
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import math
 from scipy.ndimage import label
 import scipy.ndimage as ndimage
 from sklearn.cluster import DBSCAN
 from skimage.transform import hough_circle, hough_circle_peaks
-from skimage.draw import circle_perimeter, disk
 import matplotlib.pyplot as plt
 from skimage.draw import polygon
-from scipy.ndimage import binary_fill_holes
 
 
 import ogo.util.dxa_functions as ogo
 import ogo.util.Helper as helper
 from ogo.util.echo_arguments import echo_arguments
-from ogo.util.write_txt import write_txt
 
 
 def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path_mask, region, aBMD, overwrite=False):
@@ -33,7 +28,6 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     
     # Read input image and mask 
     ct, mask = ogo.load_image_and_mask(image_filename, mask_filename)
-    spacing_unprojected = ct.GetSpacing()
 
     #cropping ct and mask down to only the bone of interest 
     cropped_ct, cropped_mask = ogo.crop_image(ct, mask)
@@ -49,14 +43,12 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
 
     #masking the projection ... 
     masked_projection = sitk.Mask(ct_projection, mask_projection)
-    spacing_projected = masked_projection.GetSpacing()
 
     #converting the numpy for analysis 
     ct_projection_np = sitk.GetArrayFromImage(masked_projection)
     mask_projection_np = sitk.GetArrayFromImage(mask_projection)
     masked_projection_np = sitk.GetArrayFromImage(masked_projection)
 
-    ct_numpy = sitk.GetArrayFromImage(ct)
     mask_numpy = sitk.GetArrayFromImage(mask)
 
     
@@ -334,7 +326,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
             closest_angle = angle
             best_point = points
     
-    if region == 'femoral_neck':
+    if region == 'femoral_neck_2D':
         helper.message('The best point on the narrowest point on the femoral neck is: {}'.format(best_point))
         helper.message('The closest angle to 90 degrees is: {}'.format(closest_angle))
 
@@ -396,7 +388,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     femoral_neck_mask.CopyInformation(masked_projection)
 
 
-    if region == 'femoral_neck':
+    if region == 'femoral_neck_2D':
         helper.message('Writing out femoral neck mask to: {}'.format(output_path_mask))
         region = femoral_neck_mask
         sitk.WriteImage(femoral_neck_mask, output_path_mask)
@@ -424,36 +416,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
         sitk.WriteImage(masked_fem_neck, output_path_image.replace('.nii.gz', '_femoral_neck.nii.gz'))
         sitk.WriteImage(femoral_neck_3d_sitk, output_path_mask.replace('.nii.gz', '_neck_mask.nii.gz'))
 
-
-    if region == "FE":
-        mask_numpy = sitk.GetArrayFromImage(mask)  
-        highest_indices = np.argmax(mask_numpy, axis=0)
-        cutoff_index = np.max(highest_indices) - 120 #length of cut off  
-
-        for x in range(mask_numpy.shape[1]):  
-            for z in range(mask_numpy.shape[2]):  
-                mask_numpy[cutoff_index > np.arange(mask_numpy.shape[0]), x, z] = 0  
-        helper.message('Writing out mask for FE to: {}'.format(output_path_mask))
-        helper.message('WARNING: this mask will only work on the original full sized image (not the cropped image...)')
-        modified_sitk_mask = sitk.GetImageFromArray(mask_numpy)
-        sitk.WriteImage(modified_sitk_mask, output_path_mask) # NOTE: this is for the full image (not the cropped one...)
-
-
-    if region == "total_hip_3D":
-        mask_numpy = sitk.GetArrayFromImage(cropped_mask)  
-        highest_indices = np.argmax(mask_numpy, axis=0)
-        cutoff_index = np.max(highest_indices) - 120 #length of cut off  
-
-        for x in range(mask_numpy.shape[1]):  
-            for z in range(mask_numpy.shape[2]):  
-                mask_numpy[cutoff_index > np.arange(mask_numpy.shape[0]), x, z] = 0  
-        helper.message('Writing out mask for 3D total hip: {}'.format(output_path_mask))
-        modified_sitk_mask = sitk.GetImageFromArray(mask_numpy)
-        sitk.WriteImage(modified_sitk_mask, output_path_mask.replace('.nii.gz', '_totalhip.nii.gz'))
-
-
-    # isolating the top of the femoral neck, to subtract from the entire hip segmentation to just get the
-    # total hip
+    # Now calculating the total hip region by subtracting the femoral neck from the entire hip region
     line_point_top = ogo.bresenham_line_2d(corners[2], corners[3])
     for points in line_point_top:
         femoral_neck_points[tuple(points)] = 1
@@ -473,7 +436,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     total_hip_mask[:,0,:] = total_hip_region
 
 
-    if region == "total_hip":
+    if region == "total_hip_2D":
         helper.message('Writing out total hip mask to: {}'.format(output_path_mask))
         total_hip_mask = sitk.GetImageFromArray(total_hip_mask)
         region = total_hip_mask
@@ -501,40 +464,6 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
         sitk.WriteImage(masked_total_hip, output_path_image.replace('.nii.gz', '_total_hip.nii.gz'))
         sitk.WriteImage(total_hip_3d_sitk, output_path_mask.replace('.nii.gz', '_totalhip_mask.nii.gz'))
     
-    if aBMD: 
-        region_masked = sitk.Mask(ct_projection, sitk.Cast(region, sitk.sitkUInt8))
-        region_masked_np = sitk.GetArrayFromImage(region_masked)
-
-        slices = cropped_ct.GetSize()
-        y_slices = slices[1]
-
-        mean_projected_vBMD_image = region_masked_np / y_slices
-
-        #calculating voxel volume
-        voxel_volume_mm3 = spacing_projected[0] * spacing_projected[1] * spacing_projected[2]
-        voxel_volume_cm3 = voxel_volume_mm3 / 1000
-
-        #calculating pixel area
-        pixel_area_mm2 = spacing_projected[0] * spacing_projected[2]
-        pixel_area_cm2 = pixel_area_mm2 / 100
-
-        #turning units from mg/ccm to mg  
-        image_mg_k2hpo4 = mean_projected_vBMD_image[:,0,:] * voxel_volume_cm3
-        image_g_k2hpo4 = image_mg_k2hpo4 * 0.001
-
-        #calculating total area under mask (cm^2)
-        binary_mask = femoral_neck_region > 0
-        total_area = binary_mask.sum() * pixel_area_cm2
-
-        #calculating BMC
-        BMC = image_g_k2hpo4.sum()
-
-        #calculating aBMD (g/cm^2)
-        aBMD_avg = BMC / total_area
-
-        helper.message('Total area: {:8.4g}'.format(total_area))
-        helper.message('Bone mineral content (BMC): {:8.4g}'.format(BMC))
-        helper.message('Bone mineral density (BMD): {:8.4g}'.format(aBMD_avg))
 
     sys.exit()
     
@@ -582,12 +511,9 @@ def main():
     parser.add_argument('output_path_image',
                         help='Path to where the output 2D projected image will be output')
     parser.add_argument('output_path_mask', help='Output file name for 2D projected ROI mask')
-    parser.add_argument('--region', default='femoral_neck',
-                                choices=['femoral_neck', 'total_hip', 'L1', 'L2',
-                                         'L3', 'L4', 'L1-L4', 'FE', 'femoral_neck_3D', '3D_bump', 'total_hip_3D'],
+    parser.add_argument('--region', default='femoral_neck_2D',
+                                choices=['femoral_neck_2D', 'total_hip_2D', 'FE', 'femoral_neck_3D', 'total_hip_3D'],
                                 help='Specify which DXA ROI (default: %(default)s)')
-    parser.add_argument('--aBMD', action='store_true', 
-                        help='Use when you would also like to evaluate the aBMD under the mask.')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
     print()
 
