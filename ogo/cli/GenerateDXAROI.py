@@ -42,7 +42,6 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     projectionFilt = sitk.SumProjectionImageFilter()
     projectionFilt.SetProjectionDimension(1)
     ct_projection = projectionFilt.Execute(cropped_ct)
-    #sitk.WriteImage(ct_projection, output_path_image)
 
     mask_projectionFilt = sitk.BinaryProjectionImageFilter() 
     mask_projectionFilt.SetProjectionDimension(1)
@@ -60,79 +59,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     ct_numpy = sitk.GetArrayFromImage(ct)
     mask_numpy = sitk.GetArrayFromImage(mask)
 
-    if region == "femoral_neck_3D":
-
-        helper.message("Isolating femoral neck region in 3D...")
-        sitk.WriteImage(cropped_ct, output_path_image)
-        mask_np = sitk.GetArrayFromImage(cropped_mask)
-        masked_cropped_ct = sitk.Mask(cropped_ct, cropped_mask)
-        masked_cropped_ct_np = sitk.GetArrayFromImage(masked_cropped_ct)
-
-        # Create output array for 3D edge detection
-        edges_3d = np.zeros_like(mask_np, dtype=np.uint8)
-
-        # Apply Canny edge detection to each slice and stack results
-        helper.message("Applying 3D Canny edge detection...")
-        for i in range(mask_np.shape[1]):  
-            canny_slice_masked = sitk.GetImageFromArray(masked_cropped_ct_np[:,i,:])
-            total_hip_mask = sitk.GetImageFromArray(mask_np[:,i,:])
-            edges = sitk.CannyEdgeDetection(sitk.Cast(canny_slice_masked, sitk.sitkFloat32), 
-                    lowerThreshold=0.0, upperThreshold=100.0, variance=(5.0, 5.0, 5.0))
-            mask_of_edges = sitk.CannyEdgeDetection(sitk.Cast(total_hip_mask, sitk.sitkFloat32), 
-                                        lowerThreshold=0.0, upperThreshold=0.6)
-            mask_of_edges = sitk.BinaryDilate(sitk.Cast(mask_of_edges, sitk.sitkUInt8), [1,1,1])
-            edges = sitk.Cast(edges, sitk.sitkUInt8)
-            mask_of_edges = sitk.Cast(mask_of_edges, sitk.sitkUInt8)
-            #creating a mask that is just the outer edges of the total hip mask 
-            combined_mask = sitk.And(edges, mask_of_edges)
-
-            edges_np = sitk.GetArrayFromImage(combined_mask)
-            edges_3d[:, i, :] = edges_np.squeeze()
-
-        # Convert back to SimpleITK image and save
-        edges_3d_sitk = sitk.GetImageFromArray(edges_3d)
-        edges_3d_sitk.CopyInformation(cropped_mask)
-        sitk.WriteImage(edges_3d_sitk, output_path_mask.replace('.nii.gz', '_cannyedge.nii.gz'))
-        helper.message("3D Canny edge detection completed and saved.")
-        helper.message("Starting Hough transform in 3D to isolate femoral neck region...")
-
-        # Create 3D Hough circle mask for all slices
-        hough_circles_3d = np.zeros_like(edges_3d, dtype=np.uint8)
-        hough_radius_to_try = np.arange(10,45,1)
-        
-        # Only process top half of proximal femur (second half of axial region)
-        top_half_start = edges_3d.shape[0] // 2
-        
-        for i in range(edges_3d.shape[1]):
-            edges_slice = edges_3d[top_half_start:, i, :]
-            
-            # Only process left half of the image
-            left_half_end = edges_slice.shape[1] // 2
-            edges_slice_left = edges_slice[:, :left_half_end]
-            
-            # Only process slices with sufficient edge data
-            if np.sum(edges_slice_left) > 20:
-                try:
-                    hough_res = hough_circle(edges_slice_left, hough_radius_to_try)
-                    accums, cx, cy, radii = hough_circle_peaks(hough_res, hough_radius_to_try, total_num_peaks=1)
-                    
-                    if len(cx) > 0:
-                        # Draw circles on the mask for this slice
-                        for center_y, center_x, radius in zip(cy, cx, radii):
-                            circy, circx = disk((center_y, center_x), int(radius), shape=edges_slice_left.shape)
-                            # Adjust y indices back to full 3D coordinates
-                            circy_full = circy + top_half_start
-                            hough_circles_3d[circy_full, i, circx] = 1
-                except:
-                    pass
-        
-        # Save hough circles mask
-        hough_circles_3d_sitk = sitk.GetImageFromArray(hough_circles_3d)
-        hough_circles_3d_sitk.CopyInformation(cropped_mask)
-        sitk.WriteImage(hough_circles_3d_sitk, output_path_mask.replace('.nii.gz', '_houghcircles.nii.gz'))
-        helper.message("Hough circle mask created and saved.")
     
-        
     if region == "FE":
         mask_numpy = sitk.GetArrayFromImage(mask)  
         highest_indices = np.argmax(mask_numpy, axis=0)
@@ -435,7 +362,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     # Calculate half-dimensions
     half_width = width / 2.0
     bottom_offset = 8  # Distance bottom corners extend downward 
-    top_offset = 1  # Distance top corners extend upward 
+    top_offset = 2  # Distance top corners extend upward 
 
     # Define corner offsets: (x_displacement, y_displacement)
     corner_offsets = [
@@ -467,10 +394,63 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     femoral_neck_mask[:,0,:] = femoral_neck_region
     femoral_neck_mask = sitk.GetImageFromArray(femoral_neck_mask)
     femoral_neck_mask.CopyInformation(masked_projection)
+
+
     if region == 'femoral_neck':
         helper.message('Writing out femoral neck mask to: {}'.format(output_path_mask))
         region = femoral_neck_mask
         sitk.WriteImage(femoral_neck_mask, output_path_mask)
+
+    if region == 'femoral_neck_3D':
+
+        sitk.WriteImage(cropped_ct, output_path_image)
+        # Convert 2D femoral neck mask back to 3D
+        helper.message('Converting 2D femoral neck mask to 3D...')
+        femoral_neck_3d = np.zeros_like(sitk.GetArrayFromImage(cropped_mask))
+
+        # Apply this 2D mask to each slice along the Y-axis
+        for y_slice in range(femoral_neck_3d.shape[1]):
+            femoral_neck_3d[:, y_slice, :] = femoral_neck_region
+
+        # Keep only regions that overlap with original cropped_mask
+        cropped_mask_np = sitk.GetArrayFromImage(cropped_mask)
+        femoral_neck_3d_masked = femoral_neck_3d * cropped_mask_np
+
+        # Convert back to SimpleITK and save
+        femoral_neck_3d_sitk = sitk.GetImageFromArray(femoral_neck_3d_masked)
+        femoral_neck_3d_sitk.CopyInformation(cropped_mask)
+        helper.message('Writing out 3D femoral neck mask to: {}'.format(output_path_mask.replace('.nii.gz', '_bumped.nii.gz')))
+        masked_fem_neck = sitk.Mask(cropped_ct, femoral_neck_3d_sitk)
+        sitk.WriteImage(masked_fem_neck, output_path_image.replace('.nii.gz', '_femoral_neck.nii.gz'))
+        sitk.WriteImage(femoral_neck_3d_sitk, output_path_mask.replace('.nii.gz', '_neck_mask.nii.gz'))
+
+
+    if region == "FE":
+        mask_numpy = sitk.GetArrayFromImage(mask)  
+        highest_indices = np.argmax(mask_numpy, axis=0)
+        cutoff_index = np.max(highest_indices) - 120 #length of cut off  
+
+        for x in range(mask_numpy.shape[1]):  
+            for z in range(mask_numpy.shape[2]):  
+                mask_numpy[cutoff_index > np.arange(mask_numpy.shape[0]), x, z] = 0  
+        helper.message('Writing out mask for FE to: {}'.format(output_path_mask))
+        helper.message('WARNING: this mask will only work on the original full sized image (not the cropped image...)')
+        modified_sitk_mask = sitk.GetImageFromArray(mask_numpy)
+        sitk.WriteImage(modified_sitk_mask, output_path_mask) # NOTE: this is for the full image (not the cropped one...)
+
+
+    if region == "total_hip_3D":
+        mask_numpy = sitk.GetArrayFromImage(cropped_mask)  
+        highest_indices = np.argmax(mask_numpy, axis=0)
+        cutoff_index = np.max(highest_indices) - 120 #length of cut off  
+
+        for x in range(mask_numpy.shape[1]):  
+            for z in range(mask_numpy.shape[2]):  
+                mask_numpy[cutoff_index > np.arange(mask_numpy.shape[0]), x, z] = 0  
+        helper.message('Writing out mask for 3D total hip: {}'.format(output_path_mask))
+        modified_sitk_mask = sitk.GetImageFromArray(mask_numpy)
+        sitk.WriteImage(modified_sitk_mask, output_path_mask.replace('.nii.gz', '_totalhip.nii.gz'))
+
 
     # isolating the top of the femoral neck, to subtract from the entire hip segmentation to just get the
     # total hip
@@ -491,11 +471,35 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
 
     total_hip_mask = np.zeros_like(mask_np)
     total_hip_mask[:,0,:] = total_hip_region
+
+
     if region == "total_hip":
         helper.message('Writing out total hip mask to: {}'.format(output_path_mask))
         total_hip_mask = sitk.GetImageFromArray(total_hip_mask)
         region = total_hip_mask
         sitk.WriteImage(total_hip_mask, output_path_mask)
+
+    if region == "total_hip_3D":
+        sitk.WriteImage(cropped_ct, output_path_image)
+        # Convert 2D total hip mask to 3D
+        helper.message('Converting 2D total hip mask to 3D...')
+        total_hip_3d = np.zeros_like(sitk.GetArrayFromImage(cropped_mask))
+
+        # Apply this 2D mask to each slice along the Y-axis
+        for y_slice in range(total_hip_3d.shape[1]):
+            total_hip_3d[:, y_slice, :] = total_hip_region
+
+        # Keep only regions that overlap with original cropped_mask
+        cropped_mask_np = sitk.GetArrayFromImage(cropped_mask)
+        total_hip_3d_masked = total_hip_3d * cropped_mask_np
+
+        # Convert back to SimpleITK and save
+        total_hip_3d_sitk = sitk.GetImageFromArray(total_hip_3d_masked)
+        total_hip_3d_sitk.CopyInformation(cropped_mask)
+        helper.message('Writing out 3D total hip mask to: {}'.format(output_path_mask.replace('.nii.gz', '_totalhip.nii.gz')))
+        masked_total_hip = sitk.Mask(cropped_ct, total_hip_3d_sitk)
+        sitk.WriteImage(masked_total_hip, output_path_image.replace('.nii.gz', '_total_hip.nii.gz'))
+        sitk.WriteImage(total_hip_3d_sitk, output_path_mask.replace('.nii.gz', '_totalhip_mask.nii.gz'))
     
     if aBMD: 
         region_masked = sitk.Mask(ct_projection, sitk.Cast(region, sitk.sitkUInt8))
@@ -580,7 +584,7 @@ def main():
     parser.add_argument('output_path_mask', help='Output file name for 2D projected ROI mask')
     parser.add_argument('--region', default='femoral_neck',
                                 choices=['femoral_neck', 'total_hip', 'L1', 'L2',
-                                         'L3', 'L4', 'L1-L4', 'FE', 'femoral_neck_3D'],
+                                         'L3', 'L4', 'L1-L4', 'FE', 'femoral_neck_3D', '3D_bump', 'total_hip_3D'],
                                 help='Specify which DXA ROI (default: %(default)s)')
     parser.add_argument('--aBMD', action='store_true', 
                         help='Use when you would also like to evaluate the aBMD under the mask.')
