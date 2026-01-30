@@ -250,7 +250,8 @@ def histogram(image, n_bins):
 
     # Generate the histogram
     # https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
-    image_histogram, bin_edges = np.histogram(array, number_bins, data_range, None, None, False)
+    #image_histogram, bin_edges = np.histogram(array, number_bins, data_range, None, None, False)
+    image_histogram, bin_edges = np.histogram(array, number_bins, data_range, None, None)
 
     total_number_voxels = sum(image_histogram)
     first_nonzero_idx = np.min(np.nonzero(image_histogram))
@@ -654,6 +655,8 @@ def bmd_metrics(vtk_image):
         'Integral BMC [mg]': BMC,
         'Bone Volume [mm^3]': VOLUME_mm,
         'Bone Volume [cm^3]': VOLUME_cm,
+        'mean_signal': mean_signal,
+        'std_noise': std_noise,
         'SNR': signal_to_noise
     }
 

@@ -111,11 +111,13 @@ def AnalyzeBMD(image_filename, mask_filename, labels, output_filename, custom_la
         parameters_dict['Label'] = lab
         parameters_dict['LabelDesc'] = labelsDict[lab]['LABEL']
 
-        parameters_dict['Integral BMD [mg/cc]'] = '{:.3f}'.format(bmd_outcomes['Integral BMD [mg/cc]'])
-        parameters_dict['Integral BMC [mg]'] = '{:.3f}'.format(bmd_outcomes['Integral BMC [mg]'])
-        parameters_dict['Bone Volume [mm^3]'] = '{:.3f}'.format(bmd_outcomes['Bone Volume [mm^3]'])
-        parameters_dict['Bone Volume [cm^3]'] = '{:.3f}'.format(bmd_outcomes['Bone Volume [cm^3]'])
-        parameters_dict['SNR'] = '{:.3f}'.format(bmd_outcomes['SNR'])
+        parameters_dict['Integral BMD [mg/cc]'] = '{:.4f}'.format(bmd_outcomes['Integral BMD [mg/cc]'])
+        parameters_dict['Integral BMC [mg]'] = '{:.4f}'.format(bmd_outcomes['Integral BMC [mg]'])
+        parameters_dict['Bone Volume [mm^3]'] = '{:.4f}'.format(bmd_outcomes['Bone Volume [mm^3]'])
+        parameters_dict['Bone Volume [cm^3]'] = '{:.4f}'.format(bmd_outcomes['Bone Volume [cm^3]'])
+        parameters_dict['mean_signal'] = '{:.4f}'.format(bmd_outcomes['mean_signal'])
+        parameters_dict['std_noise'] = '{:.4f}'.format(bmd_outcomes['std_noise'])
+        parameters_dict['SNR'] = '{:.4f}'.format(bmd_outcomes['SNR'])
 
         if output_filename:
             if idx == 0 and not noheader:
@@ -147,6 +149,8 @@ at once. However, if only a subset of labels are needed to be analysed they
 should be defined (see example calls).
 
 If no output text file is defined then results are output to the screen.
+
+Outputs the mean and standard deviation of the ROI to allow SNR calculation.
 
 WARNING: If your input image is not calibrated then the results here will be 
 incorrect. There is no calibration done as part of this application.
