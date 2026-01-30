@@ -14,12 +14,12 @@ from scipy.interpolate import UnivariateSpline
 
 def mass_density():  # mass_density, g/cm3
   rho = {
-    "adipose": 9.500E-01,  # 9.3 to 9.7 in ICRU46
+    "adipose": 9.500E-01,  # 9.3 to 9.7 in ICRU
     "air": 1.205E-03,
     "blood": 1.060E+00,
     "bone": 1.920E+00,
     "calcium": 1.550E+00,
-    "cha": 3.160E+00,
+    "cha": 3.225E+00,
     "k2hpo4": 2.440E+00,
     "muscle": 1.050E+00,
     "water": 1.000E+00,
