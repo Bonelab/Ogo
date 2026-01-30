@@ -12,6 +12,7 @@ import sys
 import time
 import math
 import vtk
+import vtkbone
 import numpy as np
 import SimpleITK as sitk
 import ogo.dat.OgoMasterLabels as lb
@@ -20,8 +21,7 @@ from ogo.util.echo_arguments import echo_arguments
 import ogo.util.Helper as ogo
 from vtk.util.numpy_support import vtk_to_numpy
     
-def resolve_totalsegmentator_label_and_id_from_filename(filename):
-    # Try based on whether the filename is one of the typical outputs from totalSegmentator
+def resolve_totalsegmentator_label_and_id(filename):
     labels = [v['LABEL'] for k, v in lb.labels_dict.items() if ((v['TOTSEG']+'.nii.gz') in filename)]
     if labels:
         keys = [k for k, v in lb.labels_dict.items() if v['LABEL'] == labels[0]]
@@ -29,15 +29,15 @@ def resolve_totalsegmentator_label_and_id_from_filename(filename):
             return labels[0],keys[0]
     
     return None,None # return None,None if cannot be resolved
-
+    
 def get_labels(ct):
     filt = sitk.LabelShapeStatisticsImageFilter()
     filt.Execute(ct)
     labels = filt.GetLabels()
     return labels
     
-def merge_labels(input_filenames, output_filename, add_multilabel, merge_method, swap_labels, collection, convert_to_ogo, overwrite=False):
-    
+def merge_labels(input_filenames, output_filename, add_multilabel, merge_method, swap_labels, collection, overwrite=False):
+        
     # Check if output exists and should overwrite
     if os.path.isfile(output_filename) and not overwrite:
         result = input('File \"{}\" already exists. Overwrite? [y/n]: '.format(output_filename))
@@ -49,15 +49,8 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
     if not (output_filename.lower().endswith('.nii') or output_filename.lower().endswith('.nii.gz')):
         os.sys.exit('[ERROR] Output must be type NIFTI file: \"{}\"'.format(output_filename))
     
-    ogo.message('The output is:')
-    ogo.message('  {}'.format(output_filename))
-    
     # Check if input files exist and are correct format
-    if len(input_filenames)>1:
-        ogo.message('There are {} inputs:'.format(len(input_filenames)))
-    else:
-        ogo.message('There is {} input:'.format(len(input_filenames)))
-        
+    ogo.message('The following {} images are available for merging:'.format(len(input_filenames)))
     max_number_input_files_to_print = 15
     for idx,input_filename in enumerate(input_filenames):
         if not os.path.isfile(input_filename):
@@ -69,10 +62,10 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
             ogo.message('  ...not showing remaining {} input files...'.format(len(input_filenames)-idx-1))
             ogo.message('')
             break
-    
-    #if len(input_filenames)<2:
-    #    os.sys.exit('[ERROR] At least two input files are required.')
-    
+        
+    if len(input_filenames)<2:
+        os.sys.exit('[ERROR] At least two input files are required.')
+        
     # Establish a valid list of images for collection (update argparse if adding a new collection here)
     if collection == 'all':
         valid_list = [v['LABEL'] for k, v in lb.labels_dict.items()]
@@ -80,8 +73,6 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
         valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1']
     elif collection == 'skeleton':
         valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1', 'T12', 'T11', 'T10', 'T9', 'T8', 'Humerus Right', 'Humerus Left', 'T7', 'T6', 'T5', 'T4', 'T3', 'T2', 'T1', 'C7', 'C6', 'C5', 'C4', 'C3', 'C2', 'C1', 'Rib Left 1', 'Rib Left 2', 'Rib Left 3', 'Rib Left 4', 'Rib Left 5', 'Rib Left 6', 'Rib Left 7', 'Rib Left 8', 'Rib Left 9', 'Rib Left 10', 'Rib Left 11', 'Rib Left 12', 'Rib Right 1', 'Rib Right 2', 'Rib Right 3', 'Rib Right 4', 'Rib Right 5', 'Rib Right 6', 'Rib Right 7', 'Rib Right 8', 'Rib Right 9', 'Rib Right 10', 'Rib Right 11', 'Rib Right 12', 'Scapula Left', 'Scapula Right', 'Clavicula Left', 'Clavicula Right']
-    elif collection == 'spine':
-        valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1', 'T12', 'T11', 'T10', 'T9', 'T8', 'T7', 'T6', 'T5', 'T4', 'T3', 'T2', 'T1', 'C7', 'C6', 'C5', 'C4', 'C3', 'C2', 'C1']
     elif collection == 'cardio':
         valid_list = ['Heart Myocardium', 'Heart Atrium Left', 'Heart Ventricle Left', 'Heart Atrium Right', 'Heart Ventricle Right', 'Aorta', 'Inferior Vena Cava', 'Portal Vein and Splenic Vein', 'Pulmonary Artery', 'Iliac Artery Left', 'Iliac Artery Right', 'Iliac Vena Left', 'Iliac Vena Right']
     elif collection == 'organs':
@@ -118,10 +109,6 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
     # This option adds multi-label images together
     if add_multilabel:
         ogo.message('Adding multi-label images together.')
-        if len(input_filenames)<2:
-            ogo.message('[ERROR] Exactly two images are required for merging.')
-            os.sys.exit()
-            
         if len(input_filenames)>2:
             ogo.message('[WARNING] Only first 2 of {} input images will be added together.'.format(len(input_filenames)))
             ogo.message('          The remaining input images are ignored.')
@@ -144,9 +131,6 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
     elif len(swap_labels)>0:
         ogo.message('Swapping {} labels from image1 into image2'.format(len(swap_labels)))
         ogo.message('  {}: '.format('labels')+' '.join('{:2d}'.format(label) for label in swap_labels))
-        if len(input_filenames)<2:
-            ogo.message('[ERROR] Exactly two images are required to swap in labels.')
-            os.sys.exit()
         if len(input_filenames)>2:
             ogo.message('[WARNING] Only image1 and image2 of {} input images will be analysed.'.format(len(input_filenames)))
             ogo.message('          The remaining input images are ignored.')
@@ -177,58 +161,14 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
                 
                 ct_final = labelmapfilt.Execute(ct_base)
                 successful_merge = True
-                
-    elif convert_to_ogo:
-        ogo.message('Collection is \'' + collection + '\'')
-        ogo.message('Converting labels in totalSegmentator images to Ogo labels')
-        if len(input_filenames)!=1:
-            ogo.message('[ERROR] Exactly one image is required as input.')
-            os.sys.exit()
             
-        ct = sitk.ReadImage(input_filenames[0], sitk.sitkUInt8)
-        
-        #ct_final = sitk.Image(ct)
-        ct_final = ct<0
-
-        input_labels = get_labels(ct)
-        for label in input_labels:
-            try:
-                ts_desc_label = lb.ts_labels_dict[label]['LABEL_TS2']
-                ogo_label = lb.ts_labels_dict.get(label)['OGO_LABEL']
-            except KeyError:
-                ts_desc_label = 'unknown label'
-                ogo_label = 255
-                
-            try:
-                desc_label = lb.labels_dict[ogo_label]['LABEL']
-            except KeyError:
-                desc_label = 'unknown label'
-            
-            if ogo_label == -1:
-                ogo_label = 255
-                desc_label = lb.labels_dict[ogo_label]['LABEL']
-                
-            
-            if desc_label in valid_list: # found a valid image
-                ogo.message('TS label {:3d} ({}) becomes ogo label {:3d} ({})'.format(label,ts_desc_label,ogo_label,desc_label))
-                
-                ct_thres = ct==label
-                
-                bin_part = ct_thres>0
-                mask = 1 - bin_part
-                ct_final = sitk.Mask(ct_final, mask)
-                ct_final = ct_final + ogo_label*bin_part
-                 
-        successful_merge = True
-
     else:
-        # Cycle through all input images that totalSegmentator provides (usually one file per bone) that are part of the collection. 
+        # Cycle through all input images that are part of the collection. 
         ogo.message('Collection is \'' + collection + '\'')
         n_valid_images = 0
         first_image = True
         for fn in input_filenames:
-            label_name,label_id = resolve_totalsegmentator_label_and_id_from_filename(fn)
-            ogo.message('Adding label {}: {}'.format(label_id,label_name))
+            label_name,label_id = resolve_totalsegmentator_label_and_id(fn)
             if label_name in valid_list: # found a valid image
                 ct = sitk.ReadImage(fn, sitk.sitkUInt8)
                 input_labels = get_labels(ct)
@@ -247,8 +187,7 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
                         ct_final = mergefilt.Execute(ct_final, ct)
                         successful_merge = True
                 else:
-                    ogo.message('[WARNING] Image with {} labels cannot be merged this way.'.format(len(input_labels)))
-                    ogo.message('          Maybe you want to use --convert_to_ogo ?')
+                    ogo.message('[WARNING] Image with {} labels cannot be merged.'.format(len(input_labels)))
                     ogo.message('  {}'.format(fn))
             #else:
             #    ogo.message('[WARNING] Input file is not part of any collection. Most')
@@ -266,14 +205,14 @@ def merge_labels(input_filenames, output_filename, add_multilabel, merge_method,
         ogo.message('        Try --add_multilabel option or --swap_labels?')
         os.sys.exit()
          
-    #ct_final = labelimagefilt.Execute(ct_final)
+    ct_final = labelimagefilt.Execute(ct_final)
     ogo.message('')
-    ogo.message('Final image contains the following labels:')
+    ogo.message('Final merged image contains the following labels:')
     final_labels = get_labels(ct_final)
     ogo.message('  [' + ', '.join('{:d}'.format(i) for i in final_labels) + ']')
 
     ogo.message('')
-    ogo.message('Writing output image to file:')
+    ogo.message('Writing merged output image to file:')
     ogo.message('  {}'.format(output_filename))
     sitk.WriteImage(ct_final, output_filename)
         
@@ -315,15 +254,14 @@ Example calls:
         description=description,
         epilog=epilog
     )
-    parser.add_argument('input_filenames', nargs='*', metavar='FILES IN', help='Input file(s)')
+    parser.add_argument('input_filenames', nargs='*', metavar='FILES IN', help='Input files')
     parser.add_argument('output_filename', metavar='FILE OUT', help='Output NIFTI file (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
-    parser.add_argument('--add_multilabel', action='store_true', help='Adds two multi-label images together')
-    parser.add_argument('--convert_to_ogo', action='store_true', help='Converts a single file from totalSegmentator that has multiple labels')
-    parser.add_argument('--swap_labels', type=int, nargs='*', default=[], metavar='ID', help='Two input images of input1 labels swapped into input2 (e.g. 1 2 3)')
-    parser.add_argument('--merge_method', default='pack',choices=['aggregate', 'strict', 'keep', 'pack'],
+    parser.add_argument('--add_multilabel', action='store_true', help='Adds multi-label images')
+    parser.add_argument('--swap_labels', type=int, nargs='*', default=[], metavar='ID', help='input1 labels swapped into input2 (e.g. 1 2 3)')
+    parser.add_argument('--merge_method', default='strict',choices=['aggregate', 'strict', 'keep', 'pack'],
                                                            help='Select merge rules (default: %(default)s)')
-    parser.add_argument('--collection', default='all', choices=['all', 'ossai', 'skeleton', 'cardio', 'organs', 'muscle', 'spine', 'gastro'],
+    parser.add_argument('--collection', default='all', choices=['all', 'ossai', 'skeleton', 'cardio', 'organs', 'muscle', 'gastro'],
                                                            help='Select collection (default: %(default)s)')
 
     # Parse and display
