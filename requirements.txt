@@ -4,12 +4,12 @@ click
 
 # Image processing
 simpleitk
-numpy
-opencv-python
+numpy<2.0
+opencv-python<4.12
 matplotlib
 
 # Statistics
-scipy
+scipy>=1.7,<1.13
 
 # Machine learning
 batchgenerators
