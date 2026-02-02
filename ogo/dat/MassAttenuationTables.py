@@ -5,7 +5,7 @@
 # | bonelab@ucalgary.ca                                                          |
 # +------------------------------------------------------------------------------+
 
-'''Mass attenuation tables for internal calibration
+r'''Mass attenuation tables for internal calibration
 
 The variable ``mass_attenuation_tables`` is defined containing:
 
