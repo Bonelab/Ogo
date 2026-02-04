@@ -30,7 +30,7 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, icru_mass_dens
   # Initialize variables
   entry = []
   inferred_volume_fraction = False
-  choices=['adipose','air','blood','bone','calcium','cha','k2hpo4','muscle','water','softtissue','redmarrow','yellowmarrow','spongiosa','iodine']
+  choices=['adipose','air','blood','bone','calcium','cha','k2hpo4','muscle','water','softtissue','redmarrow','yellowmarrow','spongiosa','iodine','liver','brain','iron']
   linear_attenuation_dict = {}
   material_dict = {
     'energy':0.0,

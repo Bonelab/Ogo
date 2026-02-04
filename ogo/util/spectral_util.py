@@ -28,6 +28,9 @@ def mass_density():  # mass_density, g/cm3
     "yellowmarrow": 0.980E+00,
     "spongiosa": 1.180E+00,
     "iodine": 4.930,
+    "liver": 1.060E+00,
+    "brain": 1.040E+00,
+    "iron": 7.86
   }
   return rho
 
