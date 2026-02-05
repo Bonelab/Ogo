@@ -17,7 +17,7 @@ import ogo.util.Helper as helper
 from ogo.util.echo_arguments import echo_arguments
 
 
-def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path_mask, region, aBMD, overwrite=False):
+def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path_mask, region, overwrite=False):
     helper.message("Starting GenerateDXAROI script...")
     # Check if output exists and should overwrite
     if os.path.isfile(output_path_mask) and not overwrite:
@@ -28,6 +28,12 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     
     # Read input image and mask 
     ct, mask = ogo.load_image_and_mask(image_filename, mask_filename)
+
+    # Make mask binary (any positive value becomes 1)
+    mask_np = sitk.GetArrayFromImage(mask)
+    mask_np[mask_np > 0] = 1
+    mask = sitk.GetImageFromArray(mask_np)
+    mask.CopyInformation(ct)
 
     #cropping ct and mask down to only the bone of interest 
     cropped_ct, cropped_mask = ogo.crop_image(ct, mask)
@@ -197,6 +203,9 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     mask_of_edges_casted = sitk.Cast(mask_of_edges, sitk.sitkUInt8)
     #creating a mask that is just the outer edges of the total hip mask (don't care about edges within the mask)
     combined_mask = sitk.And(edges_casted, mask_of_edges_casted)
+    combined_mask = sitk.BinaryDilate(combined_mask, [2,2,2])
+    combined_mask = sitk.BinaryErode(combined_mask, [1,1,1])
+
 
     #Hough transform to find the femoral head
     combined_mask_np = sitk.GetArrayFromImage(combined_mask)
@@ -255,8 +264,8 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     for j in range(connected_lines.shape[0]):
         for i in range(connected_lines.shape[1]):
             if connected_lines[j, i] == 1 and combined_mask_np[j, i] == 1:
-                for dj in range(-10,0):
-                    for di in range(0, 10):
+                for dj in range(-15,0):
+                    for di in range(0, 15):
                         new_j, new_i = j + dj, i + di
                         if 0 <= new_j < connected_lines.shape[0] and 0 <= new_i < connected_lines.shape[1]:
                             if combined_mask_np[new_j, new_i] == 1:
@@ -341,7 +350,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     point2 = line2_points[-1]
 
     # Calculating width and height of the box, scaling with the distance between the lowest two points in the fem neck region
-    width = int(np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)) + 15        
+    width = int(np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)) + 20        
     height = int(min_distance * 1.5)  # Height scales with minimum distance (narrowest part of femoral neck)    
 
     # Normalize direction vectors
@@ -391,7 +400,8 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     if region == 'femoral_neck_2D':
         helper.message('Writing out femoral neck mask to: {}'.format(output_path_mask))
         region = femoral_neck_mask
-        sitk.WriteImage(femoral_neck_mask, output_path_mask)
+        sitk.WriteImage(ct_projection, output_path_image)
+        sitk.WriteImage(femoral_neck_mask, output_path_mask.replace('.nii.gz', '_femoralneck2D.nii.gz'))
 
     if region == 'femoral_neck_3D':
 
@@ -411,9 +421,8 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
         # Convert back to SimpleITK and save
         femoral_neck_3d_sitk = sitk.GetImageFromArray(femoral_neck_3d_masked)
         femoral_neck_3d_sitk.CopyInformation(cropped_mask)
-        helper.message('Writing out 3D femoral neck mask to: {}'.format(output_path_mask.replace('.nii.gz', '_bumped.nii.gz')))
+        helper.message('Writing out 3D femoral neck mask to: {}'.format(output_path_mask.replace('.nii.gz', '_neck_mask.nii.gz')))
         masked_fem_neck = sitk.Mask(cropped_ct, femoral_neck_3d_sitk)
-        sitk.WriteImage(masked_fem_neck, output_path_image.replace('.nii.gz', '_femoral_neck.nii.gz'))
         sitk.WriteImage(femoral_neck_3d_sitk, output_path_mask.replace('.nii.gz', '_neck_mask.nii.gz'))
 
     # Now calculating the total hip region by subtracting the femoral neck from the entire hip region
@@ -461,7 +470,6 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
         total_hip_3d_sitk.CopyInformation(cropped_mask)
         helper.message('Writing out 3D total hip mask to: {}'.format(output_path_mask.replace('.nii.gz', '_totalhip.nii.gz')))
         masked_total_hip = sitk.Mask(cropped_ct, total_hip_3d_sitk)
-        sitk.WriteImage(masked_total_hip, output_path_image.replace('.nii.gz', '_total_hip.nii.gz'))
         sitk.WriteImage(total_hip_3d_sitk, output_path_mask.replace('.nii.gz', '_totalhip_mask.nii.gz'))
     
 
@@ -473,22 +481,18 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
 
 def main():
     description = '''
-    This script will calculate DXA regions of interest (ROIs) from clincial CT scans. Currently this is only in 2D: it takes in a 
-    3D clinical CT scan and will output a 2D projection of the region of interest (i.e., hip, spine) and a mask of its related
-    DXA ROI. 
-
+    This script will calculate DXA regions of interest (ROIs) from clincial CT scans. It can output both 2D projected ROIs and 
+    3D ROIs based on the DXA projections. Make sure that the input CT scan is oriented correctly (i.e. patient is 
+    supine, feet first, left side of image is right side of patient).  The input mask should be a mask of the proximal femur (any positive values will be treated as bone). 
 
     The DXA ROIs in the hip are: 
 
     1. Total hip 
     2. Femoral neck 
 
-    And in the spine it simply projects downwards, to mimic the DXA scan. 
+    It specified, it can also output the femoral neck ROI for finite element modeling (FE). This consists of a mask of the proximal femur   
+    with everything below 120 mm from the highest point in the femur set to zero. This 120 mm offset can be modified. 
 
-    WARNING: If your input image is not calibrated then the results here will be 
-    incorrect. There is no calibration done as part of this application.
-
-    EVEN BIGGER WARNING: This is currently still in the testing phase so use with caution! 
 
 '''
     epilog = '''
@@ -511,7 +515,7 @@ def main():
     parser.add_argument('output_path_image',
                         help='Path to where the output 2D projected image will be output')
     parser.add_argument('output_path_mask', help='Output file name for 2D projected ROI mask')
-    parser.add_argument('--region', default='femoral_neck_2D',
+    parser.add_argument('--region', default='femoral_neck_3D',
                                 choices=['femoral_neck_2D', 'total_hip_2D', 'FE', 'femoral_neck_3D', 'total_hip_3D'],
                                 help='Specify which DXA ROI (default: %(default)s)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
