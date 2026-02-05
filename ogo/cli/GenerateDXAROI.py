@@ -203,9 +203,8 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     mask_of_edges_casted = sitk.Cast(mask_of_edges, sitk.sitkUInt8)
     #creating a mask that is just the outer edges of the total hip mask (don't care about edges within the mask)
     combined_mask = sitk.And(edges_casted, mask_of_edges_casted)
-    combined_mask = sitk.BinaryDilate(combined_mask, [2,2,2])
+    combined_mask = sitk.BinaryDilate(combined_mask, [4,4,4])
     combined_mask = sitk.BinaryErode(combined_mask, [1,1,1])
-
 
     #Hough transform to find the femoral head
     combined_mask_np = sitk.GetArrayFromImage(combined_mask)
@@ -264,8 +263,8 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     for j in range(connected_lines.shape[0]):
         for i in range(connected_lines.shape[1]):
             if connected_lines[j, i] == 1 and combined_mask_np[j, i] == 1:
-                for dj in range(-15,0):
-                    for di in range(0, 15):
+                for dj in range(-10,0):
+                    for di in range(0, 10):
                         new_j, new_i = j + dj, i + di
                         if 0 <= new_j < connected_lines.shape[0] and 0 <= new_i < connected_lines.shape[1]:
                             if combined_mask_np[new_j, new_i] == 1:
@@ -350,7 +349,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     point2 = line2_points[-1]
 
     # Calculating width and height of the box, scaling with the distance between the lowest two points in the fem neck region
-    width = int(np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)) + 20        
+    width = int(np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)) + 30        
     height = int(min_distance * 1.5)  # Height scales with minimum distance (narrowest part of femoral neck)    
 
     # Normalize direction vectors
@@ -362,7 +361,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
 
     # Calculate half-dimensions
     half_width = width / 2.0
-    bottom_offset = 8  # Distance bottom corners extend downward 
+    bottom_offset = 9  # Distance bottom corners extend downward 
     top_offset = 2  # Distance top corners extend upward 
 
     # Define corner offsets: (x_displacement, y_displacement)
@@ -421,9 +420,11 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
         # Convert back to SimpleITK and save
         femoral_neck_3d_sitk = sitk.GetImageFromArray(femoral_neck_3d_masked)
         femoral_neck_3d_sitk.CopyInformation(cropped_mask)
+        component_image = sitk.ConnectedComponent(femoral_neck_3d_sitk)
+        sorted_component_image = sitk.RelabelComponent(component_image, sortByObjectSize=True)
+        largest_component_binary_image = sorted_component_image == 1
         helper.message('Writing out 3D femoral neck mask to: {}'.format(output_path_mask.replace('.nii.gz', '_neck_mask.nii.gz')))
-        masked_fem_neck = sitk.Mask(cropped_ct, femoral_neck_3d_sitk)
-        sitk.WriteImage(femoral_neck_3d_sitk, output_path_mask.replace('.nii.gz', '_neck_mask.nii.gz'))
+        sitk.WriteImage(largest_component_binary_image, output_path_mask.replace('.nii.gz', '_neck_mask.nii.gz'))
 
     # Now calculating the total hip region by subtracting the femoral neck from the entire hip region
     line_point_top = ogo.bresenham_line_2d(corners[2], corners[3])
@@ -469,7 +470,6 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
         total_hip_3d_sitk = sitk.GetImageFromArray(total_hip_3d_masked)
         total_hip_3d_sitk.CopyInformation(cropped_mask)
         helper.message('Writing out 3D total hip mask to: {}'.format(output_path_mask.replace('.nii.gz', '_totalhip.nii.gz')))
-        masked_total_hip = sitk.Mask(cropped_ct, total_hip_3d_sitk)
         sitk.WriteImage(total_hip_3d_sitk, output_path_mask.replace('.nii.gz', '_totalhip_mask.nii.gz'))
     
 
