@@ -9,14 +9,13 @@
 import sys
 import os
 import argparse
-import copy
 from ogo.util.echo_arguments import echo_arguments
 import ogo.util.spectral_util as md
 
 def print_dict(d):
   keys = d.keys()
   for k in keys:
-    print('  {:10s}: {:30s}'.format('material',k))
+    print('  {:10s}: {:30s}'.format('material',d[k]['material']))
     print('     {:>30s}: {:12.4f} {}'.format('energy',d[k]['energy'],'keV'))
     print('     {:>30s}: {:12.4f} {}'.format('volume_fraction',d[k]['volume_fraction'],''))
     print('     {:>30s}: {:12.4f} {}'.format('mass_concentration',d[k]['mass_concentration'],'g/cm3'))
@@ -30,17 +29,8 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, icru_mass_dens
   # Initialize variables
   entry = []
   inferred_volume_fraction = False
-  choices=['adipose','air','blood','bone','calcium','cha','k2hpo4','muscle','water','softtissue','redmarrow','yellowmarrow','spongiosa','iodine','liver','brain','iron']
+  choices = list(md.mass_density().keys())
   linear_attenuation_dict = {}
-  material_dict = {
-    'energy':0.0,
-    'volume_fraction':0.0,
-    'mass_concentration':0.0,
-    'mass_attenuation':0.0,
-    'icru_mass_density':0.0,
-    'mu':0.0,
-    'ctn':0.0
-  }
   if ctn_measured is not None:
     calculate_error = True
   else:
@@ -70,12 +60,20 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, icru_mass_dens
     else:
       os.sys.exit('[ERROR] N_material = {} and N_volume_fraction = {}.\n'.format(len(material),len(volume_fraction))+
                 '        Every ICRU material needs a volume fraction defined.')
-  for mat in material:
+  for idx,mat in enumerate(material):
     if mat not in choices:
       os.sys.exit('[ERROR] Material is not valid: {}'.format(mat))
-    linear_attenuation_dict[mat] = copy.deepcopy(material_dict)                   # initialize dictionary
-    linear_attenuation_dict[mat]['energy'] = energy
-   
+    linear_attenuation_dict[idx] = {
+        'material': mat,
+        'energy': energy,
+        'volume_fraction': 0.0,
+        'mass_concentration': 0.0,
+        'mass_attenuation': 0.0,
+        'icru_mass_density': 0.0,
+        'mu': 0.0,
+        'ctn': 0.0
+    }
+  
   # Determine mass_concentration from known volume fractions of ICRU materials
   for idx,input_volume_fraction in enumerate(volume_fraction):
     mat = material[idx]
@@ -86,32 +84,32 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, icru_mass_dens
     else:
       icru_density = md.mass_density()[material[idx]]
     mass_concentration = (input_volume_fraction * icru_density)
-    linear_attenuation_dict[mat]['volume_fraction'] = input_volume_fraction
-    linear_attenuation_dict[mat]['icru_mass_density'] = icru_density
-    linear_attenuation_dict[mat]['mass_concentration'] = mass_concentration
+    linear_attenuation_dict[idx]['volume_fraction'] = input_volume_fraction
+    linear_attenuation_dict[idx]['icru_mass_density'] = icru_density
+    linear_attenuation_dict[idx]['mass_concentration'] = mass_concentration
     if mass_concentration > icru_density:
       os.sys.exit('[ERROR] Material = {}, ICRU density = {:.3f}, volume_fraction = {:.3f}\n'.format(mat,icru_density,input_volume_fraction) +
                   '        Mass concentration {} cannot be greater than its ICRU density.'.format(mass_concentration))
 
   # Look up mass attenuations from NIST
-  for mat in material:
+  for idx,mat in enumerate(material):
     mass_attenuation = md.interpolate_mass_attenuation(mat,energy,method='log-log',smoothing_factor=1e-6)
-    linear_attenuation_dict[mat]['mass_attenuation'] = mass_attenuation
+    linear_attenuation_dict[idx]['mass_attenuation'] = mass_attenuation
   
   # Calculate linear attenuation
   mu_final = 0.0
-  for mat in material:
-    mu = linear_attenuation_dict[mat]['mass_attenuation'] * linear_attenuation_dict[mat]['icru_mass_density'] * linear_attenuation_dict[mat]['volume_fraction']
-    linear_attenuation_dict[mat]['mu'] = mu
+  for idx,mat in enumerate(material):
+    mu = linear_attenuation_dict[idx]['mass_attenuation'] * linear_attenuation_dict[idx]['icru_mass_density'] * linear_attenuation_dict[idx]['volume_fraction']
+    linear_attenuation_dict[idx]['mu'] = mu
     mu_final += mu
   
   mu_water = md.interpolate_mass_attenuation('water',energy,method='log-log',smoothing_factor=1e-6) # we need this to convert to CT numbers
   
   # Calculate the CT number (HU)
-  for mat in material:
-    mu = linear_attenuation_dict[mat]['mu']
+  for idx,mat in enumerate(material):
+    mu = linear_attenuation_dict[idx]['mu']
     ctn = round(md.mu_to_ct_number(mu,mu_water))
-    linear_attenuation_dict[mat]['ctn'] = ctn
+    linear_attenuation_dict[idx]['ctn'] = ctn
   
   # CT number based on total linear attenuation
   ctn_final = round(md.mu_to_ct_number(mu_final,mu_water))
@@ -157,13 +155,13 @@ def CalculateLinearAttenuation(energy, material, volume_fraction, icru_mass_dens
   entry.append( ['description', '{:s}'.format(description),'TXT'] )
   entry.append( ['energy', '{:.4f}'.format(energy), '[keV]'] )
   for idx,mat in enumerate(material):
-    entry.append( ['material'+'_{}'.format(idx), '{:s}'.format(mat), '[]'] )
-    entry.append( ['volume_fraction'+'_{}'.format(idx), '{:.4f}'.format(100.0 * linear_attenuation_dict[mat]['volume_fraction']), '[%]'] )
-    entry.append( ['mass_concentration'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_concentration']), '[g/cm3]'] )
-    entry.append( ['mass_attenuation'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mass_attenuation']), '[cm2/g]'] )
-    entry.append( ['icru_mass_density'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['icru_mass_density']), '[g/cm3]'] )
-    entry.append( ['mu'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['mu']), '[/cm]'] )
-    entry.append( ['ctn'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[mat]['ctn']), '[HU]'] )
+    entry.append( ['material'+'_{}'.format(idx), '{:s}'.format(linear_attenuation_dict[idx]['material']), '[]'] )
+    entry.append( ['volume_fraction'+'_{}'.format(idx), '{:.4f}'.format(100.0 * linear_attenuation_dict[idx]['volume_fraction']), '[%]'] )
+    entry.append( ['mass_concentration'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[idx]['mass_concentration']), '[g/cm3]'] )
+    entry.append( ['mass_attenuation'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[idx]['mass_attenuation']), '[cm2/g]'] )
+    entry.append( ['icru_mass_density'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[idx]['icru_mass_density']), '[g/cm3]'] )
+    entry.append( ['mu'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[idx]['mu']), '[/cm]'] )
+    entry.append( ['ctn'+'_{}'.format(idx), '{:.4f}'.format(linear_attenuation_dict[idx]['ctn']), '[HU]'] )
   entry.append( ['mu_final', '{:.4f}'.format(mu_final), '[/cm]'] )
   entry.append( ['ctn_final', '{:d}'.format(ctn_final), '[/cm]'] )
   if calculate_error:
@@ -221,11 +219,7 @@ def main():
   The ICRU-defined mass density can be overridden by specifying with the
   ICRU argument. There must be a mass density defined for each material.
 '''
-  materials_list = [
-    'adipose','air','blood','bone','calcium','cha','k2hpo4',
-    'muscle','water','softtissue','redmarrow','yellowmarrow',
-    'spongiosa','iodine'
-  ]
+  materials_list = list(md.mass_density().keys())
   # Query ICRU mass densities
   densities = md.mass_density()
   mat_lines = ['\n  Valid ICRU materials are (mass_density in g/cm3):']

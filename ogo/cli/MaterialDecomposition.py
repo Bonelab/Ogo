@@ -344,6 +344,10 @@ def main():
   Suppress writing an output image by specifying which 
   material(s).
   
+  For 3-material decomposition that includes adipose we can
+  set a limit because of the effects of noise. Using Liu et 
+  al. Medical Physics, 2009 we can choose 600 mg/cm3.
+  
 '''
   epilog = '''
 Example calls: 
@@ -402,6 +406,12 @@ Example calls:
                       default=[], 
                       metavar='MAT1 MAT2 (MAT3)', 
                       help='File outputs to suppress (e.g., HA, water, adipose)')
+  #parser.add_argument('--max_adipose', 
+  #                    type=float, 
+  #                    default=[], 
+  #                    nargs=1, 
+  #                    metavar='mg/cm3', 
+  #                    help='Maximum allowable adipose density (df. 600 mg/cm3)')
   parser.add_argument("--quiet", 
                       action='store_true', 
                       help='Overwrite output without asking')

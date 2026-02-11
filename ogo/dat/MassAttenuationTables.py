@@ -20,6 +20,7 @@ The variable ``mass_attenuation_tables`` is defined containing:
     cha_table
     triglyceride_table
     water_table
+    ctwater_table
     softtissue_table
     redmarrow_table
     yellowmarrow_table
@@ -53,7 +54,8 @@ The following material definitions came from [1] unless otherwise specified:
     Blood           Blood                 Blood, Whole (ICRU-44)
     Cortical Bone   Bone                  [2] XCOM: Bone, Cortical (ICRU-44)
     Skeletal Muscle Muscle                [2] XCOM: Muscle, Skeletal (ICRU-44)
-    Water           Water                 Water, Liquid
+    Water           Water                 Water, Liquid (ICRU-44)
+    CTWater         CTWater               CTWater, as defined by QRM
     Soft Tissue     SoftTissue            Tissue, Soft (ICRU-44)
     Red Marrow      RedMarrow             Skeleton Red Marrow Adult (ICRU-46)
     Yellow Marrow   YellowMarrow          Skeleton Yellow Marrow Adult (ICRU-46)
@@ -1170,6 +1172,13 @@ triglyceride_data = np.array([[
 ]])
 triglyceride_data[0, :] = triglyceride_data[0, :] * 1000
 
+# Water
+#
+# https://physics.nist.gov/cgi-bin/Xcom/xcom2?Method=Mix&Output2=Hand
+# 
+# H 11.2
+# O 88.8
+
 water_data = np.array([[
     1.00000E-03,
     1.50000E-03,
@@ -1246,6 +1255,102 @@ water_data = np.array([[
     1.813E-02
 ]])
 water_data[0, :] = water_data[0, :] * 1000
+
+# CTWater, QRM
+#
+# https://physics.nist.gov/cgi-bin/Xcom/xcom2?Method=Mix&Output2=Hand
+# 
+# H 8.05
+# C 69.92
+# N 2.0
+# O 18.01
+# Ca 1.88
+# Cl 0.14
+
+ctwater_data = np.array([[
+    5.000E-03,
+    1.000E-02,
+    1.500E-02,
+    2.000E-02,
+    2.500E-02,
+    3.000E-02,
+    3.500E-02,
+    4.000E-02,
+    4.500E-02,
+    5.000E-02,
+    5.500E-02,
+    6.000E-02,
+    6.500E-02,
+    7.000E-02,
+    7.500E-02,
+    8.000E-02,
+    8.500E-02,
+    9.000E-02,
+    9.500E-02,
+    1.000E-01,
+    1.050E-01,
+    1.100E-01,
+    1.150E-01,
+    1.200E-01,
+    1.250E-01,
+    1.300E-01,
+    1.350E-01,
+    1.400E-01,
+    1.450E-01,
+    1.500E-01,
+    1.550E-01,
+    1.600E-01,
+    1.650E-01,
+    1.700E-01,
+    1.750E-01,
+    1.800E-01,
+    1.850E-01,
+    1.900E-01,
+    1.950E-01,
+    2.000E-01
+], [
+    3.453E+01,
+    4.676E+00,
+    1.535E+00,
+    7.633E-01,
+    4.862E-01,
+    3.621E-01,
+    2.976E-01,
+    2.601E-01,
+    2.364E-01,
+    2.203E-01,
+    2.086E-01,
+    1.998E-01,
+    1.928E-01,
+    1.871E-01,
+    1.823E-01,
+    1.782E-01,
+    1.746E-01,
+    1.713E-01,
+    1.684E-01,
+    1.656E-01,
+    1.631E-01,
+    1.608E-01,
+    1.586E-01,
+    1.566E-01,
+    1.546E-01,
+    1.527E-01,
+    1.510E-01,
+    1.493E-01,
+    1.476E-01,
+    1.461E-01,
+    1.446E-01,
+    1.431E-01,
+    1.417E-01,
+    1.403E-01,
+    1.390E-01,
+    1.378E-01,
+    1.365E-01,
+    1.353E-01,
+    1.342E-01,
+    1.330E-01
+]])
+ctwater_data[0, :] = ctwater_data[0, :] * 1000
 
 softtissue_data = np.array([[
     1.00000E-03,
@@ -1961,6 +2066,7 @@ names = [
     'cha',
     'triglyceride',
     'water',
+    'ctwater',
     'softtissue',
     'redmarrow',
     'yellowmarrow',

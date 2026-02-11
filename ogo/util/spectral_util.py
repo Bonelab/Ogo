@@ -23,6 +23,7 @@ def mass_density():  # mass_density, g/cm3
     "k2hpo4": 2.440E+00,
     "muscle": 1.050E+00,
     "water": 1.000E+00,
+    "ctwater": 1.033E+00,
     "softtissue": 1.000E+00,
     "redmarrow": 1.030E+00,
     "yellowmarrow": 0.980E+00,
