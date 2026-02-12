@@ -30,8 +30,8 @@ def print_pattern(pattern):
 def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet, overwrite):
   
   # Initialize variables
-  choices=['adipose','air','blood','bone','calcium','cha','k2hpo4','muscle','water','softtissue','redmarrow','yellowmarrow','spongiosa','iodine']
-  
+  choices = list(md.mass_density().keys())
+
   no_print_str = '--suppressed--'
   
   # Check that input images exist and are type NIfTI
@@ -92,10 +92,10 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
       os.sys.exit('[ERROR] Output directory does not exist: {}'.format(os.path.dirname(pattern)))
   else:
     basename,dirname,name,ext = md.parse_filename(images[0])
-  
+
   for material in materials:
     if material not in suppress:
-      ofiles.append(name + '_' + '{}'.format(len(materials)) + material + ext)
+      ofiles.append(os.path.join(dirname, name + '_' + '{}'.format(len(materials)) + material + ext))
     else:
       ofiles.append(no_print_str)
 
