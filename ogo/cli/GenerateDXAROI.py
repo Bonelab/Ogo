@@ -4,6 +4,7 @@ import argparse
 import SimpleITK as sitk
 import numpy as np
 import math
+from scipy import stats
 from scipy.ndimage import label
 import scipy.ndimage as ndimage
 from sklearn.cluster import DBSCAN
@@ -42,6 +43,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     projectionFilt = sitk.SumProjectionImageFilter()
     projectionFilt.SetProjectionDimension(1)
     ct_projection = projectionFilt.Execute(cropped_ct)
+    sitk.WriteImage(ct_projection, output_path_image.replace('.nii.gz', '_projection.nii.gz'))
 
     mask_projectionFilt = sitk.BinaryProjectionImageFilter() 
     mask_projectionFilt.SetProjectionDimension(1)
@@ -203,12 +205,14 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     mask_of_edges_casted = sitk.Cast(mask_of_edges, sitk.sitkUInt8)
     #creating a mask that is just the outer edges of the total hip mask (don't care about edges within the mask)
     combined_mask = sitk.And(edges_casted, mask_of_edges_casted)
-    combined_mask = sitk.BinaryDilate(combined_mask, [4,4,4])
+    combined_mask = sitk.BinaryDilate(combined_mask, [3,3,3])
     combined_mask = sitk.BinaryErode(combined_mask, [1,1,1])
+    sitk.WriteImage(combined_mask, output_path_mask.replace('.nii.gz', '_combinedmask.nii.gz'))
+    
 
     #Hough transform to find the femoral head
     combined_mask_np = sitk.GetArrayFromImage(combined_mask)
-    hough_radius_to_try = np.arange(32,40,30)
+    hough_radius_to_try = np.arange(28,38,30)
     hough_res = hough_circle(combined_mask_np[:,0,:], hough_radius_to_try)
     accums, cx, cy, radii = hough_circle_peaks(hough_res, hough_radius_to_try, total_num_peaks=1)
 
@@ -263,12 +267,13 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     for j in range(connected_lines.shape[0]):
         for i in range(connected_lines.shape[1]):
             if connected_lines[j, i] == 1 and combined_mask_np[j, i] == 1:
-                for dj in range(-10,0):
-                    for di in range(0, 10):
+                for dj in range(-5,0):
+                    for di in range(0, 5):
                         new_j, new_i = j + dj, i + di
                         if 0 <= new_j < connected_lines.shape[0] and 0 <= new_i < connected_lines.shape[1]:
                             if combined_mask_np[new_j, new_i] == 1:
                                 connected_lines[new_j, new_i] = 1
+
 
     #relabelling the left and right sides to labels 1 and 2
     structure = np.ones((3, 3))
