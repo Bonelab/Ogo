@@ -47,6 +47,10 @@ def segment_air(input_file: str, output_mask_file: str, air_max_threshold: float
 
     
     component1_mask.CopyInformation(image)
+    # convert mask to label 92 instead of label 1 for image calibration purposes
+    selected_component_mask = sitk.Cast(selected_component_mask, sitk.sitkUInt16) * 92
+    selected_component_mask.CopyInformation(image)
+
     sitk.WriteImage(selected_component_mask, output_mask_file)
 
 if __name__ == "__main__":
