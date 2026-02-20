@@ -204,7 +204,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     mask_of_edges_casted = sitk.Cast(mask_of_edges, sitk.sitkUInt8)
     #creating a mask that is just the outer edges of the total hip mask (don't care about edges within the mask)
     combined_mask = sitk.And(edges_casted, mask_of_edges_casted)
-    combined_mask = sitk.BinaryDilate(combined_mask, [3,3,3])
+    combined_mask = sitk.BinaryDilate(combined_mask, [4,4,4])
     combined_mask = sitk.BinaryErode(combined_mask, [1,1,1])
 
     
