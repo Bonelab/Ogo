@@ -414,7 +414,7 @@ def custom_labelsDict(file_path):
                 # The 'line' variable will contain the current line, including the newline character '\n'
                 # You might want to strip whitespace, including the newline, using .strip()
                 #processed_line = line.strip()
-                if line.startswith("#"): # header information
+                if line.startswith("#") or line.strip() == "": # header information or blank line
                   labels_hdr += line
                 else: # labels
                   info = line.split()
