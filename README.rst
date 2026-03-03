@@ -191,6 +191,8 @@ with the :code:`ogo` environment activated.
      - interactive visualization tool or offscreen rendering in 2D or 3D
    * - :code:`ogodcm2nii`
      - convert DICOM files to NIfTI images (deprecated)
+   * - :code: `ogoCheckLabels`
+      - utility to check the labels present in an image, or to check that required labels are present in an image 
 	 
 	 
 Additional Resources
