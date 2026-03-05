@@ -101,7 +101,7 @@ def get_phantom(phantom_type):
         calibration_dict['type'] = 'k2hpo4'
         calibration_dict['serial'] = '#4408'
         calibration_dict['number_rods'] = 4
-        calibration_dict['rod_labels'] = [131, 132, 133, 134]
+        calibration_dict['rod_labels'] = [121, 122, 123, 124]
         calibration_dict['rod_names'] = ['A', 'B', 'C', 'D']
         calibration_dict['densities'] = [58.88, -53.40, 157.05, 157.13]
         calibration_dict['h2o_densities'] = [1103.57, 1056.95, 1119.52, 1120.10]
@@ -112,9 +112,9 @@ def get_phantom(phantom_type):
         calibration_dict['type'] = 'CHA'
         calibration_dict['serial'] = '#BDC-71'
         calibration_dict['number_rods'] = 3
-        calibration_dict['rod_labels'] = [141, 142, 143]
+        calibration_dict['rod_labels'] = [125, 126, 127]
         calibration_dict['rod_names'] = ['A', 'B', 'C']
-        calibration_dict['densities'] = [100, 400, 800]
+        calibration_dict['densities'] = [100.4, 399.9, 795.7]
         calibration_dict['h2o_densities'] = [None]
 
     elif phantom_type in 'QRM-BDC 6-rod':
@@ -123,9 +123,9 @@ def get_phantom(phantom_type):
         calibration_dict['type'] = 'CHA'
         calibration_dict['serial'] = '#BDC-106'
         calibration_dict['number_rods'] = 6
-        calibration_dict['rod_labels'] = [151, 152, 153, 154, 155, 156]
+        calibration_dict['rod_labels'] = [128, 129, 130, 131, 132, 133]
         calibration_dict['rod_names'] = ['A', 'B', 'C', 'D', 'E', 'F']
-        calibration_dict['densities'] = [0, 100, 200, 400, 600, 800]
+        calibration_dict['densities'] = [0, 98.0, 200.0, 395.7, 596.4, 798.0]
         calibration_dict['h2o_densities'] = [None]
 
     elif phantom_type in 'Image Analysis QCT-3D Plus':
@@ -145,7 +145,7 @@ def get_phantom(phantom_type):
         calibration_dict['type'] = 'CHA'
         calibration_dict['serial'] = 'unknown'
         calibration_dict['number_rods'] = 5
-        calibration_dict['rod_labels'] = [121, 122, 123, 124, 125]
+        calibration_dict['rod_labels'] = [116, 117, 118, 119, 120]
         calibration_dict['rod_names'] = ['A', 'B', 'C', 'D', 'E']
         calibration_dict['densities'] = [0, 50, 100, 150, 200]
         calibration_dict['h2o_densities'] = [None]
