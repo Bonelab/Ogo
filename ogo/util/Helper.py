@@ -2051,18 +2051,18 @@ def reapply_internal_calibration_from_txt(input_image_path, calib_txt_path, outp
 
     return density_img
 
-# def writeN88Model(model, fileName, pathname):
-#     """Writes out a N88Model.
-#     The first argument is the model.
-#     The second argument is the filename.
-#     The third argument is the pathname.
-#     Returns the N88model in the directory.
-#     """
-#     os.chdir(pathname)
-#     writer = vtkbone.vtkboneN88ModelWriter()
-#     writer.SetInputData(model)
-#     writer.SetFileName(fileName)
-#     writer.Update()
+def writeN88Model(model, fileName, pathname):
+    """Writes out a N88Model.
+    The first argument is the model.
+    The second argument is the filename.
+    The third argument is the pathname.
+    Returns the N88model in the directory.
+    """
+    os.chdir(pathname)
+    writer = vtkbone.vtkboneN88ModelWriter()
+    writer.SetInputData(model)
+    writer.SetFileName(fileName)
+    writer.Update()
 # 
 # def writeNii(imageData, fileName, output_directory):
 #     """Writes out an input image as a NIFTI file.
