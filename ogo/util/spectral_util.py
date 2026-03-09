@@ -93,14 +93,16 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
   # truncate table at material K-edge for selected materials (we need to be conservative to avoid interpolation errors)
   material_key = material.lower()
   k_edges = {
-    "iodine": 34.5,   # I K-edge ~33.17 keV
-    "calcium": 4.5,   # Ca K-edge ~4.04 keV, but we use a conservative estimate
-    "cha": 4.5,       # calcium hydroxyapatite ~ Ca K-edge
-    "bone": 4.5,      # bone dominated by Ca K-edge
-    "air": 3.5,       # air ~3.2 keV
-    "muscle": 4.0,    # muscle - we seem to have an issue with our NIST data not monotonically increasing at values below 4 keV
-    "adipose": 3.0,   # adipose - we seem to have an issue with our NIST data not monotonically increasing at values below 3 keV
-    "k2hpo4": 3.7     # k2hpo4 ~3.6 keV
+    "iodine": 34.5,      # I K-edge ~33.17 keV
+    "calcium": 4.5,      # Ca K-edge ~4.04 keV, but we use a conservative estimate
+    "cha": 4.5,          # calcium hydroxyapatite ~ Ca K-edge (4.038 keV)
+    "bone": 4.5,         # bone dominated by Ca K-edge
+    "air": 3.5,          # air ~3.2 keV
+    "blood": 7.2,        # blood ~7.112 keV
+    "muscle": 4.0,       # muscle - we seem to have an issue with our NIST data not monotonically increasing at values below 4 keV
+    "adipose": 3.0,      # adipose - we seem to have an issue with our NIST data not monotonically increasing at values below 3 keV
+    "softtissue": 5.0,   # soft tissue ~1.0 keV
+    "k2hpo4": 3.7        # k2hpo4 ~3.61 keV
   }
 
   if material_key in k_edges:
