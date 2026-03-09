@@ -99,7 +99,8 @@ def interpolate_mass_attenuation(material="water", keV=90, method="cubic", smoot
     "bone": 4.5,      # bone dominated by Ca K-edge
     "air": 3.5,       # air ~3.2 keV
     "muscle": 4.0,   # muscle - we seem to have an issue with our NIST data not monotonically increasing at values below 4 keV
-    "adipose": 3.0  # adipose - we seem to have an issue with our NIST data not monotonically increasing at values below 3 keV
+    "adipose": 3.0,  # adipose - we seem to have an issue with our NIST data not monotonically increasing at values below 3 keV
+    "k2hpo4": 3.7  # k2hpo4 - we seem to have an issue with our NIST data not monotonically increasing at values below 3.607 keV
   }
 
   if material_key in k_edges:
