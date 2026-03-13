@@ -2,7 +2,7 @@
 .. image:: docs/images/ogo-logo.png
     :alt: Ogo Logo
     :align: center
-    :width: 200px
+    :width: 300px
 
 Ogo
 ===
