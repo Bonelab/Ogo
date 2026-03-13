@@ -1,4 +1,9 @@
 
+.. image:: docs/images/ogo-logo.png
+    :alt: Ogo Logo
+    :align: center
+    :width: 300px
+
 Ogo
 ===
 Like the `Ogopogo of the Okanagan`_, osteoporosis is elusive.
