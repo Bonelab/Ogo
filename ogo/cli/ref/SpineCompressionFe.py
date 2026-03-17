@@ -463,13 +463,13 @@ def identify_boundary_surface(input_vtk_image, top_value, bottom_value):
     binary_mask = np.copy(input_array) == 2
 
     # Apply boundary conditions from the original method
-    eroded_mask = binary_erosion(binary_mask, iterations=1)
+    eroded_mask = binary_erosion(binary_mask, iterations=2)
     #dilated_mask = binary_dilation(binary_mask, iterations=1)
     outline_mask = (eroded_mask == 0) & (binary_mask == 1)
 
     # Highlight the outline
     struct_element_erosion = np.array([[[0, 1, 0], [1, 1, 1], [0, 1, 0]]])
-    highlighted_mask = binary_erosion(outline_mask, structure=struct_element_erosion)
+    highlighted_mask = binary_erosion(outline_mask, structure=struct_element_erosion, iterations=2)
 
     struct_element_dilation = np.zeros((3, 3, 3))
     struct_element_dilation[1, 1, :] = 1
@@ -502,6 +502,8 @@ def identify_boundary_surface(input_vtk_image, top_value, bottom_value):
     output_vtk_image.GetPointData().SetScalars(vtk_data_array)
 
     return output_vtk_image
+
+
 
 def extrude_disk(boundary_labelled_vtk_image, value, pmma_thick=5, direction='up', axis='x'):
     """
@@ -851,117 +853,6 @@ def create_microfe_model(
 
     return model
 
-def create_microfe_model_depreciated(
-    image_with_pads,
-    boundary_masks_with_pads,
-    bin_centers,
-    **kwargs
-):
-    """
-    Creates a micro-finite element model with optional customization via kwargs.
-
-    Parameters:
-        image_with_pads (array): Padded image input.
-        boundary_masks_with_pads (array): Padded boundary masks.
-        **kwargs: Optional finite element parameters with defaults:
-            poissons_ratio (float): Poisson's ratio. Default is 0.3.
-            elastic_Emax (float): Maximum elastic modulus. Default is 10500.
-            elastic_exponent (float): Elastic exponent. Default is 2.29.
-            pmma_mat_id (int): Material ID for PMMA. Default is 5000.
-            pmma_E (float): Elastic modulus of PMMA. Default is 2500.
-            pmma_v (float): Poisson's ratio of PMMA. Default is 0.3.
-            top_displacement (str): Constraint name for top displacement. Default is "top_displacement".
-            top_direction (tuple): Direction for top node visibility. Default is (0, 0, 1).
-            bottom_direction (tuple): Direction for bottom node visibility. Default is (0, 0, -1).
-            top_node_set_id (int): Node set ID for the top. Default is 4.
-            bottom_node_set_id (int): Node set ID for the bottom. Default is 3.
-            top_node_set_name (str): Name of the top node set. Default is "body_top".
-            bottom_node_set_name (str): Name of the bottom node set. Default is "body_bottom".
-
-    Returns:
-        model: The constructed finite element model.
-    """
-    # Default parameters
-    poissons_ratio = kwargs.get("poissons_ratio", 0.3)
-    elastic_Emax = kwargs.get("elastic_Emax", 10500)
-    elastic_exponent = kwargs.get("elastic_exponent", 2.29)
-    pmma_mat_id = kwargs.get("pmma_mat_id", 5000)
-    pmma_E = kwargs.get("pmma_E", 2500)
-    pmma_v = kwargs.get("pmma_v", 0.3)
-    top_displacement = kwargs.get("top_displacement", "top_displacement")
-    top_direction = kwargs.get("top_direction", (0, 0, 1))
-    bottom_direction = kwargs.get("bottom_direction", (0, 0, -1))
-    top_node_set_id = kwargs.get("top_node_set_id", 4)
-    bottom_node_set_id = kwargs.get("bottom_node_set_id", 3)
-    top_node_set_name = kwargs.get("top_node_set_name", "body_top")
-    bottom_node_set_name = kwargs.get("bottom_node_set_name", "body_bottom")
-    bone_yield_compression = kwargs.get("bone_yield_compression", None)
-    bone_yield_tension = kwargs.get("bone_yield_tension", None)
-    pmma_yield_compression = kwargs.get("pmma_yield_compression", None)
-    pmma_yield_tension = kwargs.get("pmma_yield_tension", None)
-    cort_elastic_Emax = elastic_Emax if kwargs.get('cort_elastic_Emax') is None else kwargs['cort_elastic_Emax']
-    cort_elastic_exponent = elastic_exponent if kwargs.get('cort_elastic_exponent') is None else kwargs['cort_elastic_exponent']
-    cort_poissons_ratio = poissons_ratio if kwargs.get('cort_poissons_ratio') is None else kwargs['cort_poissons_ratio']
-    cort_yield_compression = bone_yield_compression if kwargs.get('cort_yield_compression') is None else kwargs['cort_yield_compression']
-    cort_yield_tension = bone_yield_tension if kwargs.get('cort_yield_tension') is None else kwargs['cort_yield_tension']
-
-    n_bins = 128
-    print(kwargs)
-
-    print(cort_elastic_exponent)
-
-    # Main logic 
-    ogo.message(f"Casting to Short Integer datatype...")
-    image_pads_short = ogo.cast2short(image_with_pads)
-
-    ogo.message(f"Filtering connected components...")
-    conn = ogo.imageConnectivity(image_pads_short)
-    conn_bc = ogo.imageConnectivity(boundary_masks_with_pads)
-    
-    ogo.message(f"Meshing...")
-    mesh = ogo.Image2Mesh(conn)
-    temp_bc_mesh = ogo.Image2Mesh(conn_bc)
-
-    ogo.message("Setting up the Finite Element Material Table...")
-    material_table = vtkbone.vtkboneMaterialTable()
-
-    material_table = ogo.add_bone_material(material_table, bin_centers, elastic_Emax=elastic_Emax, elastic_exponent=elastic_exponent, 
-        mu=poissons_ratio,bone_yield_compression=bone_yield_compression, bone_yield_tension=bone_yield_tension, bin_range=(0,n_bins), material_name='TrabBone')
-    
-
-    ogo.message('Cortical Bone Material Table...')
-    material_table = ogo.add_bone_material(material_table, bin_centers, elastic_Emax=cort_elastic_Emax, elastic_exponent=cort_elastic_exponent, 
-        mu=cort_poissons_ratio,bone_yield_compression=cort_yield_compression, bone_yield_tension=cort_yield_tension, bin_range=(n_bins, 2*n_bins), material_name='CortBone')
-
-
-    
-    material_table = ogo.add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v,pmma_yield_tension=pmma_yield_tension, pmma_yield_compression=pmma_yield_compression)
-    
-
-    ogo.message("Constructing the Finite Element Model...")
-    model = ogo.applyTestBase(mesh, material_table)
-    model.ComputeBounds()
-
-    ogo.message(f"Identifying boundary nodes...")
-    model = find_and_add_visible_nodes(model, temp_bc_mesh, top_direction, top_node_set_id, top_node_set_name)
-    model = find_and_add_visible_nodes(model, temp_bc_mesh, bottom_direction, bottom_node_set_id, bottom_node_set_name)
-    model = apply_boundary_conditions(model,**kwargs)
-
-    ogo.message(f"Setting convergence criteria...")
-    model.ConvergenceSetFromConstraint(top_displacement)
-
-    ogo.message('Postprocessing...')
-    info = model.GetInformation()
-    pp_node_sets_key = vtkbone.vtkboneSolverParameters.POST_PROCESSING_NODE_SETS()
-    pp_elem_sets_key = vtkbone.vtkboneSolverParameters.POST_PROCESSING_ELEMENT_SETS()
-    for setname in [top_node_set_name, bottom_node_set_name]:
-        pp_node_sets_key.Append(info, setname)
-        elementSet = model.GetAssociatedElementsFromNodeSet(setname)
-        model.AddElementSet(elementSet)
-        pp_elem_sets_key.Append(info, setname)
-
-    return model
-
 
 ###################################################################### QUALITY CONTROL
 ## Functions to check image and boundary conditions 
@@ -998,6 +889,281 @@ def parse_filename(filepath):
     base_name = os.path.basename(filepath)
     parts = base_name.split('_')
     return {'ID': parts[0], 'TREATMENT': parts[1], 'LOCATION': parts[2], 'NUMBER': parts[4], 'filename':'_'.join(parts[:-3])}
+
+def visualize_qc_figure(image_vtk, label_vtk, filepath, title=None, body_label=2, offset=10):
+    """
+    Create a QC figure with:
+    - 3 orthogonal views (sagittal, coronal, axial)
+    - slices centered on the vertebral body centroid
+    - grayscale image background
+    - colored transparent label overlay
+    - grid + crosshairs
+    - 3 stacked 3D views with different azimuths, keeping axial direction as z-axis
+    - color legend using actual swatches
+
+    Parameters
+    ----------
+    image_vtk : vtk.vtkImageData
+        Grayscale image.
+    label_vtk : vtk.vtkImageData
+        Integer label image for overlay / 3D rendering.
+    filepath : str
+        Output PNG path.
+    title : str, optional
+        Figure title.
+    body_label : int, optional
+        Label used to define vertebral body center. Default = 2.
+    offset : int, optional
+        Slice offsets around the body center in voxels. Default = 10.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    from matplotlib.patches import Patch
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    from vtk.util.numpy_support import vtk_to_numpy
+    from skimage.measure import marching_cubes
+
+    def vtk_to_numpy_zyx(vtk_img):
+        dims = vtk_img.GetDimensions()              # (x, y, z)
+        arr = vtk_to_numpy(vtk_img.GetPointData().GetScalars())
+        arr = arr.reshape(dims, order="F")          # (x, y, z)
+        arr = np.transpose(arr, (2, 1, 0))          # -> (z, y, x)
+        return arr
+
+    def robust_window(img, lower=1, upper=99):
+        vals = img[np.isfinite(img)]
+        if vals.size == 0:
+            return img, 0.0, 1.0
+        vmin, vmax = np.percentile(vals, [lower, upper])
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+        img_clip = np.clip(img, vmin, vmax)
+        return img_clip, vmin, vmax
+
+    def extract_slice(vol, axis, idx):
+        if axis == 0:      # axial: z slice
+            return vol[idx, :, :]
+        elif axis == 1:    # coronal: y slice
+            return vol[:, idx, :]
+        elif axis == 2:    # sagittal: x slice
+            return vol[:, :, idx]
+        raise ValueError("axis must be 0, 1, or 2")
+
+    def orient_for_display(img2d):
+        return np.flipud(img2d)
+
+    def clamp(i, maxv):
+        return max(0, min(int(i), maxv - 1))
+
+    def get_body_center(labels_arr, target_label=2):
+        coords = np.where(labels_arr == target_label)
+        if coords[0].size == 0:
+            return (
+                labels_arr.shape[0] // 2,
+                labels_arr.shape[1] // 2,
+                labels_arr.shape[2] // 2,
+            )
+        zc = int(np.mean(coords[0]))
+        yc = int(np.mean(coords[1]))
+        xc = int(np.mean(coords[2]))
+        return zc, yc, xc
+
+    def get_bbox(labels_arr, pad=6):
+        coords = np.where(labels_arr > 0)
+        if coords[0].size == 0:
+            zdim, ydim, xdim = labels_arr.shape
+            return (0, zdim, 0, ydim, 0, xdim)
+
+        zmin = max(0, coords[0].min() - pad)
+        zmax = min(labels_arr.shape[0], coords[0].max() + pad + 1)
+        ymin = max(0, coords[1].min() - pad)
+        ymax = min(labels_arr.shape[1], coords[1].max() + pad + 1)
+        xmin = max(0, coords[2].min() - pad)
+        xmax = min(labels_arr.shape[2], coords[2].max() + pad + 1)
+        return zmin, zmax, ymin, ymax, xmin, xmax
+
+    def crop_2d_for_axis(img2d, lab2d, axis_name, bbox):
+        zmin, zmax, ymin, ymax, xmin, xmax = bbox
+
+        if axis_name == "Sagittal":
+            # shape: (z, y)
+            return img2d[zmin:zmax, ymin:ymax], lab2d[zmin:zmax, ymin:ymax]
+        elif axis_name == "Coronal":
+            # shape: (z, x)
+            return img2d[zmin:zmax, xmin:xmax], lab2d[zmin:zmax, xmin:xmax]
+        elif axis_name == "Axial":
+            # shape: (y, x)
+            return img2d[ymin:ymax, xmin:xmax], lab2d[ymin:ymax, xmin:xmax]
+        return img2d, lab2d
+
+    def add_surface(ax, mask_xyz, color, alpha):
+        if np.any(mask_xyz):
+            try:
+                verts, faces, _, _ = marching_cubes(mask_xyz.astype(np.uint8), level=0.5)
+                mesh = Poly3DCollection(verts[faces], alpha=alpha)
+                mesh.set_facecolor(color)
+                mesh.set_edgecolor("none")
+                ax.add_collection3d(mesh)
+            except Exception:
+                pass
+
+    # Convert inputs
+    image = vtk_to_numpy_zyx(image_vtk).astype(np.float32)
+    labels = vtk_to_numpy_zyx(label_vtk).astype(np.int16)
+
+    # Windowing
+    image, vmin, vmax = robust_window(image, 1, 99)
+
+    # Dimensions
+    zdim, ydim, xdim = image.shape
+
+    # Center slices on vertebral body
+    zc, yc, xc = get_body_center(labels, target_label=body_label)
+
+    slice_positions = {
+        "Sagittal": (
+            2,
+            [clamp(xc - offset, xdim), clamp(xc, xdim), clamp(xc + offset, xdim)],
+        ),
+        "Coronal": (
+            1,
+            [clamp(yc - offset, ydim), clamp(yc, ydim), clamp(yc + offset, ydim)],
+        ),
+        "Axial": (
+            0,
+            [clamp(zc - offset, zdim), clamp(zc, zdim), clamp(zc + offset, zdim)],
+        ),
+    }
+
+    bbox = get_bbox(labels, pad=6)
+
+    # Overlay colors
+    overlay_colors = [
+        (0, 0, 0, 0.0),            # 0 background transparent
+        (0.90, 0.35, 0.35, 0.55),  # 1 process
+        (0.30, 0.60, 0.95, 0.45),  # 2 body
+        (0.20, 0.80, 0.30, 0.60),  # 3 inferior BC
+        (0.95, 0.75, 0.15, 0.60),  # 4 superior BC
+        (0.70, 0.30, 0.90, 0.60),  # 5 inferior disk (optional)
+        (0.15, 0.85, 0.85, 0.60),  # 6 superior disk (optional)
+    ]
+    cmap = ListedColormap(overlay_colors)
+    norm = BoundaryNorm(np.arange(-0.5, len(overlay_colors) + 0.5, 1), cmap.N)
+
+    # For legends / 3D surfaces
+    label_specs = [
+        (1, "Process", (0.90, 0.35, 0.35), 0.45),
+        (2, "Body", (0.30, 0.60, 0.95), 0.38),
+        (3, "Inferior BC", (0.20, 0.80, 0.30), 0.60),
+        (4, "Superior BC", (0.95, 0.75, 0.15), 0.60),
+        (5, "Inferior disk", (0.70, 0.30, 0.90), 0.50),
+        (6, "Superior disk", (0.15, 0.85, 0.85), 0.50),
+    ]
+
+    # Figure layout: 3 rows x 4 cols
+    fig = plt.figure(figsize=(20, 14), constrained_layout=True)
+    gs = fig.add_gridspec(3, 4, width_ratios=[1, 1, 1, 1.15])
+
+    if title is not None:
+        fig.suptitle(title, fontsize=18, fontweight="bold")
+
+    # 2D panels
+    row = 0
+    for view_name, (axis, idxs) in slice_positions.items():
+        for col, idx in enumerate(idxs):
+            ax = fig.add_subplot(gs[row, col])
+
+            img2d = extract_slice(image, axis, idx)
+            lab2d = extract_slice(labels, axis, idx)
+
+            img2d, lab2d = crop_2d_for_axis(img2d, lab2d, view_name, bbox)
+
+            img2d = orient_for_display(img2d)
+            lab2d = orient_for_display(lab2d)
+
+            ax.imshow(img2d, cmap="gray", vmin=vmin, vmax=vmax, interpolation="nearest")
+            ax.imshow(lab2d, cmap=cmap, norm=norm, interpolation="nearest")
+
+            h, w = img2d.shape
+            ax.axhline(h // 2, color="white", lw=0.8, alpha=0.7)
+            ax.axvline(w // 2, color="white", lw=0.8, alpha=0.7)
+
+            ax.set_xticks(np.linspace(0, max(w - 1, 1), 6))
+            ax.set_yticks(np.linspace(0, max(h - 1, 1), 6))
+            ax.grid(color="white", linestyle=":", linewidth=0.5, alpha=0.35)
+
+            ax.set_title(f"{view_name} @ {idx}", fontsize=12, fontweight="bold")
+            ax.set_xlabel("pixels")
+            ax.set_ylabel("pixels")
+
+        row += 1
+
+    # 3D panels
+    # Convert (z, y, x) -> (x, y, z), so axial stays as vertical z-axis in the rendered plot
+    labels_xyz = np.transpose(labels, (2, 1, 0))
+    x3, y3, z3 = labels_xyz.shape
+
+    azimuths = [135, 45, -45]
+    view_titles = ["3D oblique", "3D lateral", "3D opposite oblique"]
+
+    for i in range(3):
+        ax3d = fig.add_subplot(gs[i, 3], projection="3d")
+        ax3d.set_title(view_titles[i], fontsize=12, fontweight="bold")
+
+        # translucent overall shell
+        add_surface(ax3d, labels_xyz > 0, color=(0.82, 0.84, 0.90), alpha=0.10)
+
+        # label surfaces
+        for label_val, _, color, alpha in label_specs:
+            add_surface(ax3d, labels_xyz == label_val, color=color, alpha=alpha)
+
+        ax3d.set_xlim(0, x3)
+        ax3d.set_ylim(0, y3)
+        ax3d.set_zlim(0, z3)
+        ax3d.set_box_aspect((x3, y3, z3))
+
+        # Same elevation, only rotate around axial axis
+        ax3d.view_init(elev=22, azim=azimuths[i])
+
+        ax3d.set_xlabel("X")
+        ax3d.set_ylabel("Y")
+        ax3d.set_zlabel("Z")
+
+        # cleaner panes
+        try:
+            ax3d.xaxis.pane.fill = False
+            ax3d.yaxis.pane.fill = False
+            ax3d.zaxis.pane.fill = False
+        except Exception:
+            pass
+
+        # put color legend only on bottom 3D panel
+        if i == 2:
+            handles = [
+                Patch(facecolor=color, edgecolor="none", label=name)
+                for _, name, color, _ in label_specs
+                if np.any(labels == _[0] if False else labels == _)
+            ]
+            # safer explicit version
+            handles = []
+            for label_val, name, color, _alpha in label_specs:
+                if np.any(labels == label_val):
+                    handles.append(Patch(facecolor=color, edgecolor="none", label=name))
+
+            if handles:
+                ax3d.legend(
+                    handles=handles,
+                    loc="upper left",
+                    bbox_to_anchor=(0.0, 0.0),
+                    frameon=False,
+                    fontsize=9,
+                    title="Overlay colors",
+                )
+
+    plt.savefig(filepath, dpi=220, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    ogo.message(f"QC figure saved to {filepath}")
 
 def visualize_slice(image, filepath):
     # Get the dimensions of the vtkImageData object
@@ -1246,7 +1412,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     ogo.message("creating cortical mask....")
     #1 - 3 alterantive (to create a continous cortical shell - changed to 0 5 )
 
-    cort_mask = generate_cortical_mask(transformed_image.GetOutput(), combined_masks.GetOutput(), threshold=1, min_th=2, max_th=5)
+    cort_mask = generate_cortical_mask(transformed_image.GetOutput(), combined_masks.GetOutput(), threshold=1, min_th=2, max_th=3)
     
     #writer = vtk.vtkXMLImageDataWriter()
     #writer.SetFileName('/home/matthias.walle/work/fem/CT_FE_TEMPLATE/MODELS/10001_QCT_vertebra_20_cortmask.vti')
@@ -1306,6 +1472,12 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
             ogo.message(f"Starting QC...")
             test = check_image(boundary_masks, dataframe_path)
             visualize_slice(image_with_pads, image_path)
+            visualize_qc_figure(
+                image_vtk=padded_transformed_image,
+                label_vtk=boundary_masks_with_pads,
+                filepath=image_path
+               #title=os.path.basename(n88model_output_path)
+            )
 
     ogo.message(f"Writing n88model file: {n88model_output_path}")
     writer = vtkbone.vtkboneN88ModelWriter()

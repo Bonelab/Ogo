@@ -31,6 +31,278 @@ import numpy as np
 
 from ogo.util.echo_arguments import echo_arguments
 
+def visualize_femur_qc(
+    image_vtk,
+    label_vtk,
+    filepath,
+    title=None,
+):
+    """
+    QC visualization for femur FE models.
+
+    Expects:
+    - image_vtk: grayscale CT / calibrated image
+    - label_vtk: combined aligned label/material image in the SAME grid
+      (e.g. combinedImage)
+
+    Displays:
+    - 3x3 orthogonal slices centered on the femur bbox
+    - 3 stacked 3D views with different azimuths
+    - cropped/zoomed around the femur instead of full volume
+
+    Label interpretation:
+    - any voxel > 0 and != 5000 -> femur
+    - voxel == 5000 -> PMMA
+    """
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    from matplotlib.patches import Patch
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    from vtk.util.numpy_support import vtk_to_numpy
+    from skimage.measure import marching_cubes
+
+    pmma_mat_id = 5000
+
+    # --------------------------------------------------------
+    # Helpers
+    # --------------------------------------------------------
+
+    def vtk_to_numpy_zyx(vtk_img):
+        dims = vtk_img.GetDimensions()              # (x, y, z)
+        arr = vtk_to_numpy(vtk_img.GetPointData().GetScalars())
+        arr = arr.reshape(dims, order="F")          # (x, y, z)
+        arr = np.transpose(arr, (2, 1, 0))          # -> (z, y, x)
+        return arr
+
+    def clamp(i, maxv):
+        return max(0, min(int(i), maxv - 1))
+
+    def robust_window(img, lower=1, upper=99):
+        vals = img[np.isfinite(img)]
+        if vals.size == 0:
+            return img, 0.0, 1.0
+        vmin, vmax = np.percentile(vals, [lower, upper])
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+        return np.clip(img, vmin, vmax), vmin, vmax
+
+    def orient_for_display(img2d):
+        return np.flipud(img2d)
+
+    def add_surface(ax, mask_xyz, color, alpha):
+        if not np.any(mask_xyz):
+            return
+        try:
+            verts, faces, _, _ = marching_cubes(mask_xyz.astype(np.uint8), level=0.5)
+            mesh = Poly3DCollection(verts[faces], alpha=alpha)
+            mesh.set_facecolor(color)
+            mesh.set_edgecolor("none")
+            ax.add_collection3d(mesh)
+        except Exception:
+            pass
+
+    # --------------------------------------------------------
+    # Convert VTK -> numpy
+    # --------------------------------------------------------
+
+    image = vtk_to_numpy_zyx(image_vtk).astype(np.float32)
+    raw_labels = vtk_to_numpy_zyx(label_vtk)
+
+    # Build clean display labels from combined image/material map
+    # 0 = background
+    # 1 = femur
+    # 2 = PMMA
+    labels = np.zeros_like(raw_labels, dtype=np.uint8)
+    labels[(raw_labels > 0) & (raw_labels != pmma_mat_id)] = 1
+    labels[raw_labels == pmma_mat_id] = 2
+
+    # Window image
+    image, vmin, vmax = robust_window(image, 1, 99)
+
+    # --------------------------------------------------------
+    # Bounding box from all nonzero labels
+    # --------------------------------------------------------
+
+    coords = np.where(labels > 0)
+    if coords[0].size == 0:
+        raise ValueError("No nonzero voxels found in label_vtk for QC visualization.")
+
+    zdim, ydim, xdim = labels.shape
+
+    zmin, zmax = coords[0].min(), coords[0].max()
+    ymin, ymax = coords[1].min(), coords[1].max()
+    xmin, xmax = coords[2].min(), coords[2].max()
+
+    pad = 8
+    zmin = max(0, zmin - pad)
+    zmax = min(zdim, zmax + pad + 1)
+    ymin = max(0, ymin - pad)
+    ymax = min(ydim, ymax + pad + 1)
+    xmin = max(0, xmin - pad)
+    xmax = min(xdim, xmax + pad + 1)
+
+    # centers from bbox
+    zc = (zmin + zmax) // 2
+    yc = (ymin + ymax) // 2
+    xc = (xmin + xmax) // 2
+
+    # use smaller offsets so the off-center slices stay closer to the middle
+    zoff = max(2, (zmax - zmin) // 6)
+    yoff = max(2, (ymax - ymin) // 6)
+    xoff = max(2, (xmax - xmin) // 6)
+
+    slice_positions = {
+        "Sagittal": (
+            2,
+            [clamp(xc - xoff, xdim), clamp(xc, xdim), clamp(xc + xoff, xdim)],
+        ),
+        "Coronal": (
+            1,
+            [clamp(yc - yoff, ydim), clamp(yc, ydim), clamp(yc + yoff, ydim)],
+        ),
+        "Axial": (
+            0,
+            [clamp(zc - zoff, zdim), clamp(zc, zdim), clamp(zc + zoff, zdim)],
+        ),
+    }
+
+    # --------------------------------------------------------
+    # Colors
+    # --------------------------------------------------------
+
+    overlay_colors = [
+        (0, 0, 0, 0.0),            # 0 background
+        (0.25, 0.60, 0.95, 0.48),  # 1 femur
+        (0.95, 0.70, 0.20, 0.75),  # 2 PMMA
+    ]
+    cmap = ListedColormap(overlay_colors)
+    norm = BoundaryNorm(np.arange(-0.5, len(overlay_colors) + 0.5, 1), cmap.N)
+
+    # --------------------------------------------------------
+    # Figure
+    # --------------------------------------------------------
+
+    fig = plt.figure(figsize=(20, 14), constrained_layout=True)
+    gs = fig.add_gridspec(3, 4, width_ratios=[1, 1, 1, 1.15])
+
+    if title is not None:
+        fig.suptitle(title, fontsize=18, fontweight="bold")
+
+    # --------------------------------------------------------
+    # 2D slices
+    # --------------------------------------------------------
+
+    for row, (view_name, (axis, idxs)) in enumerate(slice_positions.items()):
+        for col, idx in enumerate(idxs):
+            ax = fig.add_subplot(gs[row, col])
+
+            if axis == 0:  # axial -> (y, x)
+                img2d = image[idx, ymin:ymax, xmin:xmax]
+                lab2d = labels[idx, ymin:ymax, xmin:xmax]
+            elif axis == 1:  # coronal -> (z, x)
+                img2d = image[zmin:zmax, idx, xmin:xmax]
+                lab2d = labels[zmin:zmax, idx, xmin:xmax]
+            else:  # sagittal -> (z, y)
+                img2d = image[zmin:zmax, ymin:ymax, idx]
+                lab2d = labels[zmin:zmax, ymin:ymax, idx]
+
+            img2d = orient_for_display(img2d)
+            lab2d = orient_for_display(lab2d)
+
+            ax.imshow(img2d, cmap="gray", vmin=vmin, vmax=vmax, interpolation="nearest")
+            ax.imshow(lab2d, cmap=cmap, norm=norm, interpolation="nearest")
+
+            h, w = img2d.shape
+            ax.axhline(h // 2, color="white", lw=0.8, alpha=0.7)
+            ax.axvline(w // 2, color="white", lw=0.8, alpha=0.7)
+
+            ax.set_xticks(np.linspace(0, max(w - 1, 1), 5))
+            ax.set_yticks(np.linspace(0, max(h - 1, 1), 5))
+            ax.grid(color="white", linestyle=":", linewidth=0.5, alpha=0.30)
+
+            ax.set_title(f"{view_name} @ {idx}", fontsize=12, fontweight="bold")
+            ax.set_xlabel("pixels")
+            ax.set_ylabel("pixels")
+
+    # --------------------------------------------------------
+    # 3D views - use CROPPED bbox only
+    # --------------------------------------------------------
+
+    labels_crop = labels[zmin:zmax, ymin:ymax, xmin:xmax]
+
+    # Rotate the 3D representation so the femur lies more "on its side"
+    # and the PMMA block tends to appear at the bottom.
+    # Original crop is (z, y, x). We map it to plotting axes as:
+    # X_plot <- z
+    # Y_plot <- x
+    # Z_plot <- y
+    labels_xyz = np.transpose(labels_crop, (0, 2, 1))
+    x3, y3, z3 = labels_xyz.shape
+
+    azimuths = [110, 20, -70]
+    view_titles = ["3D oblique", "3D lateral", "3D opposite oblique"]
+
+    for i in range(3):
+        ax3d = fig.add_subplot(gs[i, 3], projection="3d")
+        ax3d.set_title(view_titles[i], fontsize=12, fontweight="bold")
+
+        # faint outer shell
+        add_surface(ax3d, labels_xyz > 0, color=(0.80, 0.84, 0.92), alpha=0.08)
+
+        # femur
+        add_surface(ax3d, labels_xyz == 1, color=(0.25, 0.60, 0.95), alpha=0.32)
+
+        # PMMA
+        if np.any(labels_xyz == 2):
+            add_surface(ax3d, labels_xyz == 2, color=(0.95, 0.70, 0.20), alpha=0.75)
+
+        ax3d.set_xlim(0, x3)
+        ax3d.set_ylim(0, y3)
+        ax3d.set_zlim(z3, 0)
+        ax3d.set_box_aspect((x3, y3, z3))
+
+        ax3d.view_init(elev=12, azim=azimuths[i])
+
+        ax3d.set_xlabel("X")
+        ax3d.set_ylabel("Y")
+        ax3d.set_zlabel("Z")
+
+        try:
+            ax3d.xaxis.pane.fill = False
+            ax3d.yaxis.pane.fill = False
+            ax3d.zaxis.pane.fill = False
+        except Exception:
+            pass
+
+        if i < 2:
+            ax3d.set_xticklabels([])
+            ax3d.set_yticklabels([])
+            ax3d.set_zticklabels([])
+
+        if i == 2:
+            handles = [
+                Patch(facecolor=(0.25, 0.60, 0.95), edgecolor="none", label="Femur"),
+            ]
+            if np.any(labels == 2):
+                handles.append(
+                    Patch(facecolor=(0.95, 0.70, 0.20), edgecolor="none", label="PMMA")
+                )
+            
+
+            ax3d.legend(
+                handles=handles,
+                loc="upper left",
+                bbox_to_anchor=(0.0, 0.0),
+                frameon=False,
+                fontsize=9,
+                title="Overlay colors",
+            )
+
+    plt.savefig(filepath, dpi=220, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    ogo.message(f"Femur QC figure saved to {filepath}")
 
 def remove_extension(filename):
     while True:
@@ -376,6 +648,15 @@ def sidewaysFallFe(args):
     # Combines the PMMA cap images with the model image
     ogo.message("Combine PMMA Cap Images with Model Image...")
     combinedImage = ogo.combineImageData_SF(conn, femoralHeadPMMA, greaterTrochanterPMMA, pmma_mat_id)
+
+    # ---------------------------------------------------------
+    # QC visualization
+    # ---------------------------------------------------------
+    visualize_femur_qc(
+        image_trans,
+        combinedImage,
+        filepath=N88_fileName.replace(".n88model", "_QC.png"),
+    )
 
     ##
     # Mesh the final image and create Finite Element Model
