@@ -205,7 +205,7 @@ Additional Resources
 Segmentation: 
 
 - Pretrained nnU-Net model for 3D segmentation of CT reference tissues for phantomless calibration: https://zenodo.org/records/15238423. This model segments adipose, autochthonous (paraspinal) muscles, gluteal muscles, aorta and common iliac arteries.
-- Pretrained nnU-Net model for 3D semantic segmentation of vertebral bodies and spinous processes (posterior spinal elements): https://zenodo.org/records/15238176 
+- Pretrained nnU-Net model for 3D semantic segmentation of vertebra into bodies and spinous processes (posterior spinal elements): https://zenodo.org/records/15238176 
 - :code:`ogo.util.seg_air.py` is a custom script for segmenting air from CT scans
  
 
