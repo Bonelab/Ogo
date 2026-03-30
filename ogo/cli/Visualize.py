@@ -299,7 +299,7 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
     
     ogo.message('Done.')
     
-def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_orientation, slice_percent, offscreen, overwrite, func):
+def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_orientation, slice_percent, offscreen, overwrite, show_labels, func):
     
     # Check if output exists and should overwrite
     if outfile:
@@ -328,6 +328,12 @@ def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_or
 
     if not (input_filename.lower().endswith('.nii') or input_filename.lower().endswith('.nii.gz')):
         os.sys.exit('[ERROR] Input must be type NIFTI file: \"{}\"'.format(input_filename))
+    
+    # Check if show_labels is set without mask_image
+    if show_labels and mask_image is None:
+        ogo.message('[WARNING]: show_labels is only possible if mask_image is used.')
+        ogo.message('           Ignoring show_labels option.')
+        show_labels = False
     
     ogo.message('Reading input image ' + input_filename)
     reader = vtk.vtkNIFTIImageReader()
@@ -372,6 +378,9 @@ def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_or
     renderer = vtk.vtkRenderer()
     renderer.AddActor(inputSlice)
 
+    # Initialize labels list
+    labels = []
+
     # Read mask
     if not mask_image is None:
         if not os.path.isfile(mask_image):
@@ -385,6 +394,34 @@ def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_or
         mask_reader.SetFileName(mask_image)
         mask_reader.Update()
         
+        ogo.message('Scanning for available labels:')
+        labels = getLabels(mask_reader.GetOutput())
+
+        # Get image data for centroid calculation for placing label text onto the rendered image
+        mask_output = mask_reader.GetOutput()
+        dims = mask_output.GetDimensions()
+        spacing = mask_output.GetSpacing()
+        origin = mask_output.GetOrigin()
+        mask_array = vtk_to_numpy(mask_output.GetPointData().GetScalars()).reshape(dims, order='F')
+
+        for idx,label in enumerate(labels):
+            rgb = lb.labels_dict[label]['RGB']
+            desc = lb.labels_dict[label]['LABEL']
+            
+            # Calculate centroid for this label
+            label_indices = np.argwhere(mask_array == label)
+            if len(label_indices) > 0:
+                # Compute centroid in index space
+                centroid_ijk = np.mean(label_indices, axis=0)
+                # Convert to physical coordinates
+                centroid_xyz = origin + centroid_ijk * spacing
+                # Store in labels_dict
+                lb.labels_dict[label]['CENTROID'] = centroid_xyz
+                ogo.message('{:5d}: ({:3d},{:3d},{:3d}) – {} – Centroid: ({:.1f}, {:.1f}, {:.1f})'.format(
+                    label, rgb[0], rgb[1], rgb[2], desc, centroid_xyz[0], centroid_xyz[1], centroid_xyz[2]))
+            else:
+                ogo.message('{:5d}: ({:3d},{:3d},{:3d}) – {}'.format(label, rgb[0], rgb[1], rgb[2], desc))
+    
         lut = get_lookup_table()
         
         mask_inputMapper = vtk.vtkOpenGLImageSliceMapper()
@@ -398,7 +435,7 @@ def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_or
         mask_imageProperty = vtk.vtkImageProperty()
         mask_imageProperty.SetInterpolationTypeToNearest()
         mask_imageProperty.SetLookupTable(lut)
-        mask_imageProperty.SetOpacity(0.5)
+        mask_imageProperty.SetOpacity(0.25)
 
         mask_inputSlice = vtk.vtkImageSlice()
         mask_inputSlice.SetMapper(mask_inputMapper)
@@ -431,6 +468,37 @@ def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_or
         ogo.message('Error selecting image orientation')
         os.sys.exit()
     renderer.ResetCamera()
+    
+    # Add text labels at centroids if show_labels is True
+    if show_labels and mask_image is not None:
+        for idx, label in enumerate(labels):
+            if 'CENTROID' in lb.labels_dict[label]:
+                centroid = lb.labels_dict[label]['CENTROID']
+                desc = lb.labels_dict[label]['LABEL']
+                rgb = lb.labels_dict[label]['RGB']
+                
+                # Transform centroid by the NIfTI transformation matrix
+                point = [centroid[0], centroid[1], centroid[2], 1.0]
+                transformed_point = [0.0, 0.0, 0.0, 0.0]
+                mat.MultiplyPoint(point, transformed_point)
+                
+                # Create billboard text actor for 3D position that always faces camera
+                textActor = vtk.vtkBillboardTextActor3D()
+                textActor.SetInput(desc)
+                textActor.SetPosition(transformed_point[0], transformed_point[1], transformed_point[2])
+                
+                # Set text properties for readability
+                textProperty = textActor.GetTextProperty()
+                textProperty.SetFontSize(18)
+                textProperty.SetColor(rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0)
+                textProperty.SetBold(True)
+                textProperty.SetFontFamilyToArial()
+                textProperty.SetJustificationToCentered()
+                textProperty.SetVerticalJustificationToCentered()
+                textProperty.SetBackgroundColor(0, 0, 0)
+                textProperty.SetBackgroundOpacity(0.5)
+                
+                renderer.AddActor(textActor)
     
     # Set slice
     ogo.message('Percent slice set to {:.1f}%'.format(slice_percent))
@@ -578,6 +646,7 @@ ogoVisualize vis2d RETRO_00053.nii.gz
     parser_vis2d.add_argument('--image_orientation', default='coronal', choices=['sagittal', 'coronal', 'axial'],
                                 help='Initiate a particular orientation (default: %(default)s)')
     parser_vis2d.add_argument('--slice_percent', default=float(50), type=float, help='Set percent slice through image (default: %(default)s)')
+    parser_vis2d.add_argument('--show_labels', action='store_true', help='Show labels (default: %(default)s)')
     parser_vis2d.add_argument('--outfile', default=None, metavar='FN', help='Output image file (*.tif) (default: %(default)s)')
     parser_vis2d.add_argument('--offscreen', action='store_true', help='Set to offscreen rendering (default: %(default)s)')
     parser_vis2d.add_argument('--overwrite', action='store_true', help='Overwrite output without asking')
