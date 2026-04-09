@@ -43,6 +43,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     projectionFilt = sitk.SumProjectionImageFilter()
     projectionFilt.SetProjectionDimension(1)
     ct_projection = projectionFilt.Execute(cropped_ct)
+    #sitk.WriteImage(ct_projection, output_path_image.replace('.nii.gz', '_projection.nii.gz'))
 
     mask_projectionFilt = sitk.BinaryProjectionImageFilter() 
     mask_projectionFilt.SetProjectionDimension(1)
@@ -73,18 +74,25 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
         sitk.WriteImage(modified_sitk_mask, output_path_mask) # NOTE: this is for the full image (not the cropped one...)
     
 
-    #cropping 2D projection... 
+    # cropping 2D projection... 
     last_row_with_1 = -1 
     for i in range(mask_projection_np.shape[0] - 1, -1, -1):
         if 1 in mask_projection_np[i]:
             last_row_with_1 = i
             break
+
     cutoff_length = 130
-    end_row = last_row_with_1 - cutoff_length
-    for i in range(end_row):
-        for j in range(mask_projection_np.shape[2]):
-            if mask_projection_np[i,0,j] == 1:
-                mask_projection_np[i,0,j] = 0
+    # only crop if the mask extends beyond the cutoff distance; otherwise leave it intact
+    if last_row_with_1 >= 0 and last_row_with_1 > cutoff_length:
+        end_row = last_row_with_1 - cutoff_length
+        for i in range(end_row):
+            for j in range(mask_projection_np.shape[2]):
+                if mask_projection_np[i,0,j] == 1:
+                    mask_projection_np[i,0,j] = 0
+    else:
+        # mask is too short to trim, just start from the top
+        helper.message('Mask shorter than cutoff_length ({}). skipping cropping.'.format(cutoff_length))
+        end_row = 0
 
     shaft_array = []
     lengths = []
@@ -206,12 +214,11 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     combined_mask = sitk.And(edges_casted, mask_of_edges_casted)
     combined_mask = sitk.BinaryDilate(combined_mask, [4,4,4])
     combined_mask = sitk.BinaryErode(combined_mask, [1,1,1])
-
-    
+    #sitk.WriteImage(combined_mask, output_path_mask.replace('.nii.gz', '_combinedmask.nii.gz'))
 
     #Hough transform to find the femoral head
     combined_mask_np = sitk.GetArrayFromImage(combined_mask)
-    hough_radius_to_try = np.arange(20,70,0.5)
+    hough_radius_to_try = np.arange(32,70,0.5)
     hough_res = hough_circle(combined_mask_np[:,0,:], hough_radius_to_try)
     accums, cx, cy, radii = hough_circle_peaks(hough_res, hough_radius_to_try, total_num_peaks=1)
 
@@ -266,8 +273,8 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     for j in range(connected_lines.shape[0]):
         for i in range(connected_lines.shape[1]):
             if connected_lines[j, i] == 1 and combined_mask_np[j, i] == 1:
-                for dj in range(-10,0):
-                    for di in range(0, 10):
+                for dj in range(-10,0): # outside
+                    for di in range(0, 10): # inside 
                         new_j, new_i = j + dj, i + di
                         if 0 <= new_j < connected_lines.shape[0] and 0 <= new_i < connected_lines.shape[1]:
                             if combined_mask_np[new_j, new_i] == 1:
@@ -353,7 +360,7 @@ def GenerateDXAROI(image_filename, mask_filename, output_path_image, output_path
     point2 = line2_points[-1]
 
     # Calculating width and height of the box, scaling with the distance between the lowest two points in the fem neck region
-    width = int(np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)) + 30        
+    width = int(np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)) + 20       
     height = int(min_distance * 1.5)  # Height scales with minimum distance (narrowest part of femoral neck)    
 
     # Normalize direction vectors
