@@ -9,6 +9,7 @@
 import argparse
 import SimpleITK as sitk
 from ogo.util.echo_arguments import echo_arguments
+import ogo.util.Helper as ogo
 from ogo.util.cli_tools import (
     check_overwrite,
     check_label_lengths,
@@ -38,41 +39,41 @@ def StyleGuide(input_file, mask_file, output_file, from_labels, to_labels, label
     
     # Check that at least some labels are defined
     if not from_labels and not to_labels and not labels_to_keep:
-        print('ERROR: No labels defined.')
-        print('       Define --labels_to_keep or --from_labels & --to_labels')
-        print('       There is nothing to do.')
+        ogo.message('ERROR: No labels defined.')
+        ogo.message('       Define --labels_to_keep or --from_labels & --to_labels')
+        ogo.message('       There is nothing to do.')
         return 1
     
     # Check if threshold was explicitly set
     if threshold is not None:
-        print(f'  user set threshold:       {threshold}')
+        ogo.message(f'  user set threshold:       {threshold}')
     else:
         threshold = 1.0  # Set default value programmatically
     
     # Check if slice_percent was explicitly set
     if slice_percent is not None:
-        print(f'  user set slice_percent:   {slice_percent}')
+        ogo.message(f'  user set slice_percent:   {slice_percent}')
     else:
         slice_percent = 1.0  # Set default value programmatically
     
     # Check if bins was explicitly set
     if bins is not None:
-        print(f'  user set bins:            {bins}')
+        ogo.message(f'  user set bins:            {bins}')
     else:
         bins = 10  # Set default value programmatically
     
     # Display label information
     if not quiet:
-        print(f'  from_labels:     {from_labels}')
-        print(f'  to_labels:       {to_labels}')
-        print(f'  labels_to_keep:  {labels_to_keep}')
-        print(f'  threshold:       {threshold}')
-        print(f'  slice_percent:   {slice_percent}')
-        print(f'  bins:            {bins}')
+        ogo.message(f'  from_labels:     {from_labels}')
+        ogo.message(f'  to_labels:       {to_labels}')
+        ogo.message(f'  labels_to_keep:  {labels_to_keep}')
+        ogo.message(f'  threshold:       {threshold}')
+        ogo.message(f'  slice_percent:   {slice_percent}')
+        ogo.message(f'  bins:            {bins}')
     
     # Read input file based on extension
     if not quiet:
-        print(f'Reading input file: {input_file}')
+        ogo.message(f'Reading input file: {input_file}')
     
     input_image = sitk.ReadImage(input_file)
     
@@ -81,10 +82,10 @@ def StyleGuide(input_file, mask_file, output_file, from_labels, to_labels, label
     
     # Read mask file based on extension
     if not quiet:
-        print(f'Reading mask file: {mask_file}')
+        ogo.message(f'Reading mask file: {mask_file}')
     
-    mask_image = sitk.ReadImage(mask_file)
-    
+    mask_image = sitk.ReadImage(mask_file, sitk.sitkUInt8)
+
     if not quiet:
         print_image_info(mask_file, mask_image)
     
@@ -93,6 +94,10 @@ def StyleGuide(input_file, mask_file, output_file, from_labels, to_labels, label
         return 1
     
     # Function logic goes here
+        
+    if not quiet:
+        ogo.message('[DONE]')
+    
     return 0
 
 def main():
@@ -100,15 +105,20 @@ def main():
     description='''
 This program demonstrates the coding styles and best practices for Ogo CLI tools.
 
+Basically it does nothing... but it shows how to set up a CLI with argparse, 
+how to validate inputs, and how to structure the code for readability and 
+maintainability.
+
 STYLE GUIDE RULES:
-  1. Use the TYPE option in argparse to check valid inputs.
-  2. Minimize use of arguments, except for mandatory inputs.
-  3. Use flags with long names and in some cases short names (see below).
+  1. Use the TYPE option in argparse to check valid inputs whenever possible.
+  2. Minimize use of positional arguments for mandatory inputs only.
+  3. Use flags with long names, but include short names in addition if needed (see below).
   4. Return 0 for successful completion, return 1 for early exit.
-  5. Use 'snake_case' for variables and function names (e.g., input_file).
-  6. Use 'PascalCase' for class names (e.g., ImageProcessor).
-  7. Use 'UPPER_SNAKE_CASE' for constants (e.g., MAX_ITERATIONS).
-  8. Do NOT use 'camelCase' (e.g., inputLabels, outputLabels).
+  5. Formatting:
+       – Use 'snake_case' for variables and function names (e.g., input_file).
+       – Use 'PascalCase' for class names (e.g., ImageProcessor).
+       - Use 'UPPER_SNAKE_CASE' for constants (e.g., MAX_ITERATIONS).
+       - Do NOT use 'camelCase' (e.g., inputLabels, outputLabels).
 
 EXAMPLE VARIABLE NAMES:
   input_file / output_file / mask_file / calib_file
@@ -129,12 +139,15 @@ COMMON ARGUMENT OPTIONS:
   -u,  --user      User (e.g., ps, ssh)
   -v,  --version   Version
 
+We can use JSON files instead of command line arguments for more complex configurations.
+  - To output current arguments as JSON: --json
+  - To load arguments from JSON file: --json my_config.json  
 '''
     epilog='''
 Example calls: 
-ogoStyleGuide input.nii output.nii -fl 1 2 3 -tl 10 20 30
-ogoStyleGuide input.nii output.nii -lk 5 10 15 --quiet
-ogoStyleGuide input.nii output.nii -lk 12 3 --json > my_config.json
+ogoStyleGuide input.nii.gz output.nii.gz -fl 1 2 3 -tl 10 20 30
+ogoStyleGuide input.nii.gz output.nii.gz -lk 5 10 15 --quiet
+ogoStyleGuide input.nii.gz output.nii.gz -lk 12 3 --json > my_config.json
 ogoStyleGuide --json my_config.json
 '''
 
@@ -196,7 +209,7 @@ ogoStyleGuide --json my_config.json
         parser.error('input_file, mask_file, and output_file are required')
     
     if not args.quiet:
-        print(echo_arguments('StyleGuide', vars(args)))
+        ogo.message(echo_arguments('StyleGuide', vars(args)))
 
     # Run program (exclude json argument)
     run_args = vars(args).copy()

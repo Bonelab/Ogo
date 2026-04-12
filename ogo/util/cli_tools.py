@@ -286,6 +286,34 @@ def validate_float_min(min_val):
     
     return validator
 
+def validate_extent(extent_list):
+    """
+    Validator for image extent specified as [xmin, xmax, ymin, ymax, zmin, zmax].
+    Ensures that min < max for each dimension.
+    
+    Args:
+        extent_list: List of 6 integers representing the extent
+    
+    Returns:
+        The validated extent list
+        
+    Raises:
+        argparse.ArgumentTypeError: If validation fails
+    """
+    if len(extent_list) != 6:
+        raise argparse.ArgumentTypeError('set_extent requires exactly 6 integers')
+    
+    xmin, xmax, ymin, ymax, zmin, zmax = extent_list
+    
+    if xmin >= xmax:
+        raise argparse.ArgumentTypeError(f'xmin ({xmin}) must be less than xmax ({xmax})')
+    if ymin >= ymax:
+        raise argparse.ArgumentTypeError(f'ymin ({ymin}) must be less than ymax ({ymax})')
+    if zmin >= zmax:
+        raise argparse.ArgumentTypeError(f'zmin ({zmin}) must be less than zmax ({zmax})')
+    
+    return extent_list
+
 def load_config_from_json(json_file):
     """
     Load configuration from JSON file.
@@ -326,25 +354,50 @@ def save_config_to_json(args, json_file):
 
 def print_image_info(infile, image):
     """
-    Print formatted image information including dimensions, spacing, and statistics.
+    Print formatted image information including dimensions, spacing, orientation, and statistics.
     
     Args:
         infile: Path to the image file
         image: SimpleITK image object
     """
-    guard = '!-------------------------------------------------------------------------------'
-    phys_dim = [x * y for x, y in zip(image.GetSize(), image.GetSpacing())]
-    position = [math.floor(x / y) for x, y in zip(image.GetOrigin(), image.GetSpacing())]
-    size = os.path.getsize(infile)
-    names = ['Bytes', 'KBytes', 'MBytes', 'GBytes']
-    n_image_voxels = image.GetSize()[0] * image.GetSize()[1] * image.GetSize()[2]
-    voxel_volume = image.GetSpacing()[0] * image.GetSpacing()[1] * image.GetSpacing()[2]
+    import numpy as np
     
-    # Calculate file size with proper unit
-    i = 0
-    while size > 1024 and i < len(names) - 1:
-        i += 1
-        size = size / 1024.0
+    guard = '!-------------------------------------------------------------------------------'
+    
+    # Get basic image properties
+    size = image.GetSize()
+    spacing = image.GetSpacing()
+    origin = image.GetOrigin()
+    direction = image.GetDirection()
+    
+    # Calculate derived properties
+    phys_dim = [x * y for x, y in zip(size, spacing)]
+    position = [math.floor(x / y) for x, y in zip(origin, spacing)]
+    n_image_voxels = size[0] * size[1] * size[2]
+    voxel_volume = spacing[0] * spacing[1] * spacing[2]
+    total_physical_volume = phys_dim[0] * phys_dim[1] * phys_dim[2]
+    
+    # Calculate physical extent (bounding box)
+    phys_min = origin
+    phys_max = image.TransformContinuousIndexToPhysicalPoint([float(size[0]), float(size[1]), float(size[2])])
+    
+    # Calculate direction matrix determinant (handedness)
+    direction_matrix = np.array(direction).reshape(3, 3)
+    determinant = np.linalg.det(direction_matrix)
+    handedness = "right-handed" if determinant > 0 else "left-handed"
+    
+    # Get file size with proper unit
+    try:
+        file_size = os.path.getsize(infile)
+        size_names = ['Bytes', 'KBytes', 'MBytes', 'GBytes']
+        size_unit_index = 0
+        while file_size > 1024 and size_unit_index < len(size_names) - 1:
+            size_unit_index += 1
+            file_size = file_size / 1024.0
+    except OSError:
+        file_size = 0
+        size_unit_index = 0
+        size_names = ['Bytes', 'KBytes', 'MBytes', 'GBytes']
 
     # Get image statistics
     stats = sitk.StatisticsImageFilter()
@@ -353,16 +406,28 @@ def print_image_info(infile, image):
     # Print formatted information
     print(guard)
     print('!>')
-    print('!> File                       {}'.format(os.path.basename(infile)))
-    print('!> dim                            {:>8}  {:>8}  {:>8}'.format(*image.GetSize()))
-    print('!> off                            {:>8}  {:>8}  {:>8}'.format('-', '-', '-'))
-    print('!> pos                            {:>8}  {:>8}  {:>8}'.format(*position))
-    print('!> element size in mm             {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*image.GetSpacing()))
-    print('!> phys dim in mm                 {:>8.4f}  {:>8.4f}  {:>8.4f}'.format(*phys_dim))
+    print(f'!> File                       {os.path.basename(infile)}')
+    print(f'!> dim                            {size[0]:>8}  {size[1]:>8}  {size[2]:>8}')
+    print(f'!> off                            {"-":>8}  {"-":>8}  {"-":>8}')
+    print(f'!> pos                            {position[0]:>8}  {position[1]:>8}  {position[2]:>8}')
+    print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}  {spacing[2]:>8.4f}')
+    print(f'!> phys dim in mm                 {phys_dim[0]:>8.4f}  {phys_dim[1]:>8.4f}  {phys_dim[2]:>8.4f}')
+    print(f'!> origin in mm                   {origin[0]:>8.4f}  {origin[1]:>8.4f}  {origin[2]:>8.4f}')
     print('!>')
-    print('!> Number of voxels           {:>12,}'.format(n_image_voxels))
-    print('!> Voxel volume (mm^3)        {:>12.6f}'.format(voxel_volume))
-    print('!> Type of data               {}'.format(image.GetPixelIDTypeAsString()))
-    print('!> Image min/max              {:>12.2f} / {:.2f}'.format(stats.GetMinimum(), stats.GetMaximum()))
-    print('!> Total memory size          {:.1f} {}'.format(size, names[i]))
+    print(f'!> Physical extent (mm):')
+    print(f'!>   min                          {phys_min[0]:>8.4f}  {phys_min[1]:>8.4f}  {phys_min[2]:>8.4f}')
+    print(f'!>   max                          {phys_max[0]:>8.4f}  {phys_max[1]:>8.4f}  {phys_max[2]:>8.4f}')
+    print('!>')
+    print(f'!> Direction matrix ({handedness}):')
+    print(f'!>   [{direction[0]:>7.4f}  {direction[1]:>7.4f}  {direction[2]:>7.4f}]')
+    print(f'!>   [{direction[3]:>7.4f}  {direction[4]:>7.4f}  {direction[5]:>7.4f}]')
+    print(f'!>   [{direction[6]:>7.4f}  {direction[7]:>7.4f}  {direction[8]:>7.4f}]')
+    print('!>')
+    print(f'!> Number of voxels           {n_image_voxels:>12,}')
+    print(f'!> Voxel volume (mm^3)        {voxel_volume:>12.6f}')
+    print(f'!> Total physical volume (mm^3) {total_physical_volume:>10.2f}')
+    print(f'!> Total physical volume (cm^3) {total_physical_volume/1000.0:>10.4f}')
+    print(f'!> Type of data               {image.GetPixelIDTypeAsString()}')
+    print(f'!> Image min/max              {stats.GetMinimum():>12.2f} / {stats.GetMaximum():.2f}')
+    print(f'!> Total memory size          {file_size:.1f} {size_names[size_unit_index]}')
     print(guard)
