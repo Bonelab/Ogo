@@ -52,8 +52,8 @@ def ImageFilterByMask(input_file, mask_file, output_file, mask_dilate, mask_erod
         print_image_info(mask_file, mask_image)
     
     # Check mask pixel type
-    if mask_image.GetPixelID() != sitk.sitkUInt8:
-        ogo.message(f'[ERROR] Mask file must be UInt8, got {sitk.GetPixelIDValueAsString(mask_image.GetPixelID())}')
+    if mask_image.GetPixelID() not in [sitk.sitkUInt8, sitk.sitkUInt16]:
+        ogo.message(f'[ERROR] Mask file must be UInt8 or UInt16, got {sitk.GetPixelIDValueAsString(mask_image.GetPixelID())}')
         return 1
     
     # Check that images have matching dimensions
@@ -164,9 +164,9 @@ def main():
     description='''
 Utility to apply a binary mask to an input image.
 
-This tool applies a mask to set voxels to zero where the mask is zero, and passes 
-through the input image values where the mask is non-zero. The input image must be 
-Int16 and the mask must be UInt8. The output will always be Int16.
+This tool applies a mask to set voxels to zero where the mask is non-zero, and passes 
+through the input image values where the mask is zero. The input image must be 
+Int16 and the mask must be UInt8 or UInt16. The output will always be Int16.
 
 Optional morphological operations (dilation and erosion) can be applied to the 
 mask before applying it to the input image.
@@ -178,18 +178,18 @@ Morphological operation types:
 '''
     epilog='''
 Example calls: 
-ogoImageMask input.nii.gz mask.nii.gz output.nii.gz
-ogoImageMask input.nii.gz mask.nii.gz output.nii.gz --mask_dilate 2
-ogoImageMask input.nii.gz mask.nii.gz output.nii.gz --mask_erode 1 -ow
-ogoImageMask input.nii.gz mask.nii.gz output.nii.gz -d 3 -e 1 -q
-ogoImageMask input.nii.gz mask.nii.gz output.nii.gz -d 2 -e 2 --morphological opening
-ogoImageMask input.nii.gz mask.nii.gz output.nii.gz -d 3 -e 3 -mo closing
+ogoImageFilterByMask input.nii.gz mask.nii.gz output.nii.gz
+ogoImageFilterByMask input.nii.gz mask.nii.gz output.nii.gz --mask_dilate 2
+ogoImageFilterByMask input.nii.gz mask.nii.gz output.nii.gz --mask_erode 1 -ow
+ogoImageFilterByMask input.nii.gz mask.nii.gz output.nii.gz -d 3 -e 1 -q
+ogoImageFilterByMask input.nii.gz mask.nii.gz output.nii.gz -d 2 -e 2 --morphological opening
+ogoImageFilterByMask input.nii.gz mask.nii.gz output.nii.gz -d 3 -e 3 -mo closing
 '''
 
     # Setup argument parsing
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
-        prog="ogoImageMask",
+        prog="ogoImageFilterByMask",
         description=description,
         epilog=epilog
     )
@@ -201,7 +201,7 @@ ogoImageMask input.nii.gz mask.nii.gz output.nii.gz -d 3 -e 3 -mo closing
     parser.add_argument('input_file', nargs='?', type=validate_input_file(['.nii', '.nii.gz']), 
                         help='Input image file (*.nii, *.nii.gz) - must be Int16')
     parser.add_argument('mask_file', nargs='?', type=validate_input_file(['.nii', '.nii.gz']), 
-                        help='Mask image file (*.nii, *.nii.gz) - must be UInt8')
+                        help='Mask image file (*.nii, *.nii.gz) - must be UInt8 or UInt16')
     parser.add_argument('output_file', nargs='?', type=validate_output_file(['.nii', '.nii.gz']), 
                         help='Output masked image file (*.nii, *.nii.gz)')
     parser.add_argument('--mask_dilate', '-d', type=validate_integer_min(0), default=0, metavar='VOXELS',

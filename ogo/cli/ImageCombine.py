@@ -14,6 +14,7 @@ from ogo.util.cli_tools import (
     check_overwrite,
     validate_integer_min,
     validate_input_file,
+    validate_integer_range,
     validate_output_file,
     validate_extent,
     load_config_from_json,
@@ -23,7 +24,7 @@ from ogo.util.cli_tools import (
 
 #------------------------------------------------------------------------------+
 # Main function
-def ImageCombine(input_file1, input_file2, output_file, mode, position, side_position, filler, set_extent, overwrite, quiet):
+def ImageCombine(input_file1, input_file2, output_file, mode, position, side_position, spacer, filler, set_extent, overwrite, quiet):
 
     # Check if output exists and should overwrite
     if not check_overwrite(output_file, overwrite):
@@ -47,13 +48,13 @@ def ImageCombine(input_file1, input_file2, output_file, mode, position, side_pos
     if side_position is not None:
         dim = input_image1.GetSize()
         if side_position == 'X':
-            position = [dim[0], 0, 0]
+            position = [dim[0] + spacer, 0, 0]
         elif side_position == 'Y':
-            position = [0, dim[1], 0]
+            position = [0, dim[1] + spacer, 0]
         elif side_position == 'Z':
-            position = [0, 0, dim[2]]
+            position = [0, 0, dim[2] + spacer]
         if not quiet:
-            ogo.message(f'Side position {side_position} set position to: {position}')
+            ogo.message(f'Side position {side_position} with spacer {spacer} set position to: {position}')
     
     # Display parameters
     if not quiet:
@@ -98,6 +99,22 @@ def ImageCombine(input_file1, input_file2, output_file, mode, position, side_pos
     
     if not quiet:
         ogo.message(f'Combined image pixel type: {sitk.GetPixelIDValueAsString(combined_pixel_type)}')
+    
+    # Validate filler value for UInt8 and Int8 output
+    if combined_pixel_type == sitk.sitkUInt8:
+        if filler < 0:
+            ogo.message(f'[WARNING] Filler value {filler} is out of range for UInt8 (0-255). Setting filler to 0.')
+            filler = 0
+        elif filler > 255:
+            ogo.message(f'[WARNING] Filler value {filler} is out of range for UInt8 (0-255). Setting filler to 255.')
+            filler = 255
+    elif combined_pixel_type == sitk.sitkInt8:
+        if filler < -128:
+            ogo.message(f'[WARNING] Filler value {filler} is out of range for Int8 (-128-127). Setting filler to -128.')
+            filler = -128
+        elif filler > 127:
+            ogo.message(f'[WARNING] Filler value {filler} is out of range for Int8 (-128-127). Setting filler to 127.')
+            filler = 127
     
     # Get dimensions of both images
     dim1 = input_image1.GetSize()
@@ -309,7 +326,9 @@ The mode determines how overlapping voxels are handled:
 
 The position parameter defines the relative position of input_file2 with respect to 
 input_file1 in voxel coordinates. Alternatively, use --side_position for convenient 
-positioning along dimension boundaries of input_file1 (X, Y, or Z axis).
+positioning along dimension boundaries of input_file1 (X, Y, or Z axis). The --spacer
+parameter can be used with --side_position to add additional spacing (in voxels) between
+the images.
 
 Optionally, use --set_extent to manually specify the extent of the output combined image.
 '''
@@ -321,6 +340,7 @@ ogoImageCombine input1.nii.gz input2.nii.gz output.nii.gz -m add --filler 255
 ogoImageCombine input1.nii.gz input2.nii.gz output.nii.gz -m subtract -p -5 0 10 -ow -q
 ogoImageCombine input1.nii.gz input2.nii.gz output.nii.gz --side_position X
 ogoImageCombine input1.nii.gz input2.nii.gz output.nii.gz -s Z -m overlay -ow
+ogoImageCombine input1.nii.gz input2.nii.gz output.nii.gz -s X --spacer 10
 ogoImageCombine input1.nii.gz input2.nii.gz output.nii.gz -e -10 100 0 200 0 150 -m add
 '''
 
@@ -348,8 +368,10 @@ ogoImageCombine input1.nii.gz input2.nii.gz output.nii.gz -e -10 100 0 200 0 150
                         help='Relative position of input_file2 [x, y, z] in voxels (default: 0 0 0)')
     parser.add_argument('--side_position', '-s', default=None, choices=['X', 'Y', 'Z'],
                         help='Position input_file2 at dimension boundary (X, Y, or Z) of input_file1. Alternative to --position')
-    parser.add_argument('--filler', '-f', type=validate_integer_min(0), default=0, metavar='VALUE',
-                        help='Filler value for regions without data (must be >= 0, default: %(default)s)')
+    parser.add_argument('--spacer', '-sp', type=validate_integer_min(0), default=0, metavar='INT',
+                        help='Additional spacing (in voxels) when using --side_position (must be >= 0, default: %(default)s)')
+    parser.add_argument('--filler', '-f', type=validate_integer_range(-32768, 32767), default=0, metavar='VALUE',
+                        help='Filler value for regions without data (default: %(default)s)')
     parser.add_argument('--set_extent', '-e', type=int, nargs=6, default=None, metavar=('xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'),
                         help='Manually set extent of combined image [xmin xmax ymin ymax zmin zmax] in voxels')
     parser.add_argument('--overwrite','-ow', action='store_true', help='Overwrite output without asking')

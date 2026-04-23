@@ -55,7 +55,7 @@ def ImageCrop(input_file, output_file, input_label_file, output_label_file, voi,
         ogo.message('      "{}"'.format(input_file))
     ct = sitk.ReadImage(input_file)
     if not quiet:
-        print_image_info(input_file, ct)
+        print_image_info(input_file, ct, brief=True)
     
     # If using labels to define bounds
     if input_label_file is not None:
@@ -65,7 +65,7 @@ def ImageCrop(input_file, output_file, input_label_file, output_label_file, voi,
         if os.path.isfile(input_label_file):
             ct_labels = sitk.ReadImage(input_label_file, sitk.sitkUInt8)
             if not quiet:
-                print_image_info(input_label_file, ct_labels)
+                print_image_info(input_label_file, ct_labels, brief=True)
             
         # check dimensions of label and ct images are the same
         if not check_image_dimensions_match(ct, ct_labels, "input_file", "input_label_file"):
@@ -187,7 +187,7 @@ def ImageCrop(input_file, output_file, input_label_file, output_label_file, voi,
             ogo.message('Writing output labels to file {}'.format(output_label_file))
         sitk.WriteImage(ct_label_out, output_label_file)
         if not quiet:
-            print_image_info(output_label_file, ct_label_out)
+            print_image_info(output_label_file, ct_label_out, brief=True)
     
     if not quiet:
         ogo.message('Done ogoImageCrop!')
@@ -245,11 +245,11 @@ ogoImageCrop input.nii.gz output_cropped.nii.gz --input_label_file labels.nii.gz
     )
     parser.add_argument('input_file', type=validate_input_file(['.nii', '.nii.gz']), help='Input image file (*.nii, *.nii.gz)')
     parser.add_argument('output_file', type=validate_output_file(['.nii', '.nii.gz']), help='Output CT image file (*.nii, *.nii.gz)')
-    parser.add_argument('--input_label_file', type=validate_input_file(['.nii', '.nii.gz']), metavar='FILE', default=None, help='Label image used to define crop (*.nii, *.nii.gz)')
-    parser.add_argument('--output_label_file', type=validate_output_file(['.nii', '.nii.gz']), metavar='FILE', default=None, help='Output label file (*.nii, *.nii.gz)')
-    parser.add_argument('--voi', type=int, nargs=6, default=[0,1,0,1,0,1], metavar='0', help='[origX, origY, origZ, dimX, dimY, dimZ')
+    parser.add_argument('--input_label_file','-ilf', type=validate_input_file(['.nii', '.nii.gz']), metavar='FILE', default=None, help='Label image used to define crop (*.nii, *.nii.gz)')
+    parser.add_argument('--output_label_file', '-olf', type=validate_output_file(['.nii', '.nii.gz']), metavar='FILE', default=None, help='Output label file (*.nii, *.nii.gz)')
+    parser.add_argument('--voi', type=int, nargs=6, default=[0,1,0,1,0,1], metavar='0', help='[origX, origY, origZ, dimX, dimY, dimZ]')
     parser.add_argument('--labels', '-l', type=validate_integer_range(0, 255), nargs='*', default=[], metavar='LABEL', help='List of labels to define crop region (default: %(default)s)')
-    parser.add_argument('--offset', type=int, nargs=3, default=None, metavar=('X', 'Y', 'Z'), help='Symmetric offset to expand VOI in label-based cropping [offsetX, offsetY, offsetZ]')
+    parser.add_argument('--offset','-os', type=int, nargs=3, default=None, metavar=('X', 'Y', 'Z'), help='Symmetric offset to expand VOI in label-based cropping [offsetX, offsetY, offsetZ]')
     parser.add_argument('--slab', action='store_true', help='Crop a Z slab (overrides X and Y VOI)')
     parser.add_argument('--overwrite', '-ow', action='store_true', help='Overwrite output without asking')
     parser.add_argument('--quiet', '-q', action='store_true', help='Suppress informational output to stdout')
