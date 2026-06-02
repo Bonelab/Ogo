@@ -20,10 +20,10 @@ def segment_air(input_file: str, output_mask_file: str, air_max_threshold: float
     image = sitk.ReadImage(input_file)
 
     image_array = sitk.GetArrayFromImage(image)
-    air_mask = np.zeros_like(image_array)
+    air_mask = np.zeros_like(image_array, dtype=np.uint8)
     air_mask[(image_array >= air_min_threshold) & (image_array <= air_max_threshold)] = 1
 
-    air_mask_image = sitk.GetImageFromArray(air_mask)
+    air_mask_image = sitk.Cast(sitk.GetImageFromArray(air_mask), sitk.sitkUInt8)
     component_image = sitk.ConnectedComponent(air_mask_image)
     sorted_component_image = sitk.RelabelComponent(component_image, sortByObjectSize=True)
     
