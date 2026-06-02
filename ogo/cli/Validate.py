@@ -36,7 +36,20 @@ def expected_bone_volumes():
          8:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':13610.6},                           # L3
          9:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':12253.7},                           # L2
         10:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':11756.1},                           # L1
-        11:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':11756.1}                            # L6
+        11:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':11756.1},                           # L6
+        12:{ 'Min':30000.0, 'Max':110000.0,  'Stdev':11756.1},                           # T13
+        13:{ 'Min':25000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T12
+        14:{ 'Min':25000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T11
+        15:{ 'Min':25000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T10
+        16:{ 'Min':25000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T9
+        17:{ 'Min':20000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T8
+        18:{ 'Min':20000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T7
+        19:{ 'Min':20000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T6
+        20:{ 'Min':20000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T5
+        21:{ 'Min':15000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T4
+        22:{ 'Min':15000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T3
+        23:{ 'Min':15000.0, 'Max':100000.0,  'Stdev':11756.1},                           # T2
+        24:{ 'Min':15000.0, 'Max':100000.0,  'Stdev':11756.1}                            # T1
     }
     return bone_volumes
 
@@ -56,6 +69,25 @@ def expected_Procrustes():
      (  24.17049, -109.25177, 425.37350 )]
     return positions
     
+def expected_procrustes_chest():
+    # Used ALCSS_0001.nii.gz as reference
+    # Labels 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24
+    positions = \
+    [( 252.74, 182.823, 50.0505 ), \
+     ( 254.832, 174.04, 82.3542 ), \
+     ( 257.745, 165.936, 111.632 ), \
+     ( 259.561, 155.484, 139.642 ), \
+     ( 259.563, 149.014, 165.861 ), \
+     ( 259.441, 142.381, 191.553 ), \
+     ( 259.077, 136.695, 216.986 ), \
+     ( 259.154, 134.056, 242.607 ), \
+     ( 258.831, 135.746, 267.518 ), \
+     ( 258.877, 140.765, 291.825 ), \
+     ( 257.907, 148.829, 315.387 ), \
+     ( 257.099, 161.516, 337.91  ), \
+     ( 257.084, 173.565, 358.009 ) ]
+    return positions
+
 def expected_Procrustes_with_L6():
     # Used RETRO_01455.nii.gz as reference (top of femurs)
     # Labels 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
@@ -201,6 +233,7 @@ def validate(input_image, report_file, yaml_file, expected_labels, overwrite, fu
     n_labels = filt.GetNumberOfLabels()
     labels = filt.GetLabels()
     hasL6 = filt.HasLabel(11)
+    hasT6 = filt.HasLabel(19)
     label_repair_list = [] # list of [label, part, new_label]
     
     conn = sitk.ConnectedComponentImageFilter()
@@ -423,6 +456,8 @@ def validate(input_image, report_file, yaml_file, expected_labels, overwrite, fu
     sensitivity = 0.008 # adjust with smaller number to make more sensitive
     if hasL6:
         expected_centroids = expected_Procrustes_with_L6()
+    elif hasT6:
+        expected_centroids = expected_procrustes_chest()
     else:
         expected_centroids = expected_Procrustes()
 
