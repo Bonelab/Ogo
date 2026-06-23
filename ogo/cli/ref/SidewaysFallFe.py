@@ -29,8 +29,10 @@ from datetime import date
 from collections import OrderedDict
 import vtk
 import vtkbone
-import numpy as np
 
+from ogo.fea.femur import side_rotation, sideways_fall_output_name, tilted_side_support_vector
+from ogo.fea.materials import build_femur_material_table
+from ogo.fea.model import write_model
 from ogo.util.echo_arguments import echo_arguments
 
 def remove_extension(filename):
@@ -81,12 +83,12 @@ def sidewaysFallFe(args):
     script_name = sys.argv[0]
     
     
-    if femur_side == 1:
-        N88_fileName = output_file.replace('.n88model',"_LT_FEMUR_SF.n88model")
-        rot_z = 90
-    elif femur_side == 2:
-        N88_fileName = output_file.replace('.n88model',"_RT_FEMUR_SF.n88model")
-        rot_z = -90
+    try:
+        N88_fileName = sideways_fall_output_name(output_file, femur_side)
+        rot_z = side_rotation(femur_side)
+    except ValueError:
+        ogo.message("Femur side not recognized. Terminating...")
+        sys.exit()
 
 
     ##
@@ -203,10 +205,19 @@ def sidewaysFallFe(args):
     ##
     # Set up the Material Table
     ogo.message("Setting up the Finite Element Material Table...")
-    material_table = vtkbone.vtkboneMaterialTable()
-    material_table = ogo.add_bone_material(material_table, bin_centers, elastic_Emax=elastic_Emax, elastic_exponent=elastic_exponent, 
-        bone_yield_compression=bone_yield_compression, bone_yield_tension=bone_yield_tension, mu=poissons_ratio)
-    material_table = ogo.add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v,pmma_yield_tension=pmma_yield_tension, pmma_yield_compression=pmma_yield_compression)
+    material_table = build_femur_material_table(
+        bin_centers,
+        elastic_Emax=elastic_Emax,
+        elastic_exponent=elastic_exponent,
+        bone_yield_compression=bone_yield_compression,
+        bone_yield_tension=bone_yield_tension,
+        poissons_ratio=poissons_ratio,
+        pmma_mat_id=pmma_mat_id,
+        pmma_E=pmma_E,
+        pmma_v=pmma_v,
+        pmma_yield_tension=pmma_yield_tension,
+        pmma_yield_compression=pmma_yield_compression,
+    )
     
     bone_yield_compression = args.bone_yield_compression
     bone_yield_tension = args.bone_yield_tension
@@ -227,16 +238,8 @@ def sidewaysFallFe(args):
     bottom_support_vector = (0, -1, 0)
     side_support_vector = (0, 0, -1)
 
-    # Define the rotation angle in degrees
-    theta = np.radians(-20)  # Convert to radians
-
-    # Define the rotation matrix around the x-axis
-    Rx = np.array([[1, 0, 0],
-                [0, np.cos(theta), -np.sin(theta)],
-                [0, np.sin(theta), np.cos(theta)]])
-
-    # Apply the rotation
-    side_support_vector = Rx @ side_support_vector
+    # Tilt the distal support to match the historical sideways-fall fixture.
+    side_support_vector = tilted_side_support_vector(-20)
 
     ogo.message("Determining Femoral Head ROI...")
     femoral_head_bounds = (
@@ -497,7 +500,7 @@ def sidewaysFallFe(args):
     ##
     # Write out n88model file
     ogo.message("Writing out n88model file: %s" % N88_fileName)
-    ogo.writeN88Model(model2, N88_fileName, image_pathname)
+    write_model(model2, N88_fileName)
 
     ##
     ogo.message("Done writing n88model.")

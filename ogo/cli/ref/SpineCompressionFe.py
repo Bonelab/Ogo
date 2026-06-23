@@ -706,42 +706,31 @@ def convert_image_to_material(image, mask, n_bins=128, cort_mask=None):
     return binned_image, bin_centers
 
 def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_id, node_set_name):
-    visibleNodesIds = vtk.vtkIdTypeArray()
-    vtkbone.vtkboneNodeSetsByGeometry.FindNodesOnVisibleSurface(
-        visibleNodesIds, bc_geometry, normal_vector, bone_material_id)
-    visibleNodesIds.SetName(node_set_name)
-    model.AddNodeSet(visibleNodesIds)
-    ogo.message(f"Found {visibleNodesIds.GetNumberOfTuples()} visible nodes for {node_set_name}.")
-    return model 
+    """Compatibility wrapper for shared spine FE visible-node detection."""
+    from ogo.fea.model import find_and_add_visible_nodes as _find_and_add_visible_nodes
+
+    return _find_and_add_visible_nodes(
+        model, bc_geometry, normal_vector, bone_material_id, node_set_name
+    )
 
 def resolve_func(func_or_name, module):
-    if callable(func_or_name):
-        return func_or_name
-    elif isinstance(func_or_name, str):
-        return getattr(module, func_or_name)
-    else:
-        return None
+    """Compatibility wrapper for material-law function resolution."""
+    from ogo.fea.materials import resolve_material_func
+
+    return resolve_material_func(func_or_name, module)
 
 def apply_boundary_conditions(model,**kwargs):
+    """Compatibility wrapper for shared spine compression boundary conditions."""
+    from ogo.fea.model import apply_spine_boundary_conditions
 
-    fe_displacement = kwargs.get("fe_displacement", -1.0)
-
-    ogo.message('Applying boundary conditions...')
-    model.ApplyBoundaryCondition("body_top", vtkbone.vtkboneConstraint.SENSE_Z, fe_displacement, "top_displacement")
-    model.ApplyBoundaryCondition("body_bottom", vtkbone.vtkboneConstraint.SENSE_Z, 0, "bottom_fixed_z")
-    return model
+    return apply_spine_boundary_conditions(model, **kwargs)
 
 
 def log_fe_arguments(**kwargs):
-    import inspect
+    """Compatibility wrapper for shared FE argument logging."""
+    from ogo.fea.model import log_fe_arguments as _log_fe_arguments
 
-    ogo.message("========= FE MODEL ARGUMENTS =========")
-    for key, value in kwargs.items():
-        if inspect.isfunction(value):
-            ogo.message(f"{key}: function -> {value.__name__}")
-        else:
-            ogo.message(f"{key}: {value}")
-    ogo.message("======================================")
+    return _log_fe_arguments(**kwargs)
 
 def create_microfe_model(
     image_with_pads,
@@ -749,131 +738,12 @@ def create_microfe_model(
     bin_centers,
     **kwargs
 ):
-    import ogo.cli.ref.material_laws as material_laws
+    """Compatibility wrapper for shared spine compression model creation."""
+    from ogo.fea.model import create_microfe_model as _create_microfe_model
 
-    # === Load defaults and dynamic functions === #
-    n_bins = 128
-    poissons_ratio = kwargs.get("poissons_ratio", 0.3)
-    pmma_mat_id = kwargs.get("pmma_mat_id", 5000)
-    pmma_E = kwargs.get("pmma_E", 2500)
-    pmma_v = kwargs.get("pmma_v", 0.3)
-    top_displacement = kwargs.get("top_displacement", "top_displacement")
-    top_direction = kwargs.get("top_direction", (0, 0, 1))
-    bottom_direction = kwargs.get("bottom_direction", (0, 0, -1))
-    top_node_set_id = kwargs.get("top_node_set_id", 4)
-    bottom_node_set_id = kwargs.get("bottom_node_set_id", 3)
-    top_node_set_name = kwargs.get("top_node_set_name", "body_top")
-    bottom_node_set_name = kwargs.get("bottom_node_set_name", "body_bottom")
-    pmma_yield_compression = kwargs.get("pmma_yield_compression", None)
-    pmma_yield_tension = kwargs.get("pmma_yield_tension", None)
-
-    # === Load material law functions from kwargs === #
-    elastic_E_func =  resolve_func(kwargs.get("elastic_E_func"), material_laws) or default_E
-    yield_comp_func = resolve_func(kwargs.get("yield_comp_func"), material_laws)
-    yield_tens_func = resolve_func(kwargs.get("yield_tens_func"), material_laws)
-
-    cort_elastic_E_func = resolve_func(kwargs.get("cort_elastic_E_func"), material_laws) or elastic_E_func
-    cort_yield_comp_func = resolve_func(kwargs.get("cort_yield_comp_func"), material_laws) or yield_comp_func
-    cort_yield_tens_func = resolve_func(kwargs.get("cort_yield_tens_func"), material_laws) or yield_tens_func
-    cort_poissons_ratio = poissons_ratio if kwargs.get('cort_poissons_ratio') is None else kwargs['cort_poissons_ratio']
-
-    log_fe_arguments(
-        n_bins=n_bins,
-        poissons_ratio=poissons_ratio,
-        pmma_mat_id=pmma_mat_id,
-        pmma_E=pmma_E,
-        pmma_v=pmma_v,
-        top_displacement=top_displacement,
-        top_direction=top_direction,
-        bottom_direction=bottom_direction,
-        top_node_set_id=top_node_set_id,
-        bottom_node_set_id=bottom_node_set_id,
-        top_node_set_name=top_node_set_name,
-        bottom_node_set_name=bottom_node_set_name,
-        pmma_yield_compression=pmma_yield_compression,
-        pmma_yield_tension=pmma_yield_tension,
-        elastic_E_func=elastic_E_func,
-        yield_comp_func=yield_comp_func,
-        yield_tens_func=yield_tens_func,
-        cort_elastic_E_func=cort_elastic_E_func,
-        cort_yield_comp_func=cort_yield_comp_func,
-        cort_yield_tens_func=cort_yield_tens_func,
-        cort_poissons_ratio=cort_poissons_ratio
+    return _create_microfe_model(
+        image_with_pads, boundary_masks_with_pads, bin_centers, **kwargs
     )
-
-    # === Mesh images === #
-    ogo.message(f"Casting to Short Integer datatype...")
-    image_pads_short = ogo.cast2short(image_with_pads)
-
-    ogo.message(f"Filtering connected components...")
-    conn = ogo.imageConnectivity(image_pads_short)
-    conn_bc = ogo.imageConnectivity(boundary_masks_with_pads)
-
-    ogo.message(f"Meshing...")
-    mesh = ogo.Image2Mesh(conn)
-    temp_bc_mesh = ogo.Image2Mesh(conn_bc)
-
-    # === Build material table === #
-    ogo.message("Setting up the Finite Element Material Table...")
-    material_table = vtkbone.vtkboneMaterialTable()
-
-    # Trabecular material
-    material_table = ogo.add_bone_material(
-        material_table, bin_centers,
-        elastic_E_func=elastic_E_func,
-        mu=poissons_ratio,
-        yield_comp_func=yield_comp_func,
-        yield_tens_func=yield_tens_func,
-        bin_range=(0, n_bins),
-        material_name='TrabBone'
-    )
-
-    # Cortical material
-    material_table = ogo.add_bone_material(
-        material_table, bin_centers,
-        elastic_E_func=cort_elastic_E_func,
-        mu=cort_poissons_ratio,
-        yield_comp_func=cort_yield_comp_func,
-        yield_tens_func=cort_yield_tens_func,
-        bin_range=(n_bins, 2 * n_bins),
-        material_name='CortBone'
-    )
-
-    # PMMA caps
-    material_table = ogo.add_pmma_material(
-        material_table,
-        pmma_mat_id,
-        pmma_E,
-        pmma_v,
-        pmma_yield_tension=pmma_yield_tension,
-        pmma_yield_compression=pmma_yield_compression
-    )
-
-    # === Build and annotate model === #
-    ogo.message("Constructing the Finite Element Model...")
-    model = ogo.applyTestBase(mesh, material_table)
-    model.ComputeBounds()
-
-    ogo.message(f"Identifying boundary nodes...")
-    model = find_and_add_visible_nodes(model, temp_bc_mesh, top_direction, top_node_set_id, top_node_set_name)
-    model = find_and_add_visible_nodes(model, temp_bc_mesh, bottom_direction, bottom_node_set_id, bottom_node_set_name)
-    model = apply_boundary_conditions(model, **kwargs)
-
-    ogo.message(f"Setting convergence criteria...")
-    model.ConvergenceSetFromConstraint(top_displacement)
-
-    # === Postprocessing sets === #
-    ogo.message('Postprocessing...')
-    info = model.GetInformation()
-    pp_node_sets_key = vtkbone.vtkboneSolverParameters.POST_PROCESSING_NODE_SETS()
-    pp_elem_sets_key = vtkbone.vtkboneSolverParameters.POST_PROCESSING_ELEMENT_SETS()
-    for setname in [top_node_set_name, bottom_node_set_name]:
-        pp_node_sets_key.Append(info, setname)
-        elementSet = model.GetAssociatedElementsFromNodeSet(setname)
-        model.AddElementSet(elementSet)
-        pp_elem_sets_key.Append(info, setname)
-
-    return model
 
 def create_microfe_model_depreciated(
     image_with_pads,
