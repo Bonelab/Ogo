@@ -71,6 +71,18 @@ def append_postprocessing_sets(model, set_names):
     return model
 
 
+def find_nodes_on_coordinate_plane(model, axis, value, *, tolerance=1.0e-5):
+    """Return model point IDs that lie on one coordinate plane."""
+    import vtk
+
+    axis_index = {"x": 0, "y": 1, "z": 2}[str(axis).lower()]
+    node_ids = vtk.vtkIdTypeArray()
+    for point_id in range(model.GetNumberOfPoints()):
+        if abs(model.GetPoint(point_id)[axis_index] - value) <= tolerance:
+            node_ids.InsertNextValue(point_id)
+    return node_ids
+
+
 def write_model(model, output_path):
     """Write a vtkbone model to an ``.n88model`` file."""
     import vtkbone
@@ -170,4 +182,3 @@ def create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers,
 
     ogo.message("Postprocessing...")
     return append_postprocessing_sets(model, [top_node_set_name, bottom_node_set_name])
-

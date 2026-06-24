@@ -1,5 +1,7 @@
 import importlib.util
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,6 +41,8 @@ BENCHMARK_NONLINEAR_ARGS = [
     "--cort_yield_tens_func",
     "kopperdahl_trab_yc",
 ]
+
+SPINE_DEFAULT_QC_ARGS = ["--quality_control", "False"]
 
 
 @pytest.fixture
@@ -89,6 +93,7 @@ def test_spine_runs_each_requested_vertebra(monkeypatch, solve_calls):
             *BENCHMARK_LINEAR_ARGS,
             "--iso_resolution",
             "1.2",
+            *SPINE_DEFAULT_QC_ARGS,
         ],
         [
             "density.nii.gz",
@@ -104,6 +109,7 @@ def test_spine_runs_each_requested_vertebra(monkeypatch, solve_calls):
             *BENCHMARK_LINEAR_ARGS,
             "--iso_resolution",
             "1.2",
+            *SPINE_DEFAULT_QC_ARGS,
         ],
     ]
     assert solve_calls == [
@@ -160,7 +166,8 @@ def test_dry_run_prints_commands_without_running(monkeypatch, capsys):
     assert (
         capsys.readouterr().out.strip()
         == "OgoSpineCompressionFe density.nii.gz spine_mask.nii.gz "
-        "--mask_threshold 6 --process_mask_threshold 5 --appendix L2"
+        "--mask_threshold 6 --process_mask_threshold 5 --appendix L2 "
+        "--quality_control False"
     )
 
 
@@ -190,6 +197,7 @@ def test_spine_preset_none_keeps_command_minimal(monkeypatch, solve_calls):
             "7",
             "--appendix",
             "L3",
+            *SPINE_DEFAULT_QC_ARGS,
         ]
     ]
 
@@ -221,6 +229,7 @@ def test_spine_nonlinear_benchmark_preset(monkeypatch, solve_calls):
             "--appendix",
             "T10",
             *BENCHMARK_NONLINEAR_ARGS,
+            *SPINE_DEFAULT_QC_ARGS,
         ]
     ]
 
@@ -241,27 +250,142 @@ def test_spine_explicit_options_follow_preset_for_overrides(monkeypatch, solve_c
         ]
     )
 
-    assert calls[0][-2:] == ["--fe_displacement", "-0.25"]
+    explicit_index = len(calls[0]) - len(SPINE_DEFAULT_QC_ARGS) - 2
+    assert calls[0][explicit_index:explicit_index + 2] == ["--fe_displacement", "-0.25"]
     assert calls[0].count("--fe_displacement") == 2
 
 
-def test_legacy_model_type_dispatch_still_works(monkeypatch):
-    calls = []
-    monkeypatch.setattr(GenerateFEM, "run_spine_command", lambda argv: calls.append(list(argv)))
+def _metadata_args(tmp_path, no_solve=True):
+    return type(
+        "Args",
+        (),
+        {
+            "dry_run": False,
+            "calibrated_image": tmp_path / "density.nii.gz",
+            "bone_mask": tmp_path / "mask.nii.gz",
+            "output_path": tmp_path,
+            "skip_bc_audit": False,
+            "bc_audit_flat_tolerance": 1.0e-4,
+            "debug": False,
+            "no_solve": no_solve,
+            "target_displacement": None,
+            "exclude": 5000,
+            "critical_volume": 2.0,
+            "critical_strain": 0.007,
+            "no_compress": False,
+        },
+    )()
 
-    GenerateFEM.main(
-        [
-            "--model_type",
-            "vertebra",
-            "density.nii.gz",
-            "mask.nii.gz",
-            "--mask_threshold",
-            "2",
-            "--process_mask_threshold",
-            "1",
-        ]
+
+def _solve_args(**overrides):
+    data = {
+        "threads": 4,
+        "faim_env": None,
+        "conda_executable": "conda",
+        "faim_install_root": None,
+        "faim_bin_dir": None,
+        "faim_license_dir": None,
+        "faim_command": None,
+        "n88modelinfo_command": None,
+        "n88derivedfields_command": None,
+        "n88postfaim_command": None,
+        "n88pistoia_command": None,
+        "n88tabulate_command": None,
+        "n88copymodel_command": None,
+        "critical_volume": 2.0,
+        "critical_strain": 0.007,
+        "exclude": 5000,
+        "no_compress": False,
+        "require_pistoia": False,
+        "dry_run": False,
+        "target_displacement": None,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+def test_solve_model_sets_femur_displacement_from_percent(monkeypatch, tmp_path):
+    import ogo.util.faim as faim_module
+
+    calls = []
+    monkeypatch.setattr(faim_module, "run_faim_pipeline", lambda **kwargs: calls.append(kwargs))
+
+    GenerateFEM.solve_model(
+        tmp_path / "density_LT_FEMUR_SF.n88model",
+        _solve_args(),
+        "hip",
+        ["density.nii.gz", "mask.nii.gz", "--fe_displacement", "-4.0"],
     )
 
-    assert calls == [
-        ["density.nii.gz", "mask.nii.gz", "--mask_threshold", "2", "--process_mask_threshold", "1"]
+    assert calls[0]["report_profile"] == "femur"
+    assert calls[0]["target_displacement"] == 4.0
+    assert calls[0]["solve_displacement_percent"] == 4.0
+
+
+def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
+    model = tmp_path / "density_vertebra_2_L1.n88model"
+    model.write_text("dummy")
+    argv = [
+        "density.nii.gz",
+        "mask.nii.gz",
+        "--mask_threshold",
+        "2",
+        "--process_mask_threshold",
+        "3",
+        "--appendix",
+        "L1",
+        "--elastic_E_func",
+        "kopperdahl_trab_E",
+        "--cort_elastic_E_func",
+        "kopperdahl_trab_E",
+        "--fe_displacement",
+        "-0.2",
     ]
+
+    path = GenerateFEM.write_modeling_metadata(model, "spine", argv, _metadata_args(tmp_path))
+    data = json.loads(path.read_text())
+
+    assert data["target"] == {"vertebra": "L1", "body_label": 2, "process_label": 3}
+    assert data["materials"]["trabecular"]["elastic_E_func"] == "kopperdahl_trab_E"
+    assert data["materials"]["cortical"]["material_id_range"] == [129, 256]
+    assert data["materials"]["pmma"]["material_id"] == 5000
+    assert data["boundary_conditions"]["constraints"][0]["node_set"] == "body_top"
+    assert "initial_generator_value_mm" not in data["boundary_conditions"]["constraints"][0]
+    assert data["boundary_conditions"]["constraints"][0]["target_displacement_percent"] == 0.68
+    assert data["boundary_conditions"]["constraints"][0]["value_source"].startswith("target_displacement_percent")
+    assert data["solve_and_reporting"]["target_displacement_percent"] == 0.68
+    assert data["solve_and_reporting"]["run_pistoia"] is False
+
+
+def test_femur_modeling_metadata_records_materials_shaft_and_bcs(tmp_path):
+    model = tmp_path / "density_LT_FEMUR_SF.n88model"
+    model.write_text("dummy")
+    argv = [
+        "density.nii.gz",
+        "mask.nii.gz",
+        "--femur_side",
+        "1",
+        "--pmma_thick",
+        "6",
+        "--pmma_intrusion",
+        "6",
+        "--femur_lesser_trochanter_distal_offset",
+        "50",
+        "--compartment_mask",
+        "trab_cort.nii.gz",
+    ]
+
+    path = GenerateFEM.write_modeling_metadata(model, "hip", argv, _metadata_args(tmp_path))
+    data = json.loads(path.read_text())
+
+    assert data["target"]["side"] == "left"
+    assert data["segmentation"]["compartment_labels"] == {"cortical": 1, "trabecular": 2}
+    assert data["shaft_standardization"]["lesser_trochanter_distal_offset_mm"] == 50.0
+    assert data["materials"]["include_cortical_region"] is True
+    assert data["materials"]["cortical"]["material_id_range"] == [129, 256]
+    assert data["boundary_conditions"]["fixture_geometry"]["femoral_head"]["pmma_intrusion_mm"] == 6.0
+    assert data["boundary_conditions"]["constraints"][0]["node_set"] == "Femoral_Head_PMMA_Nodes"
+    assert "initial_generator_value_mm" not in data["boundary_conditions"]["constraints"][0]
+    assert data["boundary_conditions"]["constraints"][0]["target_displacement_percent"] == 4.0
+    assert data["boundary_conditions"]["constraints"][0]["value_source"].startswith("target_displacement_percent")
+    assert data["solve_and_reporting"]["target_displacement_percent"] == 4.0

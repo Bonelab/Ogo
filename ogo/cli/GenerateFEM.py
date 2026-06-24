@@ -1,17 +1,41 @@
-"""Generate finite-element models for spine vertebrae and hip femurs.
+"""Generate and solve finite-element models for spine vertebrae and hip femurs.
 
-This module is intentionally a thin orchestration layer.  The scientific model
-generation remains in ``ogo.cli.ref.SpineCompressionFe`` and
-``ogo.cli.ref.SidewaysFallFe``; this command provides a clean user-facing entry
-point for running one or many targets.
+This module is intentionally a thin orchestration layer. The scientific model
+generation lives in ``ogo.fea``; this command provides the maintained
+user-facing entry point for running one or many targets.
 """
 
 import argparse
 from collections import namedtuple
 import importlib.util
+import json
 from pathlib import Path
 import sys
 from typing import Callable, List, Optional, Sequence
+
+from ogo.fea.spine import (
+    BENCHMARK_LINEAR_FE_DISPLACEMENT_MM,
+    BENCHMARK_NONLINEAR_FE_DISPLACEMENT_MM,
+    DEFAULT_SPINE_FE_DISPLACEMENT_MM,
+    DEFAULT_SPINE_ISO_RESOLUTION_MM,
+    DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+    DEFAULT_SPINE_PMMA_THICKNESS_MM,
+    DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
+    DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
+    DEFAULT_SPINE_TARGET_DISPLACEMENT_PERCENT,
+    SPINE_ALIGNMENT_METHOD,
+    default_spine_reference_path,
+)
+from ogo.fea.femur import (
+    DEFAULT_FEMUR_CUT_MODE,
+    DEFAULT_FEMUR_FE_DISPLACEMENT,
+    DEFAULT_FEMUR_ISO_RESOLUTION_MM,
+    DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+    DEFAULT_FEMUR_TARGET_DISPLACEMENT_PERCENT,
+    DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
+    DEFAULT_PMMA_INTRUSION_MM,
+    DEFAULT_PMMA_THICKNESS_MM,
+)
 
 
 SpineTarget = namedtuple("SpineTarget", ["level", "body_label", "process_label"])
@@ -20,7 +44,7 @@ SPINE_PRESETS = {
     "none": [],
     "benchmark-linear": [
         "--fe_displacement",
-        "-0.2",
+        str(BENCHMARK_LINEAR_FE_DISPLACEMENT_MM),
         "--elastic_E_func",
         "kopperdahl_trab_E",
         "--cort_elastic_E_func",
@@ -28,7 +52,7 @@ SPINE_PRESETS = {
     ],
     "benchmark-nonlinear": [
         "--fe_displacement",
-        "-2.0",
+        str(BENCHMARK_NONLINEAR_FE_DISPLACEMENT_MM),
         "--pmma_yield_compression",
         "70.0",
         "--pmma_yield_tension",
@@ -160,6 +184,77 @@ def option_value(argv: Sequence[str], option: str, default: Optional[str] = None
     return value
 
 
+def option_float(argv: Sequence[str], option: str, default: float) -> float:
+    """Return the final numeric value for an argv-style option."""
+    return float(option_value(argv, option, str(default)))
+
+
+def option_optional_float(argv: Sequence[str], option: str) -> Optional[float]:
+    """Return the final numeric value for an optional argv-style option."""
+    value = option_value(argv, option)
+    return None if value is None else float(value)
+
+
+def option_int(argv: Sequence[str], option: str, default: int) -> int:
+    """Return the final integer value for an argv-style option."""
+    return int(option_value(argv, option, str(default)))
+
+
+def option_present(argv: Sequence[str], option: str) -> bool:
+    """Return whether a flag-like option is present."""
+    return option in argv
+
+
+def option_path(argv: Sequence[str], option: str, default: Optional[Path] = None) -> Optional[str]:
+    """Return the final path value for an option as a string."""
+    value = option_value(argv, option, str(default) if default is not None else None)
+    return None if value is None else str(value)
+
+
+def target_displacement_percent(args: argparse.Namespace, model_type: str) -> float:
+    """Return the maintained endpoint displacement percentage for this model."""
+    if args.target_displacement is not None:
+        return args.target_displacement
+    if model_type == "spine":
+        return DEFAULT_SPINE_TARGET_DISPLACEMENT_PERCENT
+    return DEFAULT_FEMUR_TARGET_DISPLACEMENT_PERCENT
+
+
+def percent_displacement_metadata(
+    model_path: Path,
+    *,
+    report_profile: str,
+    failure_axis: str,
+    target_percent: float,
+) -> dict:
+    """Describe the solve displacement derived from model geometry."""
+    metadata = {
+        "value_mm": None,
+        "target_displacement_percent": target_percent,
+        "characteristic_length_mm": None,
+        "value_source": "target_displacement_percent * characteristic_length_mm / 100",
+    }
+    try:
+        from ogo.util.faim import (
+            infer_profile_characteristic_length_mm,
+            read_prescribed_displacement,
+        )
+
+        characteristic_length = infer_profile_characteristic_length_mm(
+            model_path,
+            report_profile,
+            failure_axis,
+        )
+        current_value = read_prescribed_displacement(model_path, report_profile)
+        sign = -1.0 if current_value != "" and float(current_value) < 0 else 1.0
+        target_mm = abs(float(target_percent)) * characteristic_length / 100.0
+        metadata["value_mm"] = sign * target_mm
+        metadata["characteristic_length_mm"] = characteristic_length
+    except Exception as exc:
+        metadata["value_note"] = "available after model generation with netCDF4: {}".format(exc)
+    return metadata
+
+
 def solve_model(
     model_path: Path,
     args: argparse.Namespace,
@@ -180,14 +275,25 @@ def solve_model(
     # Spine compression uses z reaction force; sideways-fall hip uses y.
     if model_type == "spine":
         analysis_var = "fz_ns1"
-        pistoia_vars = ["pis_fz_fail", "pis_stiffz"]
+        pistoia_vars = []
         failure_axis = "z"
     else:
         analysis_var = "fy_ns1"
         pistoia_vars = ["pis_fy_fail", "pis_stiffy"]
         failure_axis = "y"
 
-    applied_displacement = option_value(generator_argv, "--fe_displacement", "-1.0")
+    default_applied_displacement = (
+        str(DEFAULT_SPINE_FE_DISPLACEMENT_MM)
+        if model_type == "spine"
+        else str(DEFAULT_FEMUR_FE_DISPLACEMENT)
+    )
+    applied_displacement = option_value(
+        generator_argv,
+        "--fe_displacement",
+        default_applied_displacement,
+    )
+    target_displacement = target_displacement_percent(args, model_type)
+    report_profile = "spine" if model_type == "spine" else "femur"
 
     run_faim_pipeline(
         model_file=model_path,
@@ -211,31 +317,439 @@ def solve_model(
         critical_volume=args.critical_volume,
         critical_strain=args.critical_strain,
         exclude=args.exclude,
+        run_pistoia=False,
         applied_displacement=applied_displacement,
-        target_displacement=args.target_displacement,
+        target_displacement=target_displacement,
+        report_profile=report_profile,
+        solve_displacement_percent=target_displacement,
         compress=not args.no_compress,
         require_pistoia=args.require_pistoia,
         dry_run=args.dry_run,
     )
 
 
+def write_modeling_metadata(
+    model_path: Path,
+    model_type: str,
+    generator_argv: Sequence[str],
+    args: argparse.Namespace,
+    bc_audit_summary: Optional[dict] = None,
+) -> Optional[Path]:
+    """Write a traceable model-building record next to a generated n88model."""
+    if args.dry_run:
+        return None
+    if not model_path.exists():
+        return None
+
+    output_path = model_path.with_name(model_path.with_suffix("").name + "_modeling.json")
+    common = {
+        "schema_version": 1,
+        "model_file": str(model_path),
+        "generator": {
+            "entry_point": "ogoFEA",
+            "model_type": model_type,
+            "lower_level_argv": list(generator_argv),
+        },
+        "inputs": {
+            "calibrated_image": str(args.calibrated_image),
+            "bone_mask": str(args.bone_mask),
+            "output_path": str(args.output_path) if args.output_path is not None else str(args.calibrated_image.parent),
+        },
+        "post_generation_validation": {
+            "bc_audit": {
+                "enabled": bc_audit_summary is not None,
+                "flat_tolerance": args.bc_audit_flat_tolerance,
+                "summary": bc_audit_summary,
+                "json_path": None,
+                "csv_path": None,
+                "png_path": None
+                if not args.debug
+                else str(model_path.with_name(model_path.with_suffix("").name + "_bc_audit.png")),
+            }
+        },
+        "solve_and_reporting": {
+            "solve_requested": not args.no_solve,
+            "target_displacement_percent": target_displacement_percent(args, model_type),
+            "target_displacement_definition": "percent strain converted from model geometry for spine; percent of femur length for femur",
+            "run_pistoia": False,
+            "compress_solved_model": not args.no_compress,
+        },
+    }
+
+    if model_type == "spine":
+        body_label = option_int(generator_argv, "--mask_threshold", 0)
+        process_label = option_int(generator_argv, "--process_mask_threshold", 0)
+        appendix = option_value(generator_argv, "--appendix")
+        spine_displacement = percent_displacement_metadata(
+            model_path,
+            report_profile="spine",
+            failure_axis="z",
+            target_percent=common["solve_and_reporting"]["target_displacement_percent"],
+        )
+        metadata = common.copy()
+        metadata.update({
+            "model": "spine-compression",
+            "target": {
+                "vertebra": appendix,
+                "body_label": body_label,
+                "process_label": process_label,
+            },
+            "alignment": {
+                "method": SPINE_ALIGNMENT_METHOD,
+                "reference_path": option_value(
+                    generator_argv,
+                    "--reference_path",
+                    str(default_spine_reference_path()),
+                ),
+                "registration_scale": option_value(generator_argv, "--registration_scale", "auto"),
+                "registration_min_scale": option_value(
+                    generator_argv,
+                    "--registration_min_scale",
+                    DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
+                ),
+                "registration_max_scale": option_value(
+                    generator_argv,
+                    "--registration_max_scale",
+                    DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
+                ),
+            },
+            "image_processing": {
+                "iso_resolution_mm": option_float(generator_argv, "--iso_resolution", DEFAULT_SPINE_ISO_RESOLUTION_MM),
+                "spatial_operations": "ICP transform and isotropic output spacing in one shared VTK reslice",
+                "image_interpolation": "cubic",
+                "label_interpolation": "nearest-neighbor",
+                "mask_smoothing": {
+                    "operation": "binary close/open after ICP resampling",
+                    "condition": "enabled only when any input spacing dimension exceeds threshold_mm",
+                    "threshold_mm": option_float(
+                        generator_argv,
+                        "--mask_smoothing_spacing_threshold",
+                        DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+                    ),
+                },
+                "density_preprocessing": {
+                    "connectivity_filter": True,
+                    "bmd_preprocess_threshold": -31,
+                    "density_binning": {
+                        "n_bins": 128,
+                        "background_material_id": 0,
+                        "trabecular_material_ids": [1, 128],
+                        "cortical_material_ids": [129, 256],
+                    },
+                },
+            },
+            "segmentation": {
+                "input_mask": str(args.bone_mask),
+                "labels": {
+                    "vertebral_body": body_label,
+                    "posterior_process": process_label,
+                },
+                "derived_masks": {
+                    "body": "threshold body label",
+                    "process": "threshold process label",
+                    "cortical": "density/surface-derived cortical shell generated after alignment",
+                    "pmma_caps": "fit-to-body superior and inferior caps",
+                },
+            },
+            "materials": {
+                "builder": "ogo.fea.materials.build_spine_material_table",
+                "convention": "region material IDs; 0 background, 1..128 trabecular, 129..256 cortical, PMMA explicit",
+                "poissons_ratio": option_float(generator_argv, "--poissons_ratio", 0.3),
+                "trabecular": {
+                    "elastic_E_func": option_value(generator_argv, "--elastic_E_func", "default_E"),
+                    "yield_comp_func": option_value(generator_argv, "--yield_comp_func"),
+                    "yield_tens_func": option_value(generator_argv, "--yield_tens_func"),
+                    "material_id_range": [1, 128],
+                },
+                "cortical": {
+                    "elastic_E_func": option_value(
+                        generator_argv,
+                        "--cort_elastic_E_func",
+                        option_value(generator_argv, "--elastic_E_func", "default_E"),
+                    ),
+                    "yield_comp_func": option_value(
+                        generator_argv,
+                        "--cort_yield_comp_func",
+                        option_value(generator_argv, "--yield_comp_func"),
+                    ),
+                    "yield_tens_func": option_value(
+                        generator_argv,
+                        "--cort_yield_tens_func",
+                        option_value(generator_argv, "--yield_tens_func"),
+                    ),
+                    "poissons_ratio": option_float(
+                        generator_argv,
+                        "--cort_poissons_ratio",
+                        option_float(generator_argv, "--poissons_ratio", 0.3),
+                    ),
+                    "material_id_range": [129, 256],
+                },
+                "pmma": {
+                    "material_id": option_int(generator_argv, "--pmma_mat_id", 5000),
+                    "elastic_E_MPa": option_float(generator_argv, "--pmma_E", 2500),
+                    "poissons_ratio": option_float(generator_argv, "--pmma_v", 0.3),
+                    "yield_compression_MPa": option_optional_float(generator_argv, "--pmma_yield_compression"),
+                    "yield_tension_MPa": option_optional_float(generator_argv, "--pmma_yield_tension"),
+                },
+            },
+            "boundary_conditions": {
+                "fixture_geometry": {
+                    "superior_cap": {
+                        "label_id": option_int(generator_argv, "--top_node_set_id", 4),
+                        "node_set": "body_top",
+                        "shape": "fit to vertebral body surface",
+                        "pmma_thickness_mm": option_float(generator_argv, "--pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM),
+                    },
+                    "inferior_cap": {
+                        "label_id": option_int(generator_argv, "--bottom_node_set_id", 3),
+                        "node_set": "body_bottom",
+                        "shape": "fit to vertebral body surface",
+                        "pmma_thickness_mm": option_float(generator_argv, "--pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM),
+                    },
+                },
+                "constraints": [
+                    {
+                        "name": "top_displacement",
+                        "node_set": "body_top",
+                        "axis": "z",
+                        **spine_displacement,
+                        "meaning": "superior PMMA cap prescribed toward inferior cap",
+                    },
+                    {
+                        "name": "bottom_fixed",
+                        "node_set": "body_bottom",
+                        "axis": "z",
+                        "value_mm": 0.0,
+                        "meaning": "inferior PMMA cap fixed in compression direction",
+                    },
+                ],
+            },
+        })
+    else:
+        femur_side = option_value(generator_argv, "--femur_side", "1")
+        side = "left" if femur_side == "1" else "right" if femur_side == "2" else "unknown"
+        compartment_mask = option_path(generator_argv, "--compartment_mask")
+        femur_displacement = percent_displacement_metadata(
+            model_path,
+            report_profile="femur",
+            failure_axis="y",
+            target_percent=common["solve_and_reporting"]["target_displacement_percent"],
+        )
+        metadata = common.copy()
+        metadata.update({
+            "model": "femur-sideways",
+            "target": {
+                "side": side,
+                "femur_side_code": int(femur_side) if femur_side.isdigit() else femur_side,
+                "mask_threshold": option_int(generator_argv, "--mask_threshold", 1),
+            },
+            "alignment": {
+                "method": "pre-rotation plus ICP to side-specific femur reference",
+                "reference_path": option_value(generator_argv, "--reference_path", "bundled side-specific femur reference"),
+            },
+            "image_processing": {
+                "iso_resolution_mm": option_float(generator_argv, "--iso_resolution", DEFAULT_FEMUR_ISO_RESOLUTION_MM),
+                "spatial_operations": (
+                    "side pre-rotation reslice, then ICP transform and isotropic output spacing in one shared VTK reslice"
+                ),
+                "image_interpolation": "cubic",
+                "label_interpolation": "nearest-neighbor",
+                "mask_smoothing": {
+                    "operation": "binary close/open after ICP resampling",
+                    "condition": "enabled only when any input spacing dimension exceeds threshold_mm",
+                    "threshold_mm": option_float(
+                        generator_argv,
+                        "--mask_smoothing_spacing_threshold",
+                        DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+                    ),
+                    "applies_to": [
+                        "whole-femur mask",
+                        "derived cortical binary mask when compartment_mask is supplied",
+                    ],
+                },
+                "density_preprocessing": {
+                    "connectivity_filter": True,
+                    "bmd_preprocess_threshold": -31,
+                    "density_binning": {
+                        "n_bins": 128,
+                        "background_material_id": 0,
+                        "trabecular_material_ids": [1, 128],
+                        "cortical_material_ids": [129, 256] if compartment_mask is not None else None,
+                    },
+                },
+            },
+            "segmentation": {
+                "input_mask": str(args.bone_mask),
+                "whole_bone_mask_threshold": option_int(generator_argv, "--mask_threshold", 1),
+                "compartment_mask": compartment_mask,
+                "compartment_labels": None
+                if compartment_mask is None
+                else {
+                    "cortical": option_int(generator_argv, "--cortical_label", 1),
+                    "trabecular": option_int(generator_argv, "--trabecular_label", 2),
+                },
+            },
+            "shaft_standardization": {
+                "cut_mode": option_value(generator_argv, "--femur_cut_mode", DEFAULT_FEMUR_CUT_MODE),
+                "fixed_length_mm": option_float(generator_argv, "--femur_shaft_length", 100.0),
+                "lesser_trochanter_distal_offset_mm": option_float(
+                    generator_argv,
+                    "--femur_lesser_trochanter_distal_offset",
+                    DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
+                ),
+                "cut_plane": "flat model-grid z plane",
+                "incomplete_fov_behavior": "fail model generation",
+            },
+            "materials": {
+                "builder": "ogo.fea.materials.build_femur_material_table",
+                "convention": "region material IDs; 0 background, 1..128 trabecular, optional 129..256 cortical, PMMA explicit",
+                "include_cortical_region": compartment_mask is not None,
+                "poissons_ratio": option_float(generator_argv, "--poissons_ratio", 0.3),
+                "trabecular": {
+                    "elastic_E_func": option_value(generator_argv, "--elastic_E_func", "default_E"),
+                    "yield_comp_func": option_value(generator_argv, "--yield_comp_func"),
+                    "yield_tens_func": option_value(generator_argv, "--yield_tens_func"),
+                    "material_id_range": [1, 128],
+                },
+                "cortical": None
+                if compartment_mask is None
+                else {
+                    "elastic_E_func": option_value(
+                        generator_argv,
+                        "--cort_elastic_E_func",
+                        option_value(generator_argv, "--elastic_E_func", "default_E"),
+                    ),
+                    "yield_comp_func": option_value(
+                        generator_argv,
+                        "--cort_yield_comp_func",
+                        option_value(generator_argv, "--yield_comp_func"),
+                    ),
+                    "yield_tens_func": option_value(
+                        generator_argv,
+                        "--cort_yield_tens_func",
+                        option_value(generator_argv, "--yield_tens_func"),
+                    ),
+                    "poissons_ratio": option_float(
+                        generator_argv,
+                        "--cort_poissons_ratio",
+                        option_float(generator_argv, "--poissons_ratio", 0.3),
+                    ),
+                    "material_id_range": [129, 256],
+                },
+                "pmma": {
+                    "material_id": option_int(generator_argv, "--pmma_mat_id", 5000),
+                    "elastic_E_MPa": option_float(generator_argv, "--pmma_E", 2500),
+                    "poissons_ratio": option_float(generator_argv, "--pmma_v", 0.3),
+                    "yield_compression_MPa": option_optional_float(generator_argv, "--pmma_yield_compression"),
+                    "yield_tension_MPa": option_optional_float(generator_argv, "--pmma_yield_tension"),
+                },
+            },
+            "boundary_conditions": {
+                "fixture_geometry": {
+                    "femoral_head": {
+                        "node_set": "Femoral_Head_PMMA_Nodes",
+                        "shape": "round fixture cap",
+                        "pmma_thickness_mm": option_float(generator_argv, "--pmma_thick", DEFAULT_PMMA_THICKNESS_MM),
+                        "pmma_intrusion_mm": option_float(generator_argv, "--pmma_intrusion", DEFAULT_PMMA_INTRUSION_MM),
+                        "width_extension_mm": 10.0,
+                        "long_axis_extension_mm": 80.0,
+                    },
+                    "greater_trochanter": {
+                        "node_set": "Greater_Trochanter_PMMA_Nodes",
+                        "shape": "box fixture cap",
+                        "pmma_thickness_mm": option_float(generator_argv, "--pmma_thick", DEFAULT_PMMA_THICKNESS_MM),
+                        "pmma_intrusion_mm": option_float(generator_argv, "--pmma_intrusion", DEFAULT_PMMA_INTRUSION_MM),
+                    },
+                    "distal_shaft": {
+                        "node_set": "Distal_Femur_Nodes",
+                        "support_surface": "flat distal shaft cut face",
+                    },
+                },
+                "constraints": [
+                    {
+                        "name": "top_displacement",
+                        "node_set": "Femoral_Head_PMMA_Nodes",
+                        "axis": "y",
+                        **femur_displacement,
+                        "meaning": "femoral head PMMA cap prescribed toward greater trochanter",
+                    },
+                    {
+                        "name": "bottom_fixed_y_PMMA",
+                        "node_set": "Greater_Trochanter_PMMA_Nodes",
+                        "axis": "y",
+                        "value_mm": 0.0,
+                        "meaning": "greater trochanter PMMA cap constrained in loading direction",
+                    },
+                    {
+                        "name": "bottom_fixed_x",
+                        "node_set": "Distal_Femur_Nodes",
+                        "axis": "x",
+                        "value_mm": 0.0,
+                        "meaning": "distal shaft rigid-body constraint",
+                    },
+                    {
+                        "name": "bottom_fixed_z",
+                        "node_set": "Distal_Femur_Nodes",
+                        "axis": "z",
+                        "value_mm": 0.0,
+                        "meaning": "distal shaft rigid-body constraint",
+                    },
+                ],
+            },
+        })
+
+    output_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    print(f"Wrote {output_path}")
+    return output_path
+
+
+def audit_generated_model(model_path: Path, model_type: str, args: argparse.Namespace) -> Optional[dict]:
+    """Return BC audit summary and optionally write a debug PNG."""
+    if args.skip_bc_audit or args.dry_run:
+        return None
+    if not model_path.exists():
+        return None
+
+    from ogo.cli.CheckFEModelBC import audit_model
+
+    audit_kind = "spine-compression" if model_type == "spine" else "femur-sideways"
+    result = audit_model(
+        model_path,
+        model=audit_kind,
+        flat_tolerance=args.bc_audit_flat_tolerance,
+        write_json=False,
+        write_csv_file=False,
+        write_plot=args.debug,
+    )
+    if result["png_path"] is not None:
+        print(f"Wrote {result['png_path']}")
+    if not result["passed"]:
+        failed = [check["name"] for check in result["checks"] if not check["passed"]]
+        raise RuntimeError("BC audit failed for {}: {}".format(model_path, "; ".join(failed)))
+    return result["summary"]
+
+
 def _call_cli(main_func: Callable[[], None], program: str, argv: Sequence[str]) -> None:
     old_argv = sys.argv
     try:
         sys.argv = [program, *argv]
-        main_func()
+        try:
+            main_func()
+        except SystemExit as exc:
+            if exc.code not in (None, 0):
+                raise
     finally:
         sys.argv = old_argv
 
 
 def run_spine_command(argv: Sequence[str]) -> None:
-    from ogo.cli.ref.SpineCompressionFe import main as spine_compression_main
+    from ogo.fea.spine_compression import main as spine_compression_main
 
     _call_cli(spine_compression_main, "OgoSpineCompressionFe", argv)
 
 
 def run_femur_command(argv: Sequence[str]) -> None:
-    from ogo.cli.ref.SidewaysFallFe import main as sideways_fall_main
+    from ogo.fea.sideways_fall import main as sideways_fall_main
 
     _call_cli(sideways_fall_main, "OgoSidewaysFallFe", argv)
 
@@ -292,8 +806,11 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--target_displacement",
         type=float,
-        default=0.2,
-        help="Standard displacement threshold used for the rescaled load endpoint.",
+        default=None,
+        help=(
+            "Profile reporting endpoint as percent strain. Defaults to 2.0 for spine "
+            "and 4.0 for femur; converted to mm from the generated model geometry."
+        ),
     )
     parser.add_argument(
         "--require_pistoia",
@@ -305,11 +822,27 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Skip n88copymodel --compress after solving.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write debug sidecars such as BC audit PNGs and legacy spine QC quick looks.",
+    )
+    parser.add_argument(
+        "--skip_bc_audit",
+        action="store_true",
+        help="Skip automatic boundary-condition audit files after model generation.",
+    )
+    parser.add_argument(
+        "--bc_audit_flat_tolerance",
+        type=float,
+        default=1.0e-4,
+        help="Flat-plane tolerance for automatic boundary-condition audit checks.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ogoGenerateFEM",
+        prog="ogoFEA",
         description=(
             "Generate N88 finite-element models for spine vertebrae and hip femurs. "
             "Unknown options are forwarded to the selected lower-level FE generator."
@@ -361,22 +894,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_legacy(argv: Sequence[str]) -> None:
-    """Keep the historical ``--model_type`` dispatch working."""
-    parser = argparse.ArgumentParser(prog="ogoGenerateFEM")
-    parser.add_argument("--model_type", choices=["vertebra", "femur"], required=True)
-    args, remaining = parser.parse_known_args(argv)
-    if args.model_type == "vertebra":
-        run_spine_command(remaining)
-    else:
-        run_femur_command(remaining)
-
-
 def main(argv: Optional[Sequence[str]] = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if "--model_type" in argv:
-        _run_legacy(argv)
-        return
 
     parser = build_parser()
     args, extra_args = parser.parse_known_args(argv)
@@ -385,7 +904,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         parser.error("model type is required: choose spine or hip")
 
     if args.model_type == "spine":
-        spine_extra_args = spine_preset_args(args.preset) + list(extra_args)
+        spine_extra_args = spine_preset_args(args.preset) + list(extra_args) + [
+            "--quality_control",
+            str(bool(args.debug)),
+        ]
         for target in args.vertebra:
             cmd = build_spine_command(
                 calibrated_image=args.calibrated_image,
@@ -398,6 +920,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 print_dry_run("OgoSpineCompressionFe", cmd)
             else:
                 run_spine_command(cmd)
+                model_path = expected_spine_model_path(args.calibrated_image, args.output_path, target)
+                bc_audit_summary = audit_generated_model(
+                    model_path,
+                    "spine",
+                    args,
+                )
+                write_modeling_metadata(model_path, "spine", cmd, args, bc_audit_summary)
             if not args.no_solve:
                 solve_model(
                     expected_spine_model_path(args.calibrated_image, args.output_path, target),
@@ -420,6 +949,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 print_dry_run("OgoSidewaysFallFe", cmd)
             else:
                 run_femur_command(cmd)
+                model_path = expected_femur_model_path(args.calibrated_image, args.output_path, side)
+                bc_audit_summary = audit_generated_model(
+                    model_path,
+                    "hip",
+                    args,
+                )
+                write_modeling_metadata(model_path, "hip", cmd, args, bc_audit_summary)
             if not args.no_solve:
                 solve_model(
                     expected_femur_model_path(args.calibrated_image, args.output_path, side),

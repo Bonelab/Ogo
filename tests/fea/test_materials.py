@@ -1,6 +1,6 @@
 import pytest
 
-from ogo.cli.ref import material_laws
+from ogo.fea import material_laws
 from ogo.fea import materials
 
 
@@ -49,3 +49,30 @@ def test_build_spine_material_table_requires_vtkbone_when_exercised():
 
     assert table.GetNumberOfMaterials() == 5
 
+
+def test_build_femur_material_table_can_use_single_trabecular_region():
+    pytest.importorskip("vtkbone")
+
+    table = materials.build_femur_material_table(
+        [100.0, 200.0],
+        n_bins=2,
+        pmma_mat_id=300,
+        elastic_E_func="kopperdahl_trab_E",
+    )
+
+    assert table.GetNumberOfMaterials() == 3
+
+
+def test_build_femur_material_table_can_use_trab_cort_regions():
+    pytest.importorskip("vtkbone")
+
+    table = materials.build_femur_material_table(
+        [100.0, 200.0, 100.0, 200.0],
+        n_bins=2,
+        pmma_mat_id=300,
+        elastic_E_func="kopperdahl_trab_E",
+        cort_elastic_E_func="bayraktar_cort_E",
+        include_cortical=True,
+    )
+
+    assert table.GetNumberOfMaterials() == 5

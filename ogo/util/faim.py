@@ -8,6 +8,9 @@ import subprocess
 from typing import Dict, Iterable, List, Optional, Sequence
 
 
+_AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
+
+
 def _optional_path(value):
     if value is None:
         return None
@@ -182,6 +185,167 @@ def parse_pistoia_text(path):
     return out
 
 
+def _read_n88_node_coordinates_and_sets(model_file):
+    """Read node coordinates and named node sets from an n88model file."""
+    try:
+        from netCDF4 import Dataset
+    except ImportError as exc:
+        raise RuntimeError(
+            "netCDF4 is required to convert profile target displacements from percent to mm."
+        ) from exc
+
+    with Dataset(str(model_file), "r") as root:
+        coords = root.groups["Parts"].groups["Part1"].variables["NodeCoordinates"][:]
+        node_sets = {}
+        sets_group = root.groups.get("Sets")
+        if sets_group is not None and "NodeSets" in sets_group.groups:
+            node_sets_group = sets_group.groups["NodeSets"]
+            node_sets.update(
+                {
+                    name: group.variables["NodeNumber"][:]
+                    for name, group in node_sets_group.groups.items()
+                    if "NodeNumber" in group.variables
+                }
+            )
+        constraints_group = root.groups.get("Constraints")
+        if constraints_group is not None:
+            node_sets.update(
+                {
+                    name: group.variables["NodeNumber"][:]
+                    for name, group in constraints_group.groups.items()
+                    if "NodeNumber" in group.variables
+                }
+            )
+    return coords, node_sets
+
+
+def _first_available_node_set_centroid(coords, node_sets, set_names):
+    """Return the centroid for the first available node-set or constraint name."""
+    for set_name in set_names:
+        if set_name in node_sets:
+            return _node_set_centroid(coords, node_sets, set_name)
+    raise ValueError(
+        "None of the expected node sets were found in the n88model: {}".format(
+            ", ".join(set_names)
+        )
+    )
+
+
+def _node_set_centroid(coords, node_sets, set_name):
+    if set_name not in node_sets:
+        raise ValueError(f"Node set '{set_name}' was not found in the n88model.")
+
+    node_numbers = [int(node_number) for node_number in node_sets[set_name]]
+    if not node_numbers:
+        raise ValueError(f"Node set '{set_name}' is empty.")
+
+    totals = [0.0, 0.0, 0.0]
+    for node_number in node_numbers:
+        coord = coords[node_number - 1]
+        for axis_index in range(3):
+            totals[axis_index] += float(coord[axis_index])
+    return [total / len(node_numbers) for total in totals]
+
+
+def infer_profile_characteristic_length_mm(model_file, report_profile, failure_axis):
+    """Infer the physical length used to convert percent strain endpoints to mm."""
+    profile = str(report_profile or "generic").strip().lower()
+    axis_index = _AXIS_INDEX[str(failure_axis).lower()]
+    coords, node_sets = _read_n88_node_coordinates_and_sets(model_file)
+
+    if profile == "spine":
+        first = _first_available_node_set_centroid(
+            coords, node_sets, ["body_top", "top_displacement", "convergence_set"]
+        )
+        second = _first_available_node_set_centroid(
+            coords, node_sets, ["body_bottom", "bottom_fixed_z"]
+        )
+    elif profile == "femur":
+        from ogo.fea.femur import FEMORAL_HEAD_NODE_SET, GREATER_TROCHANTER_NODE_SET
+
+        first = _first_available_node_set_centroid(
+            coords, node_sets, [FEMORAL_HEAD_NODE_SET, "top_displacement", "convergence_set"]
+        )
+        second = _first_available_node_set_centroid(
+            coords, node_sets, [GREATER_TROCHANTER_NODE_SET, "bottom_fixed_y_PMMA"]
+        )
+    else:
+        return ""
+
+    length = abs(first[axis_index] - second[axis_index])
+    if length <= 0:
+        raise ValueError(
+            f"Could not infer a positive {profile} characteristic length along {failure_axis}."
+        )
+    return length
+
+
+def _percent_to_mm(percent, characteristic_length_mm):
+    return abs(float(percent)) * float(characteristic_length_mm) / 100.0
+
+
+def _first_available_constraint_group(root, names):
+    constraints = root.groups.get("Constraints")
+    if constraints is None:
+        return None
+    for name in names:
+        group = constraints.groups.get(name)
+        if group is not None and "Value" in group.variables:
+            return group
+    return None
+
+
+def read_prescribed_displacement(model_file, report_profile="generic"):
+    """Read the active prescribed displacement from the model constraints."""
+    try:
+        from netCDF4 import Dataset
+    except ImportError as exc:
+        raise RuntimeError("netCDF4 is required to read n88model constraints.") from exc
+
+    profile = str(report_profile or "generic").strip().lower()
+    names = ["top_displacement", "convergence_set"]
+    with Dataset(str(model_file), "r") as root:
+        group = _first_available_constraint_group(root, names)
+        if group is None:
+            return ""
+        values = group.variables["Value"][:]
+        return float(values[0]) if len(values) else ""
+
+
+def set_prescribed_displacement_from_percent(
+    model_file,
+    *,
+    report_profile,
+    failure_axis,
+    target_displacement_percent,
+    displacement_sign=-1.0,
+):
+    """Set model displacement constraints to a profile percent endpoint."""
+    try:
+        from netCDF4 import Dataset
+    except ImportError as exc:
+        raise RuntimeError("netCDF4 is required to update n88model constraints.") from exc
+
+    characteristic_length = infer_profile_characteristic_length_mm(
+        model_file, report_profile, failure_axis
+    )
+    target_displacement_mm = _percent_to_mm(target_displacement_percent, characteristic_length)
+    signed_displacement = float(displacement_sign) * target_displacement_mm
+
+    with Dataset(str(model_file), "r+") as root:
+        for name in ("top_displacement", "convergence_set"):
+            group = _first_available_constraint_group(root, [name])
+            if group is not None:
+                values = group.variables["Value"]
+                values[:] = signed_displacement
+
+    return {
+        "characteristic_length_mm": characteristic_length,
+        "target_displacement_mm": target_displacement_mm,
+        "applied_displacement_mm": signed_displacement,
+    }
+
+
 def write_results_csv(
     *,
     output_file,
@@ -195,9 +359,10 @@ def write_results_csv(
     failure_axis,
     applied_displacement=None,
     target_displacement=0.2,
+    report_profile="generic",
     warnings=None,
 ):
-    """Write a compact, user-facing CSV with loads, stiffness, and Pistoia values."""
+    """Write a compact, user-facing CSV with loads and stiffness."""
     pistoia_meta = parse_pistoia_text(pistoia_file)
     loads = _read_single_row_csv(loads_csv)
     pistoia = _read_single_row_csv(pistoia_csv)
@@ -215,43 +380,84 @@ def write_results_csv(
     stiffness = _safe_float(
         pistoia.get(stiffness_var) or pistoia_meta.get(stiffness_key)
     )
+    pistoia_failure_load_magnitude = (
+        abs(float(pistoia_failure_load)) if pistoia_failure_load != "" else ""
+    )
 
-    # The benchmark endpoint is reported at 0.2. If the model was solved at a
-    # different prescribed displacement, scale the linear reaction force back to
-    # that standard point.
+    # If the linear model was solved at a different prescribed displacement,
+    # scale the reaction force to the requested reporting endpoint.
+    profile = str(report_profile or "generic").strip().lower()
+    characteristic_length = ""
+    target_displacement_mm = ""
     rescale_factor = ""
     load_at_target = ""
+    computed_stiffness = ""
     try:
         applied = abs(float(applied_displacement))
         target = abs(float(target_displacement))
-        if applied > 0 and reaction_force != "":
-            rescale_factor = target / applied
-            load_at_target = abs(float(reaction_force)) * rescale_factor
     except (TypeError, ValueError):
-        pass
+        applied = ""
+        target = ""
 
-    row = {
+    if applied != "" and target != "":
+        if profile in ("femur", "spine"):
+            characteristic_length = infer_profile_characteristic_length_mm(
+                model_file, profile, failure_axis
+            )
+            target_displacement_mm = _percent_to_mm(target, characteristic_length)
+        else:
+            target_displacement_mm = target
+        if applied > 0 and reaction_force != "":
+            rescale_factor = target_displacement_mm / applied
+            load_at_target = abs(float(reaction_force)) * rescale_factor
+            computed_stiffness = abs(float(reaction_force)) / applied
+
+    common = {
         "model_file": str(model_file),
         "analysis_file": str(analysis_file),
-        "pistoia_file": str(pistoia_file),
-        "loads_csv": str(loads_csv),
-        "pistoia_csv": str(pistoia_csv),
         "analysis_var": analysis_var,
-        "pistoia_failure_var": failure_var,
-        "pistoia_stiffness_var": stiffness_var,
         "applied_displacement": applied_displacement if applied_displacement is not None else "",
-        "target_displacement_percent": target_displacement,
-        "rescale_factor_to_target": rescale_factor,
-        "load_at_0p2_percent_N": load_at_target,
-        "load_at_0p2_percent_kN": load_at_target / 1000.0 if load_at_target != "" else "",
         "reaction_force_N": reaction_force,
-        "pistoia_failure_load_N": pistoia_failure_load,
-        "stiffness_N_per_mm": stiffness,
-        "critical_volume_pct": pistoia_meta.get("critical_volume_pct", ""),
-        "critical_ees": pistoia_meta.get("critical_ees", ""),
-        "ees_at_crit_vol": pistoia_meta.get("ees_at_crit_vol", ""),
-        "warnings": " | ".join(warnings or []),
+        "stiffness_N_per_mm": computed_stiffness if computed_stiffness != "" else stiffness,
     }
+    if profile == "femur":
+        row = {
+            "model_file": common["model_file"],
+            "analysis_file": common["analysis_file"],
+            "analysis_var": common["analysis_var"],
+            "applied_displacement": common["applied_displacement"],
+            "reaction_force_N": common["reaction_force_N"],
+            "stiffness_N_per_mm": common["stiffness_N_per_mm"],
+            "characteristic_length_mm": characteristic_length,
+        }
+    elif profile == "spine":
+        row = {
+            "model_file": common["model_file"],
+            "analysis_file": common["analysis_file"],
+            "analysis_var": common["analysis_var"],
+            "applied_displacement": common["applied_displacement"],
+            "reaction_force_N": common["reaction_force_N"],
+            "stiffness_N_per_mm": common["stiffness_N_per_mm"],
+            "characteristic_length_mm": characteristic_length,
+        }
+    else:
+        row = {
+            **common,
+            "loads_csv": str(loads_csv),
+            "pistoia_file": str(pistoia_file),
+            "pistoia_csv": str(pistoia_csv),
+            "pistoia_failure_var": failure_var,
+            "pistoia_stiffness_var": stiffness_var,
+            "target_displacement_percent": target_displacement,
+            "rescale_factor_to_target": rescale_factor,
+            "load_at_target_displacement_N": load_at_target,
+            "load_at_target_displacement_kN": load_at_target / 1000.0 if load_at_target != "" else "",
+            "pistoia_failure_load_N": pistoia_failure_load,
+            "critical_volume_pct": pistoia_meta.get("critical_volume_pct", ""),
+            "critical_ees": pistoia_meta.get("critical_ees", ""),
+            "ees_at_crit_vol": pistoia_meta.get("ees_at_crit_vol", ""),
+            "warnings": " | ".join(warnings or []),
+        }
 
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -285,8 +491,11 @@ def run_faim_pipeline(
     critical_volume=2.0,
     critical_strain=0.007,
     exclude=5000,
+    run_pistoia=True,
     applied_displacement=None,
     target_displacement=0.2,
+    report_profile="generic",
+    solve_displacement_percent=None,
     compress=True,
     require_pistoia=False,
     dry_run=False,
@@ -360,6 +569,36 @@ def run_faim_pipeline(
         check=False,
     )
 
+    if solve_displacement_percent is not None and not dry_run:
+        if "Name :" in modelinfo_text:
+            warnings.append(
+                "Existing solution found; prescribed displacement was not updated before solve."
+            )
+            current_displacement = read_prescribed_displacement(model_file, report_profile)
+            if current_displacement != "":
+                applied_displacement = current_displacement
+        else:
+            current_displacement = read_prescribed_displacement(model_file, report_profile)
+            try:
+                sign_source = (
+                    current_displacement
+                    if current_displacement != ""
+                    else applied_displacement
+                    if applied_displacement is not None
+                    else -1.0
+                )
+                displacement_sign = -1.0 if float(sign_source) < 0 else 1.0
+            except (TypeError, ValueError):
+                displacement_sign = -1.0
+            update = set_prescribed_displacement_from_percent(
+                model_file,
+                report_profile=report_profile,
+                failure_axis=failure_axis,
+                target_displacement_percent=solve_displacement_percent,
+                displacement_sign=displacement_sign,
+            )
+            applied_displacement = update["applied_displacement_mm"]
+
     if "Name :" not in modelinfo_text:
         run_command(
             [solver, "--engine=mt", "--threads={}".format(int(threads)), str(model_file)],
@@ -387,29 +626,30 @@ def run_faim_pipeline(
 
     # Pistoia is useful but can fail for nonlinear or unusual models; make that
     # behavior configurable so the main solve result can still be collected.
-    try:
-        run_command(
-            [
-                pistoia,
-                str(model_file),
-                "--critical_volume",
-                str(critical_volume),
-                "--critical_strain",
-                str(critical_strain),
-                "--exclude",
-                str(exclude),
-                "--output_file",
-                str(pistoia_file),
-            ],
-            conda_env=conda_env,
-            conda_executable=conda_executable,
-            env=env,
-            dry_run=dry_run,
-        )
-    except subprocess.CalledProcessError:
-        if require_pistoia:
-            raise
-        warnings.append("Pistoia postprocessing failed.")
+    if run_pistoia:
+        try:
+            run_command(
+                [
+                    pistoia,
+                    str(model_file),
+                    "--critical_volume",
+                    str(critical_volume),
+                    "--critical_strain",
+                    str(critical_strain),
+                    "--exclude",
+                    str(exclude),
+                    "--output_file",
+                    str(pistoia_file),
+                ],
+                conda_env=conda_env,
+                conda_executable=conda_executable,
+                env=env,
+                dry_run=dry_run,
+            )
+        except subprocess.CalledProcessError:
+            if require_pistoia:
+                raise
+            warnings.append("Pistoia postprocessing failed.")
 
     # Tabulate the reaction force and Pistoia values into small CSV files.
     run_command(
@@ -420,7 +660,7 @@ def run_faim_pipeline(
         dry_run=dry_run,
     )
 
-    if pistoia_vars:
+    if run_pistoia and pistoia_vars:
         run_command(
             [
                 tabulate,
@@ -471,8 +711,15 @@ def run_faim_pipeline(
             failure_axis=failure_axis,
             applied_displacement=applied_displacement,
             target_displacement=target_displacement,
+            report_profile=report_profile,
             warnings=warnings,
         )
+        if str(report_profile or "").strip().lower() in ("spine", "femur"):
+            for intermediate_file in (loads_csv, pistoia_csv):
+                try:
+                    Path(intermediate_file).unlink()
+                except FileNotFoundError:
+                    pass
 
     return {
         "analysis_file": analysis_file,

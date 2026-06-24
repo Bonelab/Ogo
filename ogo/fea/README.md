@@ -1,0 +1,406 @@
+# Ogo FEA Workflow
+
+This directory contains the maintained model-building code used by
+`ogoFEA`. The user-facing entry point is the CLI in
+`ogo/cli/GenerateFEM.py`; the lower-level spine and femur modules in this
+directory should stay implementation details.
+
+## Inputs
+
+All FEA workflows expect a density-calibrated CT image and an aligned
+segmentation image.
+
+The calibrated image should be a scalar image in K2HPO4-equivalent density
+units, with the same image space as the segmentation. During model generation,
+the image is cropped, aligned to the model reference frame, resampled to
+isotropic spacing, thresholded at -31 mg/cc, and converted to material IDs.
+
+The segmentation depends on the model type:
+
+| Model | Required mask | Label convention |
+| --- | --- | --- |
+| Spine compression | Labelled vertebra mask | Provide the vertebral body label and posterior process label for each target as `LEVEL:BODY_LABEL:PROCESS_LABEL`. |
+| Hip sideways fall | Whole-femur mask | Nonzero voxels are the femur by default. The wrapper chooses left/right from `--side`. |
+| Hip with trab/cort compartments | Whole-femur mask plus `--compartment_mask` | Compartment mask defaults are cortical `1`, trabecular `2`; override with `--cortical_label` and `--trabecular_label` if needed. |
+
+The spine mask must contain both the body and posterior process labels. The
+femur workflow currently requires a side-specific run because alignment uses
+left and right reference models.
+
+## Basic Commands
+
+Generate and solve one L1 model:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --output_path derivatives/fea
+```
+
+Generate L1 and L2 in one command:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --vertebra L2:4:5 \
+  --output_path derivatives/fea
+```
+
+Generate only the model files, without running FAIM:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --output_path derivatives/fea \
+  --no-solve
+```
+
+Generate the left femur:
+
+```bash
+ogoFEA hip \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-leftFemur_mask.nii.gz \
+  --side left \
+  --output_path derivatives/fea
+```
+
+Generate both femurs from a mask containing both sides:
+
+```bash
+ogoFEA hip \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-femur_mask.nii.gz \
+  --side both \
+  --output_path derivatives/fea
+```
+
+Generate a femur model with an explicit trabecular/cortical compartment mask:
+
+```bash
+ogoFEA hip \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-leftFemur_mask.nii.gz \
+  --side left \
+  --compartment_mask sub-001_desc-leftFemur_compartments.nii.gz \
+  --output_path derivatives/fea
+```
+
+Use `--dry-run` to print the lower-level command without generating files.
+
+## Solver Settings
+
+By default, `ogoFEA` generates each `.n88model`, audits the boundary
+conditions, writes a `_modeling.json` record, then runs the FAIM/N88 solve and
+postprocessing.
+
+Control the FAIM thread count with `--threads`:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --threads 8
+```
+
+This sets the FAIM solver command to use the multithreaded engine with
+`--threads=8`. It is a per-solve thread count, not a request to run multiple
+models in parallel.
+
+If Ogo and FAIM/N88 are installed in separate conda environments, activate the
+Ogo environment first and pass the FAIM environment with `--faim_env`. Ogo
+generates the `.n88model` in the current Python process, then launches each
+FAIM/N88 subprocess through `conda run -n ENV_NAME`.
+
+For example, if Ogo is installed in `ogo-dev` and FAIM/N88 is installed in
+`ogoloco-n88`:
+
+```bash
+conda activate ogo-dev
+
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --faim_env ogoloco-n88 \
+  --threads 8
+```
+
+The same pattern works for femur:
+
+```bash
+ogoFEA hip \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-leftFemur_mask.nii.gz \
+  --side left \
+  --faim_env ogoloco-n88 \
+  --threads 8
+```
+
+Use `--conda_executable` if `conda` is not on `PATH` or if a specific conda
+install should be used. For example:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --faim_env ogoloco-n88 \
+  --conda_executable /path/to/conda
+```
+
+Other available solver-location options are `--faim_bin_dir`,
+`--faim_install_root`, `--faim_license_dir`, and explicit command overrides
+such as `--faim_command`, `--n88postfaim_command`, and `--n88tabulate_command`.
+
+FAIM/N88 does not interpret prescribed displacement as percent strain in these
+models. The `.n88model` stores the applied displacement in millimeters. For
+spine, Ogo converts Crawford `0.68%` strain to millimeters from the generated
+vertebral height before solving, updates the model displacement, and reports
+that solved load directly. Femur reporting still converts the `4%` endpoint
+from generated model geometry for `_results.csv`.
+
+## Outputs
+
+The default output directory is the calibrated image directory. Use
+`--output_path` for a dedicated derivatives folder.
+
+Expected default outputs are:
+
+| Output | Meaning |
+| --- | --- |
+| `.n88model` | The generated finite-element model. |
+| `_modeling.json` | Traceable record of inputs, alignment, image processing, material laws, boundary conditions, audit summary, and reporting settings. |
+| `_results.csv` | One-row summary written after solve with stiffness, reaction force, and profile-specific force endpoints. |
+| Solve/postprocessing files | Written when `--no-solve` is not used. These come from FAIM/N88 postprocessing. |
+
+Use `--debug` to write visual sidecars such as the boundary-condition audit
+PNG. These images are intended for manual model inspection and are not part of
+the minimal output contract.
+
+## Results CSV
+
+After a successful solve, `ogoFEA` writes one compact `_results.csv` next to the
+model. This is the file intended for downstream analysis tables.
+
+Maintained spine and femur models write the same columns:
+
+| Field | Meaning |
+| --- | --- |
+| `model_file` | Source `.n88model`. |
+| `analysis_file` | FAIM/N88 postprocessing text file used to tabulate reaction force. |
+| `analysis_var` | N88 reaction-force variable tabulated from `analysis_file`. |
+| `applied_displacement` | Prescribed displacement in the solved `.n88model`. |
+| `reaction_force_N` | Reaction force from the solved model at the prescribed displacement. |
+| `stiffness_N_per_mm` | Reaction force divided by applied displacement when computable. |
+| `characteristic_length_mm` | Spine: distance between `body_top` and `body_bottom` centroids along the loading axis. Femur: distance between femoral-head and greater-trochanter PMMA node-set centroids along the loading axis. |
+
+Spine models are solved directly at `0.68%` strain, following the vertebral
+strength endpoint reported by Crawford et al. (2003). Femur models are solved
+directly at `4%` displacement. The exact percent endpoint and converted
+millimeter displacement are recorded in `_modeling.json`; the CSV stays compact
+for downstream statistics.
+
+## Spine Model
+
+The spine workflow builds one compression model per `--vertebra` target:
+
+1. Threshold the labelled mask into vertebral body and posterior process.
+2. Crop the image and masks to the vertebra.
+3. Align the body to the bundled vertebral-body reference using scaled ICP.
+4. Apply transform and isotropic resampling through the shared VTK reslice
+   helper. The default output spacing is `1.0 x 1.0 x 1.0 mm`.
+5. Smooth body/process masks with one binary close/open pass only when at
+   least one input spacing dimension is coarser than 2 mm.
+6. Generate superior and inferior PMMA caps fitted to the body surface.
+7. Convert density to material IDs and construct the N88 model.
+8. Apply axial compression boundary conditions.
+
+Default spine boundary conditions:
+
+| Region | Node set | Constraint |
+| --- | --- | --- |
+| Superior PMMA cap | `body_top` | Prescribed displacement in the compression direction. |
+| Inferior PMMA cap | `body_bottom` | Fixed in the compression direction. |
+
+The default high-level spine preset is `benchmark-linear`. It applies the
+spineFE benchmark linear material settings for model construction, then
+`ogoFEA` updates the generated model to solve at Crawford `0.68%` strain.
+The `0.68%` endpoint follows Crawford RP, Cann CE, Keaveny TM. Finite element
+models predict in vitro vertebral body compressive strength better than
+quantitative computed tomography. Bone. 2003;33(4):744-50.
+doi:10.1016/s8756-3282(03)00210-2.
+
+Available spine presets:
+
+| Preset | Use |
+| --- | --- |
+| `benchmark-linear` | Default linear spineFE benchmark-style run. |
+| `benchmark-nonlinear` | Nonlinear material/yield settings for benchmark-style runs. |
+| `none` | Pass only explicit lower-level options. |
+
+## Femur Model
+
+The femur workflow builds one sideways-fall model per side:
+
+1. Read the calibrated image and whole-femur mask.
+2. Pre-rotate the side to a stable starting orientation.
+3. ICP-align to the bundled left or right femur reference.
+4. Apply transform and isotropic resampling through the shared VTK reslice
+   helper. The default output spacing is `1.0 x 1.0 x 1.0 mm`.
+5. Smooth the transformed femur mask with one binary close/open pass only when
+   at least one input spacing dimension is coarser than 2 mm. If a compartment
+   mask is supplied, the derived cortical binary mask follows the same rule.
+6. Standardize the distal shaft with a flat model-grid cut. The default cut
+   mode detects the lesser trochanter and keeps `50 mm` distal to it. If the
+   required distal field of view is missing, model generation fails.
+7. Generate PMMA fixtures for the femoral head and greater trochanter.
+8. Convert density to material IDs and construct the N88 model.
+9. Apply sideways-fall boundary conditions.
+
+Default femur boundary conditions:
+
+| Region | Node set | Constraint |
+| --- | --- | --- |
+| Femoral head PMMA | `Femoral_Head_PMMA_Nodes` | Prescribed displacement toward the greater trochanter. |
+| Greater trochanter PMMA | `Greater_Trochanter_PMMA_Nodes` | Constrained in the loading direction. |
+| Distal shaft cut face | `Distal_Femur_Nodes` | Constrained to remove rigid-body motion. |
+
+Femur reporting defaults to stiffness and force at `4%` displacement. Pistoia
+postprocessing is not run for femur models by the high-level wrapper.
+
+## Materials
+
+Spine and femur use the same shared material-table builder in
+`ogo.fea.materials`.
+
+Material ID convention:
+
+| Material | IDs |
+| --- | --- |
+| Background | `0` |
+| Trabecular bone | `1..128` |
+| Cortical bone | `129..256` when a cortical region is present |
+| PMMA fixtures/caps | Default `5000` |
+
+The default material law is `default_E`, defined in `ogo.fea.material_laws`:
+
+```text
+E = 10500 * rho^2.29 MPa
+```
+
+where `rho` is density in g/cc. Poisson's ratio defaults to `0.3` for bone.
+PMMA defaults are `E = 2500 MPa`, Poisson's ratio `0.3`.
+
+The default spine preset overrides the elastic law to `kopperdahl_trab_E` for
+both trabecular and cortical regions. The simple femur path uses `default_E`
+unless a material-law override is supplied. If a femur compartment mask is
+provided, cortical and trabecular regions use the same law unless cortical
+overrides are supplied.
+
+### Kopperdahl Spine Presets
+
+The spine benchmark presets use the Kopperdahl trabecular density-modulus law:
+
+```text
+E = 2980 * rho^1.05 MPa
+```
+
+where `rho` is density in g/cc. In code this is
+`ogo.fea.material_laws.kopperdahl_trab_E`.
+
+The `benchmark-linear` preset uses this elastic law only. It does not assign a
+bone yield criterion, so the solved model is linear elastic. The maintained
+spine workflow does not run or report Pistoia postprocessing.
+
+The `benchmark-nonlinear` preset additionally assigns the Kopperdahl
+compressive yield law:
+
+```text
+sigma_y,c = 37.4 * rho^1.39 MPa
+```
+
+where `rho` is density in g/cc. In code this is
+`ogo.fea.material_laws.kopperdahl_trab_yc`. The current nonlinear preset uses
+the same function for compression and tension unless the user supplies separate
+yield functions. When yield functions are present, Ogo creates
+`vtkboneMohrCoulombIsotropicMaterial` entries with the resolved tensile and
+compressive yield strengths.
+
+Material-law overrides can be passed through the high-level command because
+unknown options are forwarded to the lower-level generator:
+
+```bash
+ogoFEA hip \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-leftFemur_mask.nii.gz \
+  --side left \
+  --elastic_E_func kopperdahl_trab_E \
+  --cort_elastic_E_func kopperdahl_trab_E
+```
+
+Supported named laws are defined in `ogo.fea.material_laws`, including
+`default_E`, `kopperdahl_trab_E`, `kopperdahl_trab_yc`, `morgan_trab_E`,
+`crawford_voxel_E`, and Bayraktar-style constants.
+
+## Quality Control
+
+Every generated model is audited by `ogo/cli/CheckFEModelBC.py` unless
+`--skip_bc_audit` is used. The audit summary is embedded in `_modeling.json`.
+
+For manual inspection, run with `--debug`:
+
+```bash
+ogoFEA hip \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-leftFemur_mask.nii.gz \
+  --side left \
+  --debug \
+  --no-solve
+```
+
+This writes a boundary-condition audit PNG next to the model. For spine, debug
+mode also enables legacy quick-look output from the lower-level generator.
+
+## Common Adjustments
+
+Change output resolution:
+
+```bash
+ogoFEA spine image.nii.gz labels.nii.gz \
+  --vertebra L1:2:3 \
+  --iso_resolution 0.8
+```
+
+Change femur shaft retention:
+
+```bash
+ogoFEA hip image.nii.gz femur_mask.nii.gz \
+  --side left \
+  --femur_lesser_trochanter_distal_offset 70
+```
+
+Change PMMA dimensions:
+
+```bash
+ogoFEA hip image.nii.gz femur_mask.nii.gz \
+  --side left \
+  --pmma_thick 6 \
+  --pmma_intrusion 6
+```
+
+Run model generation only, inspect the `.n88model`, then solve later:
+
+```bash
+ogoFEA hip image.nii.gz femur_mask.nii.gz \
+  --side left \
+  --no-solve \
+  --debug
+```
