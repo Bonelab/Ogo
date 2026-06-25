@@ -113,8 +113,8 @@ def test_spine_runs_each_requested_vertebra(monkeypatch, solve_calls):
         ],
     ]
     assert solve_calls == [
-        (Path("models/density_vertebra_2_L1.n88model"), "spine", calls[0]),
-        (Path("models/density_vertebra_4_T12.n88model"), "spine", calls[1]),
+        (Path("models/density_L1.n88model"), "spine", calls[0]),
+        (Path("models/density_T12.n88model"), "spine", calls[1]),
     ]
 
 
@@ -129,8 +129,8 @@ def test_hip_defaults_to_both_sides(monkeypatch, solve_calls):
         ["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "2", "--output_path", "models"],
     ]
     assert solve_calls == [
-        (Path("models/density_LT_FEMUR_SF.n88model"), "hip", calls[0]),
-        (Path("models/density_RT_FEMUR_SF.n88model"), "hip", calls[1]),
+        (Path("models/density_LF.n88model"), "hip", calls[0]),
+        (Path("models/density_RF.n88model"), "hip", calls[1]),
     ]
 
 
@@ -141,7 +141,7 @@ def test_hip_can_run_one_side(monkeypatch, solve_calls):
     GenerateFEM.main(["hip", "density.nii.gz", "hip_mask.nii.gz", "--side", "right"])
 
     assert calls == [["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "2"]]
-    assert solve_calls == [(Path("density_RT_FEMUR_SF.n88model"), "hip", calls[0])]
+    assert solve_calls == [(Path("density_RF.n88model"), "hip", calls[0])]
 
 
 def test_dry_run_prints_commands_without_running(monkeypatch, capsys):
