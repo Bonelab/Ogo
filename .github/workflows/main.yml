@@ -51,7 +51,7 @@ jobs:
       - name: Install package
         run: |
           conda activate test
-          pip install --no-deps -e .
+          pip install -e .
       - name: Run tests
         run: |
           nosetests tests
