@@ -3,16 +3,16 @@ import pytest
 from ogo.fea import femur
 
 
-def test_side_suffix_and_rotation_match_legacy_outputs():
-    assert femur.side_suffix(1) == "_LT_FEMUR_SF"
-    assert femur.side_suffix(2) == "_RT_FEMUR_SF"
+def test_side_suffix_and_rotation_match_compact_outputs():
+    assert femur.side_suffix(1) == "LF"
+    assert femur.side_suffix(2) == "RF"
     assert femur.side_rotation(1) == 90
     assert femur.side_rotation(2) == -90
 
 
-def test_sideways_fall_output_name_preserves_legacy_pattern():
-    assert femur.sideways_fall_output_name("density.n88model", 1) == "density_LT_FEMUR_SF.n88model"
-    assert femur.sideways_fall_output_name("density.n88model", 2) == "density_RT_FEMUR_SF.n88model"
+def test_sideways_fall_output_name_uses_compact_side_suffix():
+    assert femur.sideways_fall_output_name("density.n88model", 1) == "density_LF.n88model"
+    assert femur.sideways_fall_output_name("density.n88model", 2) == "density_RF.n88model"
 
 
 def test_invalid_femur_side_is_rejected():

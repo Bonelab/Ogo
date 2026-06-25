@@ -161,18 +161,14 @@ def build_femur_command(
 def expected_spine_model_path(calibrated_image: Path, output_path: Optional[Path], target: SpineTarget) -> Path:
     """Predict the spine model path written by ``OgoSpineCompressionFe``."""
     output_dir = output_path if output_path is not None else calibrated_image.parent
-    return output_dir / "{}_vertebra_{}_{}.n88model".format(
-        remove_extension(calibrated_image),
-        target.body_label,
-        target.level,
-    )
+    return output_dir / "{}_{}.n88model".format(remove_extension(calibrated_image), target.level)
 
 
 def expected_femur_model_path(calibrated_image: Path, output_path: Optional[Path], side: str) -> Path:
     """Predict the femur model path written by ``OgoSidewaysFallFe``."""
     output_dir = output_path if output_path is not None else calibrated_image.parent
-    suffix = "_LT_FEMUR_SF" if side == "left" else "_RT_FEMUR_SF"
-    return output_dir / "{}{}.n88model".format(remove_extension(calibrated_image), suffix)
+    stem = "LF" if side == "left" else "RF"
+    return output_dir / "{}_{}.n88model".format(remove_extension(calibrated_image), stem)
 
 
 def option_value(argv: Sequence[str], option: str, default: Optional[str] = None) -> Optional[str]:

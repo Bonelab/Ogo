@@ -58,6 +58,7 @@ from ogo.fea.femur import (
     expand_xz_footprint,
     femur_z_coverage,
     flat_crop_vtk_image_below_z,
+    mirror_polydata_x,
     side_rotation,
     sideways_fall_output_name,
     standardize_femur_shaft_length,
@@ -194,7 +195,14 @@ def sidewaysFallFe(args):
     if femur_side == 1:
         ref_poly = ogo.readPolyData(left_femur_reference)
     elif femur_side == 2:
-        ref_poly = ogo.readPolyData(right_femur_reference)
+        if os.path.exists(right_femur_reference):
+            ref_poly = ogo.readPolyData(right_femur_reference)
+        else:
+            ogo.message(
+                "Right femur reference not found; mirroring left reference in x:",
+                right_femur_reference,
+            )
+            ref_poly = mirror_polydata_x(ogo.readPolyData(left_femur_reference))
     else:
         print("Error: Femur Side not defined. Terminating...")
         sys.exit()

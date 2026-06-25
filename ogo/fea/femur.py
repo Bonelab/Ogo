@@ -32,6 +32,8 @@ Default femur workflow:
    trabecular-style region. If supplied, cortical=1 and trabecular=2 by default.
 """
 
+from pathlib import Path
+
 
 LEFT_FEMUR = 1
 RIGHT_FEMUR = 2
@@ -61,11 +63,11 @@ SIDEWAYS_FALL_NODE_SETS = [
 
 
 def side_suffix(femur_side):
-    """Return the legacy output suffix for a femur side."""
+    """Return the compact output stem for a femur side."""
     if femur_side == LEFT_FEMUR:
-        return "_LT_FEMUR_SF"
+        return "LF"
     if femur_side == RIGHT_FEMUR:
-        return "_RT_FEMUR_SF"
+        return "RF"
     raise ValueError("femur_side must be 1 for left or 2 for right.")
 
 
@@ -79,11 +81,37 @@ def side_rotation(femur_side):
 
 
 def sideways_fall_output_name(output_file, femur_side):
-    """Apply the legacy left/right suffix to a sideways-fall output path."""
-    suffix = side_suffix(femur_side)
-    if str(output_file).endswith(".n88model"):
-        return str(output_file).replace(".n88model", f"{suffix}.n88model")
-    return f"{output_file}{suffix}.n88model"
+    """Return the compact side-specific sideways-fall output path."""
+    output_path = Path(output_file)
+    return str(output_path.with_name(f"{output_path.stem}_{side_suffix(femur_side)}.n88model"))
+
+
+def mirror_polydata_x(polydata):
+    """Return a left/right mirrored copy of polydata around its x-bounds center."""
+    import vtk
+
+    bounds = polydata.GetBounds()
+    center_x = (bounds[0] + bounds[1]) / 2.0
+
+    transform = vtk.vtkTransform()
+    transform.Translate(center_x, 0.0, 0.0)
+    transform.Scale(-1.0, 1.0, 1.0)
+    transform.Translate(-center_x, 0.0, 0.0)
+
+    transform_filter = vtk.vtkTransformPolyDataFilter()
+    transform_filter.SetInputData(polydata)
+    transform_filter.SetTransform(transform)
+    transform_filter.Update()
+
+    reverse = vtk.vtkReverseSense()
+    reverse.SetInputData(transform_filter.GetOutput())
+    reverse.ReverseCellsOn()
+    reverse.ReverseNormalsOn()
+    reverse.Update()
+
+    mirrored = vtk.vtkPolyData()
+    mirrored.DeepCopy(reverse.GetOutput())
+    return mirrored
 
 
 def tilted_side_support_vector(angle_degrees=-20):

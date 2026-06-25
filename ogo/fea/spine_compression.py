@@ -1167,9 +1167,9 @@ def main():
     output_dir = os.path.abspath(output_dir)
 
     if args.appendix is None:
-        output_file = os.path.join(output_dir, f"{basename}_vertebra_{args.mask_threshold}.n88model")
+        output_file = os.path.join(output_dir, f"{basename}_{args.mask_threshold}.n88model")
     else:
-        output_file = os.path.join(output_dir, f"{basename}_vertebra_{args.mask_threshold}_{args.appendix}.n88model")
+        output_file = os.path.join(output_dir, f"{basename}_{args.appendix}.n88model")
 
     ogo.message(f'N88Model File path: {output_file}')
     # Set default reference path if not provided

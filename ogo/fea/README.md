@@ -24,8 +24,8 @@ The segmentation depends on the model type:
 | Hip with trab/cort compartments | Whole-femur mask plus `--compartment_mask` | Compartment mask defaults are cortical `1`, trabecular `2`; override with `--cortical_label` and `--trabecular_label` if needed. |
 
 The spine mask must contain both the body and posterior process labels. The
-femur workflow currently requires a side-specific run because alignment uses
-left and right reference models.
+femur workflow currently requires a side-specific run because alignment uses a
+side-specific femur reference frame.
 
 ## Basic Commands
 
@@ -202,11 +202,59 @@ Maintained spine and femur models write the same columns:
 | `stiffness_N_per_mm` | Reaction force divided by applied displacement when computable. |
 | `characteristic_length_mm` | Spine: distance between `body_top` and `body_bottom` centroids along the loading axis. Femur: distance between femoral-head and greater-trochanter PMMA node-set centroids along the loading axis. |
 
-Spine models are solved directly at `0.68%` strain, following the vertebral
-strength endpoint reported by Crawford et al. (2003). Femur models are solved
-directly at `4%` displacement. The exact percent endpoint and converted
-millimeter displacement are recorded in `_modeling.json`; the CSV stays compact
-for downstream statistics.
+## Reaction Force and Displacement Endpoint
+
+The reported `reaction_force_N` is the net support reaction from the solved
+model at the prescribed displacement endpoint. For spine compression this is
+tabulated from the axial `fz_ns1` reaction force. For hip sideways fall this is
+tabulated from the lateral `fy_ns1` reaction force. The sign depends on the
+model coordinate convention, so the compact CSV reports the force magnitude
+used for stiffness and downstream comparisons.
+
+The reaction force and stiffness in `_results.csv` should be interpreted at
+that endpoint. They are the relevant summary values for the chosen model
+protocol: the force is the load carried by the model at the target normalized
+displacement, and stiffness is the secant stiffness from zero displacement to
+that same endpoint. Changing the endpoint can change both values, especially
+for nonlinear material settings, so comparisons should use the same model type,
+material law, boundary conditions, and displacement endpoint.
+
+Ogo chooses percent displacement endpoints so models of different physical
+size are compared at a similar normalized deformation:
+
+| Model | Default endpoint | Length used for conversion | Reason |
+| --- | --- | --- | --- |
+| Spine compression | `0.68%` strain | Distance between `body_top` and `body_bottom` centroids along the loading axis | Matches the vertebral strength endpoint reported by Crawford et al. (2003), and keeps the solved displacement scaled to each vertebral body height. |
+| Hip sideways fall | `4%` displacement | Distance between femoral-head and greater-trochanter PMMA node-set centroids along the loading axis | Keeps the sideways-fall load endpoint scaled to each generated femur model instead of using one fixed millimeter displacement for all femora. |
+
+FAIM/N88 stores prescribed displacement in millimeters, not percent strain.
+Before solving, `ogoFEA` converts the percent endpoint to millimeters from the
+generated model geometry and updates the `.n88model`. The exact percent
+endpoint, converted millimeter displacement, and characteristic length are
+recorded in `_modeling.json`; `_results.csv` stays compact for downstream
+statistics. `stiffness_N_per_mm` is computed as
+`reaction_force_N / applied_displacement`.
+
+## Reference Models
+
+The reference models define the common coordinate frame used before meshing and
+boundary-condition placement. They are alignment targets, not subject-specific
+geometry copied into the final model.
+
+For spine compression, the bundled vertebral-body reference is an L4 body. The
+same reference is used for all requested vertebrae. Before ICP, Ogo estimates
+principal-axis lengths for the segmented body and for the L4 reference, scales
+the reference to match the target vertebra within the configured scale limits,
+and then runs rigid ICP. This lets one L4 reference provide a stable model frame
+for other vertebral levels while still adapting to their size.
+
+For hip sideways fall, the canonical bundled reference is a left femur. Left
+femur models ICP-align directly to that reference. Right femur models use
+`RT_FEMUR_SIDEWAYS_FALL_REF.vtk` when it is present; otherwise Ogo mirrors the
+left femur reference across the x direction in memory and uses that mirrored
+surface as the right-side ICP target. The mirrored reference keeps left and
+right outputs in matching sideways-fall coordinate frames without requiring a
+separate right reference file.
 
 ## Spine Model
 
@@ -214,7 +262,7 @@ The spine workflow builds one compression model per `--vertebra` target:
 
 1. Threshold the labelled mask into vertebral body and posterior process.
 2. Crop the image and masks to the vertebra.
-3. Align the body to the bundled vertebral-body reference using scaled ICP.
+3. Align the body to the scaled L4 vertebral-body reference using ICP.
 4. Apply transform and isotropic resampling through the shared VTK reslice
    helper. The default output spacing is `1.0 x 1.0 x 1.0 mm`.
 5. Smooth body/process masks with one binary close/open pass only when at
@@ -252,7 +300,7 @@ The femur workflow builds one sideways-fall model per side:
 
 1. Read the calibrated image and whole-femur mask.
 2. Pre-rotate the side to a stable starting orientation.
-3. ICP-align to the bundled left or right femur reference.
+3. ICP-align to the left femur reference or the mirrored right reference.
 4. Apply transform and isotropic resampling through the shared VTK reslice
    helper. The default output spacing is `1.0 x 1.0 x 1.0 mm`.
 5. Smooth the transformed femur mask with one binary close/open pass only when
