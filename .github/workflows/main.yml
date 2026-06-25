@@ -39,9 +39,17 @@ jobs:
           activate-environment: test
           channels: numerics88,simpleitk,conda-forge
           auto-activate-base: false
+      - uses: actions/cache@v3
+        id: conda-env-cache
+        with:
+          path: ${{ env.CONDA }}/envs/test
+          key: conda-env-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('.github/workflows/main.yml') }}
       - name: Create and install dependencies
+        if: steps.conda-env-cache.outputs.cache-hit != 'true'
         run: |
           conda install -n test n88tools matplotlib pbr nose six simpleitk pydicom gdcm pandas
+      - name: Install package
+        run: |
           conda activate test
           pip install -e .
       - name: Run tests
