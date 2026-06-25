@@ -41,6 +41,7 @@ from ogo.fea.femur import (
     DEFAULT_CORTICAL_LABEL,
     DEFAULT_FEMUR_FE_DISPLACEMENT,
     DEFAULT_FEMUR_CUT_MODE,
+    DEFAULT_FEMUR_INPUT_MARGIN_MM,
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
     DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
     DEFAULT_FEMUR_SHAFT_LENGTH_MM,
@@ -59,6 +60,7 @@ from ogo.fea.femur import (
     femur_z_coverage,
     flat_crop_vtk_image_below_z,
     mirror_polydata_x,
+    pad_vtk_images_to_foreground_margin,
     side_rotation,
     sideways_fall_output_name,
     standardize_femur_shaft_length,
@@ -106,6 +108,8 @@ def sidewaysFallFe(args):
     femur_shaft_length = args.femur_shaft_length
     femur_cut_mode = args.femur_cut_mode
     femur_lesser_trochanter_distal_offset = args.femur_lesser_trochanter_distal_offset
+    femur_lesser_trochanter_distal_offset_percent = args.femur_lesser_trochanter_distal_offset_percent
+    femur_input_margin = args.femur_input_margin
     cortical_label = args.cortical_label
     trabecular_label = args.trabecular_label
     mask_smoothing_spacing_threshold = args.mask_smoothing_spacing_threshold
@@ -159,11 +163,17 @@ def sidewaysFallFe(args):
         ogo.message("Trabecular Label: %d" % trabecular_label)
     if femur_cut_mode == "fixed_length":
         ogo.message("Retained Proximal Femur Length [mm]: %8.4f" % femur_shaft_length)
+    elif femur_lesser_trochanter_distal_offset_percent is not None:
+        ogo.message(
+            "Lesser Trochanter Distal Cut Offset [%% greater-lesser distance]: %8.4f"
+            % femur_lesser_trochanter_distal_offset_percent
+        )
     else:
         ogo.message(
             "Lesser Trochanter Distal Cut Offset [mm]: %8.4f"
             % femur_lesser_trochanter_distal_offset
         )
+    ogo.message("Input Foreground Safety Margin [mm]: %8.4f" % femur_input_margin)
 
     ##
     # Read input image
@@ -180,6 +190,25 @@ def sidewaysFallFe(args):
     if compartment_mask is not None:
         ogo.message("Reading trabecular/cortical compartment mask...")
         compartmentData = ogo.readNii(compartment_mask)
+
+    images_to_pad = [imageData, maskThres] + ([compartmentData] if compartmentData is not None else [])
+    padded_images, padding = pad_vtk_images_to_foreground_margin(
+        images_to_pad,
+        maskThres,
+        margin_mm=femur_input_margin,
+        constants=[0] * len(images_to_pad),
+    )
+    imageData = padded_images[0]
+    maskThres = padded_images[1]
+    if compartmentData is not None:
+        compartmentData = padded_images[2]
+    if any(padding["lower"]) or any(padding["upper"]):
+        ogo.message(
+            "Padded input image extent by lower=%s upper=%s voxels for FE transform safety."
+            % (padding["lower"], padding["upper"])
+        )
+    else:
+        ogo.message("Input image already has sufficient foreground safety margin.")
 
     ##
     # Pre-rotate the image and mask for better alignment
@@ -243,6 +272,7 @@ def sidewaysFallFe(args):
             retained_length_mm=femur_shaft_length,
             cut_mode=femur_cut_mode,
             lesser_trochanter_distal_offset_mm=femur_lesser_trochanter_distal_offset,
+            lesser_trochanter_distal_offset_percent=femur_lesser_trochanter_distal_offset_percent,
         )
     except ValueError as exc:
         ogo.message(str(exc))
@@ -257,6 +287,8 @@ def sidewaysFallFe(args):
             retained_length_mm,
         )
     )
+    for warning in shaft_crop.get("warnings", []):
+        ogo.message("WARNING: Femur crop QC: %s" % warning)
     if femur_cut_mode == "lesser_trochanter":
         ogo.message(
             "Detected greater trochanter z=%8.4f; lesser trochanter z=%8.4f"
@@ -713,6 +745,10 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Set the distal femur crop. Default detects the lesser trochanter and fails if the field of view is incomplete. (default: %(default)s)")
     parser.add_argument("--femur_lesser_trochanter_distal_offset", type=float, default=DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
                         help="Cut this many mm distal to the detected lesser trochanter in lesser_trochanter mode. (default: %(default)s [mm])")
+    parser.add_argument("--femur_lesser_trochanter_distal_offset_percent", type=float, default=None,
+                        help="Optional percentage of the detected greater-to-lesser trochanter z distance to cut distal to the lesser trochanter. Overrides --femur_lesser_trochanter_distal_offset when set. (default: %(default)s)")
+    parser.add_argument("--femur_input_margin", type=float, default=DEFAULT_FEMUR_INPUT_MARGIN_MM,
+                        help="Pad the input image/mask as needed so femur foreground has this margin before pre-rotation and ICP. (default: %(default)s [mm])")
     parser.add_argument("--compartment_mask", type=str, default=None,
                         help="Optional trabecular/cortical compartment mask aligned with the bone mask. Defaults: cortical=1, trabecular=2.")
     parser.add_argument("--cortical_label", type=int, default=DEFAULT_CORTICAL_LABEL,

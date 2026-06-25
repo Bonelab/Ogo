@@ -99,8 +99,87 @@ def test_flat_femur_shaft_crop_zeroes_voxels_below_cut():
     out = vtk_to_numpy(cropped.GetPointData().GetScalars()).reshape((3, 3, 5), order="F")
 
     assert meta["cut_z"] == pytest.approx(2)
+    assert not any("femoral-head-side region" in warning for warning in meta["warnings"])
     assert not np.any(out[:, :, :2])
     assert np.all(out[:, :, 2:])
+
+
+def test_femur_crop_warns_when_cut_enters_head_side_region():
+    np = pytest.importorskip("numpy")
+    vtk = pytest.importorskip("vtk")
+    from vtk.util.numpy_support import numpy_to_vtk
+
+    data = np.zeros((40, 40, 100), dtype=np.uint8)
+    data[:, 0:8, 20:70] = 1
+    data[:, 8:25, 10:95] = 1
+    image = vtk.vtkImageData()
+    image.SetDimensions(data.shape)
+    image.SetOrigin(0, 0, 0)
+    image.SetSpacing(1, 1, 1)
+    image.GetPointData().SetScalars(numpy_to_vtk(data.ravel(order="F"), deep=True))
+
+    _, _, meta = femur.standardize_femur_shaft_length(
+        image,
+        image,
+        reference_bounds=(0, 0, 0, 0, 0, 90),
+        retained_length_mm=30,
+        cut_mode="fixed_length",
+    )
+
+    assert any("femoral-head-side region" in warning for warning in meta["warnings"])
+    assert any("unusually short" in warning for warning in meta["warnings"])
+
+
+def test_femur_crop_does_not_warn_short_length_above_threshold():
+    np = pytest.importorskip("numpy")
+    vtk = pytest.importorskip("vtk")
+    from vtk.util.numpy_support import numpy_to_vtk
+
+    data = np.zeros((40, 40, 100), dtype=np.uint8)
+    data[:, 10:30, 20:95] = 1
+    image = vtk.vtkImageData()
+    image.SetDimensions(data.shape)
+    image.SetOrigin(0, 0, 0)
+    image.SetSpacing(1, 1, 1)
+    image.GetPointData().SetScalars(numpy_to_vtk(data.ravel(order="F"), deep=True))
+
+    _, _, meta = femur.standardize_femur_shaft_length(
+        image,
+        image,
+        reference_bounds=(0, 0, 0, 0, 0, 90),
+        retained_length_mm=56,
+        cut_mode="fixed_length",
+    )
+
+    assert not any("unusually short" in warning for warning in meta["warnings"])
+
+
+def test_femur_input_padding_adds_only_missing_foreground_margin():
+    np = pytest.importorskip("numpy")
+    vtk = pytest.importorskip("vtk")
+    from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
+
+    data = np.zeros((5, 6, 7), dtype=np.uint8)
+    data[0:3, 2:5, 0:4] = 1
+    image = vtk.vtkImageData()
+    image.SetDimensions(data.shape)
+    image.SetOrigin(0, 0, 0)
+    image.SetSpacing(1, 2, 1)
+    image.GetPointData().SetScalars(numpy_to_vtk(data.ravel(order="F"), deep=True))
+
+    padded, meta = femur.pad_vtk_images_to_foreground_margin([image], image, margin_mm=2)
+    out = vtk_to_numpy(padded[0].GetPointData().GetScalars()).reshape(
+        padded[0].GetDimensions(),
+        order="F",
+    )
+    coords = np.array(np.where(out != 0))
+
+    assert meta["lower"] == (2, 0, 2)
+    assert meta["upper"] == (0, 0, 0)
+    assert tuple(coords.min(axis=1)) == (2, 2, 2)
+    assert out.shape[0] - 1 - coords.max(axis=1)[0] >= 2
+    assert out.shape[1] - 1 - coords.max(axis=1)[1] >= 1
+    assert out.shape[2] - 1 - coords.max(axis=1)[2] >= 2
 
 
 def test_lesser_trochanter_cut_uses_distal_area_peak():
@@ -133,6 +212,43 @@ def test_lesser_trochanter_cut_uses_distal_area_peak():
     assert meta["greater_trochanter_z"] == pytest.approx(76)
     assert meta["lesser_trochanter_z"] == pytest.approx(61)
     assert meta["cut_z"] == pytest.approx(61)
+
+
+def test_lesser_trochanter_cut_uses_peak_plateau_center_and_percent_offset():
+    np = pytest.importorskip("numpy")
+    vtk = pytest.importorskip("vtk")
+    from vtk.util.numpy_support import numpy_to_vtk
+
+    data = np.zeros((80, 90, 100), dtype=np.uint8)
+    x = np.arange(data.shape[0])[:, None]
+    y = np.arange(data.shape[1])[None, :]
+    for z in range(10, 96):
+        radius = 10
+        y_center = 35
+        if 54 <= z <= 62:
+            radius = 20
+        if 78 <= z <= 82:
+            y_center = 58
+            radius = 12
+        section = ((x - 40) ** 2 + (y - y_center) ** 2) <= radius**2
+        data[:, :, z] = section.astype(np.uint8)
+
+    image = vtk.vtkImageData()
+    image.SetDimensions(data.shape)
+    image.SetOrigin(0, 0, 0)
+    image.SetSpacing(1, 1, 1)
+    image.GetPointData().SetScalars(numpy_to_vtk(data.ravel(order="F"), deep=True))
+
+    meta = femur.detect_lesser_trochanter_cut_z(
+        image,
+        distal_offset_percent=50.0,
+        max_distal_to_greater_mm=45.0,
+    )
+
+    assert meta["greater_trochanter_z"] == pytest.approx(80)
+    assert meta["lesser_trochanter_z"] == pytest.approx(58)
+    assert meta["distal_offset_mm"] == pytest.approx(11)
+    assert meta["cut_z"] == pytest.approx(47)
 
 
 def test_cortical_compartment_mask_uses_default_labels():

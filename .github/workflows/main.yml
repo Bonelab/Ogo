@@ -41,9 +41,9 @@ jobs:
           auto-activate-base: false
       - name: Create and install dependencies
         run: |
-          conda install -n test n88tools matplotlib pbr nose six simpleitk pydicom gdcm pandas
+          conda install -n test n88tools matplotlib pbr pytest six simpleitk pydicom gdcm pandas
           conda activate test
           pip install -e .
       - name: Run tests
         run: |
-          nosetests tests
+          python -m pytest tests
