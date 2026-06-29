@@ -81,6 +81,18 @@ def _expanded_bbox(mask, extrusion_axis, direction, thickness):
     return tuple(bb_list), bb
 
 
+def _expanded_bbox_for_fixed_thickness_fixture(mask, extrusion_axis, thickness, intrusion):
+    """Return a crop wide enough for a fixture that may straddle the bone surface."""
+    bb = _bounding_box(mask)
+    bb_list = list(bb)
+    margin = max(int(thickness), int(intrusion), 0)
+    bb_list[extrusion_axis] = slice(
+        max(bb[extrusion_axis].start - margin, 0),
+        min(bb[extrusion_axis].stop + margin, mask.shape[extrusion_axis]),
+    )
+    return tuple(bb_list), bb
+
+
 def _contact_surface(mask, extrusion_axis, direction):
     import numpy as np
 
@@ -224,6 +236,272 @@ def _projected_footprint(surface, extrusion_axis, shape):
     raise ValueError("shape must be 'fit', 'box', or 'round'.")
 
 
+def _selector_for_material_column(lateral, extrusion_axis):
+    """Build an index selector for one column running along the extrusion axis."""
+    selector = [slice(None), slice(None), slice(None)]
+    lateral_iter = iter(lateral)
+    for axis in range(3):
+        if axis != extrusion_axis:
+            selector[axis] = next(lateral_iter)
+    return selector
+
+
+def _largest_planar_component(mask):
+    """Keep the largest connected region in a 2D projected footprint."""
+    import numpy as np
+
+    values = np.asarray(mask, dtype=bool)
+    visited = np.zeros(values.shape, dtype=bool)
+    best = []
+    for start_array in np.argwhere(values):
+        start = tuple(int(v) for v in start_array)
+        if visited[start]:
+            continue
+        component = []
+        queue = [start]
+        visited[start] = True
+        while queue:
+            coord = queue.pop(0)
+            component.append(coord)
+            for axis in range(2):
+                for offset in (-1, 1):
+                    neighbor = [coord[0], coord[1]]
+                    neighbor[axis] += offset
+                    if neighbor[axis] < 0 or neighbor[axis] >= values.shape[axis]:
+                        continue
+                    token = tuple(neighbor)
+                    if visited[token] or not values[token]:
+                        continue
+                    visited[token] = True
+                    queue.append(token)
+        if len(component) > len(best):
+            best = component
+    out = np.zeros(values.shape, dtype=bool)
+    if best:
+        coords = tuple(np.asarray(best, dtype=np.int64).T)
+        out[coords] = True
+    return out
+
+
+def _fill_short_boolean_gaps_in_line(line, max_gap):
+    """Fill short False runs when they are bracketed by True values."""
+    import numpy as np
+
+    out = np.asarray(line, dtype=bool).copy()
+    false_runs = np.flatnonzero(~out)
+    if false_runs.size == 0:
+        return out
+    start = 0
+    while start < false_runs.size:
+        stop = start + 1
+        while stop < false_runs.size and false_runs[stop] == false_runs[stop - 1] + 1:
+            stop += 1
+        run = false_runs[start:stop]
+        if (
+            run.size <= int(max_gap)
+            and int(run[0]) > 0
+            and int(run[-1]) < out.size - 1
+            and out[int(run[0]) - 1]
+            and out[int(run[-1]) + 1]
+        ):
+            out[run] = True
+        start = stop
+    return out
+
+
+def _fill_short_boolean_gaps_in_footprint(values, max_gap=2):
+    """Fill small row-wise and column-wise holes in a projected footprint."""
+    import numpy as np
+
+    out = np.asarray(values, dtype=bool).copy()
+    for row in range(out.shape[0]):
+        out[row, :] = _fill_short_boolean_gaps_in_line(out[row, :], max_gap)
+    for col in range(out.shape[1]):
+        out[:, col] = _fill_short_boolean_gaps_in_line(out[:, col], max_gap)
+    return out
+
+
+def _clean_projected_footprint(mask):
+    """Clean a candidate cap footprint before it is extruded into a disk."""
+    import numpy as np
+    from scipy.ndimage import binary_fill_holes
+
+    values = np.asarray(mask, dtype=bool)
+    values = _fill_short_boolean_gaps_in_footprint(values, max_gap=2)
+    values = binary_fill_holes(values).astype(bool)
+    return _largest_planar_component(values)
+
+
+def _apply_requested_footprint_shape(mask, *, shape):
+    """Convert a projected support mask to the requested disk footprint."""
+    import numpy as np
+
+    values = np.asarray(mask, dtype=bool)
+    if not np.any(values):
+        return values
+    mode = str(shape).strip().lower()
+    if mode in {"", "anatomy", "fit", "projected", "mask"}:
+        return values
+    coords = np.argwhere(values)
+    lo = coords.min(axis=0)
+    hi = coords.max(axis=0)
+    yy, xx = np.indices(values.shape, dtype=np.float64)
+    center = (lo + hi) / 2.0
+    half = np.maximum((hi - lo + 1) / 2.0, 0.5)
+    if mode in {"box", "square"}:
+        shaped = np.ones(values.shape, dtype=bool)
+    elif mode in {"round", "circle", "circular"}:
+        norm_y = (yy - center[0]) / half[0]
+        norm_x = (xx - center[1]) / half[1]
+        shaped = (norm_y * norm_y + norm_x * norm_x) <= 1.0
+    elif mode in {"hex", "hexagon", "hexagonal"}:
+        norm_y = np.abs((yy - center[0]) / half[0])
+        norm_x = np.abs((xx - center[1]) / half[1])
+        shaped = (norm_x <= 1.0) & (norm_y <= 1.0) & (norm_x + norm_y / 2.0 <= 1.0)
+    else:
+        raise ValueError("disk shape must be one of anatomy, square, round, or hex")
+    return shaped
+
+
+def _generate_projected_bone_caps_from_mask(mask, *, extrusion_axis, thickness, intrusion_depth, shape):
+    """Generate inferior and superior bone caps from projected surface footprints.
+
+    This is the older Ogo-style cap builder used for non-``anatomy`` shapes. It
+    looks at each material column, records the first and last bone voxel, then
+    builds a flat cap from columns close enough to the global inferior/superior
+    surfaces.
+    """
+    import numpy as np
+
+    thickness = max(1, int(thickness))
+    intrusion = max(
+        0,
+        int(round(thickness * 2.5)) if intrusion_depth is None else int(intrusion_depth),
+    )
+    inferior = np.zeros(mask.shape, dtype=bool)
+    superior = np.zeros(mask.shape, dtype=bool)
+    lateral_shape = tuple(mask.shape[idx] for idx in range(3) if idx != extrusion_axis)
+    inferior_surface_by_column = np.full(lateral_shape, -1, dtype=np.int32)
+    superior_surface_by_column = np.full(lateral_shape, -1, dtype=np.int32)
+    for lateral in np.ndindex(lateral_shape):
+        selector = _selector_for_material_column(lateral, extrusion_axis)
+        occupied = np.flatnonzero(mask[tuple(selector)])
+        if occupied.size == 0:
+            continue
+        inferior_surface_by_column[lateral] = int(occupied.min())
+        superior_surface_by_column[lateral] = int(occupied.max())
+    has_bone_in_column = inferior_surface_by_column >= 0
+    if not np.any(has_bone_in_column):
+        return inferior, superior
+
+    global_inferior_surface = int(np.min(inferior_surface_by_column[has_bone_in_column]))
+    global_superior_surface = int(np.max(superior_surface_by_column[has_bone_in_column]))
+    inferior_depth_limit = min(
+        global_inferior_surface + intrusion,
+        int(np.max(inferior_surface_by_column[has_bone_in_column])),
+    )
+    superior_depth_limit = max(
+        global_superior_surface - intrusion,
+        int(np.min(superior_surface_by_column[has_bone_in_column])),
+    )
+    inferior_footprint = _apply_requested_footprint_shape(
+        _clean_projected_footprint(
+            has_bone_in_column & (inferior_surface_by_column <= inferior_depth_limit)
+        ),
+        shape=shape,
+    )
+    superior_footprint = _apply_requested_footprint_shape(
+        _clean_projected_footprint(
+            has_bone_in_column & (superior_surface_by_column >= superior_depth_limit)
+        ),
+        shape=shape,
+    )
+
+    inferior_start = max(0, global_inferior_surface + intrusion - thickness)
+    inferior_stop = min(mask.shape[extrusion_axis], global_inferior_surface + intrusion)
+    superior_start = max(0, global_superior_surface - intrusion + 1)
+    superior_stop = min(mask.shape[extrusion_axis], superior_start + thickness)
+
+    for lateral in np.ndindex(lateral_shape):
+        if inferior_footprint[lateral]:
+            selector = _selector_for_material_column(lateral, extrusion_axis)
+            selector[extrusion_axis] = slice(inferior_start, inferior_stop)
+            inferior[tuple(selector)] = True
+        if superior_footprint[lateral]:
+            selector = _selector_for_material_column(lateral, extrusion_axis)
+            selector[extrusion_axis] = slice(superior_start, superior_stop)
+            superior[tuple(selector)] = True
+    return inferior, superior
+
+
+def _generate_axis_aligned_anatomy_cap_from_mask(mask, *, extrusion_axis, direction, thickness, intrusion_depth):
+    """Generate an axis-aligned cap from the local anatomy surface.
+
+    The cap has a fixed total thickness. ``intrusion_depth`` does not mean
+    "overwrite this much bone". It means that the anatomy is allowed to occupy
+    that much of the fixed cap thickness before the PMMA part starts. After the
+    cap is built, any overlap with bone is cleared so bone material is preserved.
+    """
+    import numpy as np
+
+    thickness = max(1, int(thickness))
+    intrusion = max(0, int(intrusion_depth))
+    cap = np.zeros(mask.shape, dtype=bool)
+    lateral_shape = tuple(mask.shape[idx] for idx in range(3) if idx != extrusion_axis)
+    surface_position_by_column = np.full(lateral_shape, -1, dtype=np.int32)
+
+    for lateral in np.ndindex(lateral_shape):
+        selector = _selector_for_material_column(lateral, extrusion_axis)
+        occupied = np.flatnonzero(mask[tuple(selector)])
+        if occupied.size == 0:
+            continue
+        surface_position_by_column[lateral] = int(occupied.max() if direction == "up" else occupied.min())
+
+    has_bone_in_column = surface_position_by_column >= 0
+    if not np.any(has_bone_in_column):
+        return cap
+
+    # Keep columns whose surface is close enough to the outermost contact
+    # surface. This preserves a flat outer cap while allowing the inner side to
+    # follow nearby anatomy.
+    maximum_supported_surface_depth = thickness + intrusion
+    if direction == "up":
+        flat_contact_position = int(np.max(surface_position_by_column[has_bone_in_column]))
+        included_columns = has_bone_in_column & (
+            surface_position_by_column >= flat_contact_position - maximum_supported_surface_depth
+        )
+        outer_cap_position = flat_contact_position - intrusion + thickness
+        for lateral in np.argwhere(included_columns):
+            lateral = tuple(int(value) for value in lateral)
+            bone_surface_position = int(surface_position_by_column[lateral])
+            selector = _selector_for_material_column(lateral, extrusion_axis)
+            selector[extrusion_axis] = slice(
+                max(bone_surface_position + 1, 0),
+                min(outer_cap_position + 1, mask.shape[extrusion_axis]),
+            )
+            cap[tuple(selector)] = True
+    elif direction == "down":
+        flat_contact_position = int(np.min(surface_position_by_column[has_bone_in_column]))
+        included_columns = has_bone_in_column & (
+            surface_position_by_column <= flat_contact_position + maximum_supported_surface_depth
+        )
+        outer_cap_position = flat_contact_position + intrusion - thickness
+        for lateral in np.argwhere(included_columns):
+            lateral = tuple(int(value) for value in lateral)
+            bone_surface_position = int(surface_position_by_column[lateral])
+            selector = _selector_for_material_column(lateral, extrusion_axis)
+            selector[extrusion_axis] = slice(
+                max(outer_cap_position, 0),
+                min(bone_surface_position, mask.shape[extrusion_axis]),
+            )
+            cap[tuple(selector)] = True
+    else:
+        raise ValueError("direction must be 'up' or 'down'.")
+
+    cap[mask] = False
+    return cap
+
+
 def _projected_contact_within_depth(mask, extrusion_axis, direction, depth):
     """Project only columns with bone near the flat fixture contact plane."""
     import numpy as np
@@ -298,17 +576,20 @@ def _full_fixture_cap(
     cap = np.zeros_like(mask, dtype=bool)
     hit = np.where(mask)[extrusion_axis]
     contact = int(hit.min() if direction == "down" else hit.max())
+    thickness = max(int(thickness), 0)
     intrusion = max(int(intrusion), 0)
     if direction == "up":
-        slab = slice(
-            max(contact - intrusion + 1, 0),
-            min(contact + thickness + 1, mask.shape[extrusion_axis]),
-        )
+        slab_start = contact - intrusion + 1
+        slab_stop = slab_start + thickness
+    elif direction == "down":
+        slab_stop = contact + intrusion
+        slab_start = slab_stop - thickness
     else:
-        slab = slice(
-            max(contact - thickness, 0),
-            min(contact + intrusion, mask.shape[extrusion_axis]),
-        )
+        raise ValueError("direction must be 'up' or 'down'.")
+    slab = slice(
+        max(slab_start, 0),
+        min(slab_stop, mask.shape[extrusion_axis]),
+    )
     if extrusion_axis == 0:
         cap[slab, :, :] = footprint
     elif extrusion_axis == 1:
@@ -318,13 +599,52 @@ def _full_fixture_cap(
     return cap
 
 
-def generate_bone_cap_mask(mask, *, axis="x", direction="up", thickness=5, shape="fit"):
-    """Generate a one-sided cap mask from a binary bone/contact mask."""
+def generate_bone_cap_mask(mask, *, axis="x", direction="up", thickness=5, shape="fit", intrusion=None):
+    """Generate a one-sided cap mask from a binary bone/contact mask.
+
+    Without ``intrusion`` this uses the historical Ogo surface-projection path.
+    With ``intrusion`` it uses the newer fixed-thickness cap convention:
+
+    * ``thickness`` is the total requested cap thickness.
+    * ``intrusion`` is how far the anatomy is allowed to occupy that thickness.
+    * generated PMMA cap voxels are removed anywhere they overlap bone.
+
+    The spine workflow calls this with ``shape="anatomy"`` to build a flat
+    outside face whose inner side follows nearby body anatomy.
+    """
     import numpy as np
 
     shape = str(shape).lower()
     thickness = int(thickness)
     extrusion_axis = axis_index(axis)
+    if intrusion is not None:
+        work_bb, _ = _expanded_bbox(mask, extrusion_axis, direction, thickness + int(intrusion))
+        cropped = mask[work_bb].astype(bool)
+        if shape in {"anatomy", "interactive", "interactive_anatomy"}:
+            cap = _generate_axis_aligned_anatomy_cap_from_mask(
+                cropped,
+                extrusion_axis=extrusion_axis,
+                direction=direction,
+                thickness=thickness,
+                intrusion_depth=int(intrusion),
+            )
+            output = np.zeros_like(mask, dtype=bool)
+            output[work_bb] = cap
+            output[mask] = False
+            return output
+        inferior, superior = _generate_projected_bone_caps_from_mask(
+            cropped,
+            extrusion_axis=extrusion_axis,
+            thickness=thickness,
+            intrusion_depth=int(intrusion),
+            shape=shape,
+        )
+        cap = superior if direction == "up" else inferior
+        output = np.zeros_like(mask, dtype=bool)
+        output[work_bb] = cap
+        output[mask] = False
+        return largest_connected_component(output)
+
     work_bb, _ = _expanded_bbox(mask, extrusion_axis, direction, thickness)
     cropped = mask[work_bb].astype(bool)
     surface = _contact_surface(cropped, extrusion_axis, direction)
@@ -352,9 +672,14 @@ def generate_fixture_cap_mask(
 ):
     """Generate a full geometric fixture cap from a binary ROI/contact mask.
 
-    Unlike a bone-fit cap, fixture caps keep their full square/round footprint.
-    They may overlap the bone mask; the later image-combine step preserves bone
-    material IDs where PMMA and bone overlap.
+    Fixture caps are used for hip/sideways-fall style contact fixtures. They
+    keep the full square/round footprint instead of trimming to a bone-fit
+    surface.
+
+    ``thickness`` is the total fixture thickness. ``intrusion`` shifts that
+    fixed-thickness slab toward the anatomy; it does not request a thicker cap.
+    The cap mask may overlap bone, so callers that merge it into a material
+    image should preserve existing bone material IDs.
     """
     import numpy as np
 
@@ -363,7 +688,7 @@ def generate_fixture_cap_mask(
         raise ValueError("fixture cap shape must be 'box' or 'round'.")
     thickness = int(thickness)
     extrusion_axis = axis_index(axis)
-    work_bb, _ = _expanded_bbox(mask, extrusion_axis, direction, thickness)
+    work_bb, _ = _expanded_bbox_for_fixed_thickness_fixture(mask, extrusion_axis, thickness, intrusion)
     cropped = mask[work_bb].astype(bool)
     surface = _contact_surface(cropped, extrusion_axis, direction)
     cap = _full_fixture_cap(
@@ -417,6 +742,7 @@ def generate_bone_cap_vtk(
     direction="up",
     thickness=5,
     shape="fit",
+    intrusion=None,
     output_value=1,
 ):
     """Generate a VTK PMMA/support cap from a labelled bone mask."""
@@ -429,6 +755,7 @@ def generate_bone_cap_vtk(
         direction=direction,
         thickness=thickness,
         shape=shape,
+        intrusion=intrusion,
     )
     return numpy_to_vtk_image(
         (cap.astype(np.uint16) * int(output_value)),

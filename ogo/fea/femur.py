@@ -20,9 +20,11 @@ Default femur workflow:
    using a shorter shaft. ``fixed_length`` mode is available for debugging.
 6. Generate two geometric PMMA fixtures: a round femoral-head loading fixture
    and a box-like greater-trochanter contact fixture. Defaults are 6 mm PMMA
-   thickness and 6 mm PMMA intrusion toward bone before material merging. The
-   femoral-head footprint is widened by 10 mm and lengthened by 80 mm so the
-   anatomical cropping determines the actual contact.
+   thickness and 6 mm intrusion through that fixed thickness. The fixture masks
+   themselves do not overwrite bone voxels; intrusion only determines
+   which anatomy is close enough to support the cap. The femoral-head footprint
+   is widened by 10 mm and lengthened by 80 mm so the anatomical cropping
+   determines the actual contact.
 7. Apply sideways-fall boundary conditions: prescribed displacement at the
    femoral-head PMMA cap toward the greater trochanter, loading-direction
    constraint at the greater-trochanter PMMA cap, and distal shaft constraints

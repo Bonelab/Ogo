@@ -19,9 +19,11 @@ from ogo.fea.spine import (
     DEFAULT_SPINE_FE_DISPLACEMENT_MM,
     DEFAULT_SPINE_ISO_RESOLUTION_MM,
     DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+    DEFAULT_SPINE_PMMA_INTRUSION_MM,
     DEFAULT_SPINE_PMMA_THICKNESS_MM,
     DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
     DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
+    DEFAULT_SPINE_REGISTRATION_BACKEND,
     DEFAULT_SPINE_TARGET_DISPLACEMENT_PERCENT,
     SPINE_ALIGNMENT_METHOD,
     default_spine_reference_path,
@@ -408,6 +410,11 @@ def write_modeling_metadata(
                     "--registration_max_scale",
                     DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
                 ),
+                "registration_backend": option_value(
+                    generator_argv,
+                    "--registration_backend",
+                    DEFAULT_SPINE_REGISTRATION_BACKEND,
+                ),
             },
             "image_processing": {
                 "iso_resolution_mm": option_float(generator_argv, "--iso_resolution", DEFAULT_SPINE_ISO_RESOLUTION_MM),
@@ -444,7 +451,7 @@ def write_modeling_metadata(
                     "body": "threshold body label",
                     "process": "threshold process label",
                     "cortical": "density/surface-derived cortical shell generated after alignment",
-                    "pmma_caps": "fit-to-body superior and inferior caps",
+                    "pmma_caps": "fixed-thickness anatomy superior and inferior caps",
                 },
             },
             "materials": {
@@ -493,14 +500,34 @@ def write_modeling_metadata(
                     "superior_cap": {
                         "label_id": option_int(generator_argv, "--top_node_set_id", 4),
                         "node_set": "body_top",
-                        "shape": "fit to vertebral body surface",
-                        "pmma_thickness_mm": option_float(generator_argv, "--pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM),
+                        "shape": "fixed-thickness anatomy cap",
+                        "pmma_thickness_mm": option_float(
+                            generator_argv, "--pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM
+                        ),
+                        "pmma_intrusion_mm": option_float(
+                            generator_argv, "--pmma_intrusion", DEFAULT_SPINE_PMMA_INTRUSION_MM
+                        ),
+                        "meaning": (
+                            "fixed-thickness anatomy cap: pmma_thickness_mm is total cap thickness; "
+                            "pmma_intrusion_mm controls how far anatomy can occupy that fixed "
+                            "thickness without overwriting body bone"
+                        ),
                     },
                     "inferior_cap": {
                         "label_id": option_int(generator_argv, "--bottom_node_set_id", 3),
                         "node_set": "body_bottom",
-                        "shape": "fit to vertebral body surface",
-                        "pmma_thickness_mm": option_float(generator_argv, "--pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM),
+                        "shape": "fixed-thickness anatomy cap",
+                        "pmma_thickness_mm": option_float(
+                            generator_argv, "--pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM
+                        ),
+                        "pmma_intrusion_mm": option_float(
+                            generator_argv, "--pmma_intrusion", DEFAULT_SPINE_PMMA_INTRUSION_MM
+                        ),
+                        "meaning": (
+                            "fixed-thickness anatomy cap: pmma_thickness_mm is total cap thickness; "
+                            "pmma_intrusion_mm controls how far anatomy can occupy that fixed "
+                            "thickness without overwriting body bone"
+                        ),
                     },
                 },
                 "constraints": [

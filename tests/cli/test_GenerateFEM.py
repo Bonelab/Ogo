@@ -340,15 +340,20 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
         "kopperdahl_trab_E",
         "--fe_displacement",
         "-0.2",
+        "--pmma_intrusion",
+        "3",
     ]
 
     path = GenerateFEM.write_modeling_metadata(model, "spine", argv, _metadata_args(tmp_path))
     data = json.loads(path.read_text())
 
     assert data["target"] == {"vertebra": "L1", "body_label": 2, "process_label": 3}
+    assert data["alignment"]["registration_backend"] == "vtk"
     assert data["materials"]["trabecular"]["elastic_E_func"] == "kopperdahl_trab_E"
     assert data["materials"]["cortical"]["material_id_range"] == [129, 256]
     assert data["materials"]["pmma"]["material_id"] == 5000
+    assert data["boundary_conditions"]["fixture_geometry"]["superior_cap"]["pmma_intrusion_mm"] == 3.0
+    assert data["boundary_conditions"]["fixture_geometry"]["inferior_cap"]["pmma_intrusion_mm"] == 3.0
     assert data["boundary_conditions"]["constraints"][0]["node_set"] == "body_top"
     assert "initial_generator_value_mm" not in data["boundary_conditions"]["constraints"][0]
     assert data["boundary_conditions"]["constraints"][0]["target_displacement_percent"] == 0.68

@@ -444,6 +444,25 @@ ogoFEA hip image.nii.gz femur_mask.nii.gz \
   --pmma_intrusion 6
 ```
 
+For spine compression, `--pmma_thick` controls the total generated disk
+thickness and `--pmma_intrusion` controls how far anatomy can occupy that fixed
+thickness. The maintained spine defaults are 10 mm thickness and 6 mm intrusion.
+Intrusion does not overwrite vertebral-body voxels; it limits how far from the
+superior/inferior body surface the cap is allowed to search for supporting
+anatomy before generating the flat PMMA disk.
+
+After vtkbone identifies visible cap nodes, spine compression filters each cap
+node set to the dominant coordinate plane along the load axis. This removes
+small rim/contact-side nodes from the jelly-bean disk surface while keeping the
+full disk material geometry in the solved model.
+
+```bash
+ogoFEA spine image.nii.gz labels.nii.gz \
+  --vertebra L1:20:48 \
+  --pmma_thick 10 \
+  --pmma_intrusion 6
+```
+
 Run model generation only, inspect the `.n88model`, then solve later:
 
 ```bash

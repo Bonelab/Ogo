@@ -5,7 +5,42 @@ import shutil
 
 import pytest
 
+from ogo.fea.model import filter_node_set_to_dominant_coordinate_plane
 from ogo.fea.spine import build_benchmark_sample_model, find_spinefe_benchmark_dir
+
+
+def test_filter_node_set_to_dominant_coordinate_plane_removes_small_rim():
+    vtk = pytest.importorskip("vtk")
+
+    class FakeModel:
+        def __init__(self):
+            self.points = [
+                (0.0, 0.0, 2.0),
+                (1.0, 0.0, 2.0),
+                (0.0, 1.0, 2.0),
+                (1.0, 1.0, 2.0),
+                (0.0, 0.0, 1.0),
+            ]
+            self.node_sets = {"cap": vtk.vtkIdTypeArray()}
+            self.node_sets["cap"].SetName("cap")
+            for point_id in range(len(self.points)):
+                self.node_sets["cap"].InsertNextValue(point_id)
+
+        def GetNodeSet(self, name):
+            return self.node_sets.get(name)
+
+        def AddNodeSet(self, node_ids):
+            self.node_sets[node_ids.GetName()] = node_ids
+
+        def GetPoint(self, point_id):
+            return self.points[point_id]
+
+    model = FakeModel()
+    filter_node_set_to_dominant_coordinate_plane(model, "cap", axis="z")
+
+    filtered = model.GetNodeSet("cap")
+    assert filtered.GetNumberOfTuples() == 4
+    assert [filtered.GetValue(i) for i in range(filtered.GetNumberOfTuples())] == [0, 1, 2, 3]
 
 
 def _node_set_count(model, name):
@@ -21,6 +56,38 @@ def _model_count(model, method_names):
         if method is not None:
             return method()
     raise AssertionError(f"Model does not expose any of {method_names!r}")
+
+
+def test_merge_vtk_images_can_preserve_existing_material_voxels():
+    np = pytest.importorskip("numpy")
+    vtk = pytest.importorskip("vtk")
+    from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
+
+    from ogo.fea.spine_compression import merge_vtk_images
+
+    material = np.zeros((3, 3, 3), dtype=np.float32)
+    material[1, 1, 1] = 42
+    disk = np.zeros_like(material)
+    disk[1, 1, 1] = 1
+    disk[2, 1, 1] = 1
+
+    def vtk_image(array):
+        image = vtk.vtkImageData()
+        image.SetDimensions(array.shape)
+        image.SetOrigin(0, 0, 0)
+        image.SetSpacing(1, 1, 1)
+        image.GetPointData().SetScalars(numpy_to_vtk(array.ravel(order="F"), deep=True))
+        return image
+
+    merged = merge_vtk_images(
+        [vtk_image(material), vtk_image(disk)],
+        [None, 5000],
+        overwrite_existing=False,
+    )
+
+    out = vtk_to_numpy(merged.GetPointData().GetScalars()).reshape(material.shape, order="F")
+    assert out[1, 1, 1] == 42
+    assert out[2, 1, 1] == 5000
 
 
 def _sample_paths():

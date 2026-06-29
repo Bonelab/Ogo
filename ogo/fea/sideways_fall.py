@@ -496,6 +496,7 @@ def sidewaysFallFe(args):
         shape="box",
         intrusion=intrusion,
         crop_to_contact=True,
+        clear_contact_mask=True,
         output_value=pmma_mat_id,
     )
 
@@ -511,6 +512,7 @@ def sidewaysFallFe(args):
         thickness=thickness,
         shape="round",
         intrusion=intrusion,
+        clear_contact_mask=True,
         output_value=pmma_mat_id,
     )
 
@@ -733,7 +735,7 @@ This script sets up the sideways fall FE model on the hip from the
     parser.add_argument("--pmma_thick", type=float, default=DEFAULT_PMMA_THICKNESS_MM,
                         help="Sets the minimum thickness for PMMA caps in the FE model. Default value (6 [mm]) based on observed measurement of Keaveny BCT FE modeling of the femur. (default: %(default)s [mm])")
     parser.add_argument("--pmma_intrusion", type=float, default=DEFAULT_PMMA_INTRUSION_MM,
-                        help="Sets how far PMMA fixtures intrude toward the bone side before bone overlap is preserved during material combination. (default: %(default)s [mm])")
+                        help="Sets how far anatomy can occupy the fixed PMMA fixture thickness before bone overlap is preserved during material combination. (default: %(default)s [mm])")
     parser.add_argument("--pmma_mat_id", type=int, default=5000,
                         help="Sets the material ID for the PMMA blocks. (default: %(default)s)")
     parser.add_argument("--fe_displacement", type=float, default=DEFAULT_FEMUR_FE_DISPLACEMENT,

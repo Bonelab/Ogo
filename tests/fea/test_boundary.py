@@ -2,7 +2,10 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from ogo.fea.boundary import generate_bone_cap_mask, generate_fixture_cap_mask
+from ogo.fea.boundary import (
+    generate_bone_cap_mask,
+    generate_fixture_cap_mask,
+)
 
 
 def test_fit_cap_follows_each_contact_ray():
@@ -69,6 +72,126 @@ def test_round_cap_stays_inside_projected_box():
     assert not np.any(round_cap & mask)
 
 
+def test_bone_cap_intrusion_limits_global_surface_depth():
+    mask = np.zeros((14, 9, 9), dtype=bool)
+    mask[4:6, 2:7, 2:7] = True
+    mask[7, 4:6, 4:6] = True
+
+    cap = generate_bone_cap_mask(
+        mask,
+        axis="x",
+        direction="up",
+        thickness=2,
+        shape="fit",
+        intrusion=1,
+    )
+
+    assert cap.any()
+    assert not np.any(cap & mask)
+    cap_x = np.where(cap)[0]
+    assert cap_x.min() >= 7
+    assert cap_x.max() <= 9
+    assert cap[:, 2, 2].sum() == 0
+    assert cap[:, 4, 4].sum() > 0
+
+
+def test_bone_cap_zero_intrusion_stays_outside_global_surface():
+    mask = np.zeros((12, 8, 8), dtype=bool)
+    mask[4:7, 2:6, 2:6] = True
+
+    cap = generate_bone_cap_mask(
+        mask,
+        axis="x",
+        direction="up",
+        thickness=2,
+        shape="box",
+        intrusion=0,
+    )
+
+    assert np.all(cap[7:9, 2:6, 2:6])
+    assert not np.any(cap[:7])
+    assert not np.any(cap & mask)
+
+
+def test_projected_bone_cap_closes_two_voxel_footprint_gaps():
+    mask = np.zeros((12, 12, 12), dtype=bool)
+    mask[5:7, 2:5, 2:10] = True
+    mask[5:7, 7:10, 2:10] = True
+
+    cap = generate_bone_cap_mask(
+        mask,
+        axis="x",
+        direction="up",
+        thickness=4,
+        shape="fit",
+        intrusion=2,
+    )
+
+    assert cap.any()
+    assert not np.any(cap & mask)
+    assert np.all(cap[7:9, 5:7, 2:10])
+    cap_x = np.where(cap)[0]
+    assert cap_x.max() - cap_x.min() + 1 <= 4
+
+
+def test_projected_bone_cap_intrusion_keeps_requested_total_thickness():
+    mask = np.zeros((24, 12, 12), dtype=bool)
+    mask[8:10, 2:10, 2:10] = True
+    mask[14:16, 5:7, 5:7] = True
+
+    cap = generate_bone_cap_mask(
+        mask,
+        axis="x",
+        direction="up",
+        thickness=6,
+        shape="fit",
+        intrusion=5,
+    )
+
+    assert cap.any()
+    assert not np.any(cap & mask)
+    cap_x = np.where(cap)[0]
+    assert cap_x.max() - cap_x.min() + 1 <= 6
+
+
+def test_anatomy_bone_cap_uses_axis_aligned_surface_depth():
+    mask = np.zeros((16, 9, 9), dtype=bool)
+    mask[7:9, 2:6, 2:6] = True
+    mask[2:4, 6, 3] = True
+
+    cap = generate_bone_cap_mask(
+        mask,
+        axis="x",
+        direction="up",
+        thickness=5,
+        shape="anatomy",
+        intrusion=3,
+    )
+
+    assert not np.any(cap & mask)
+    assert np.flatnonzero(cap[:, 3, 3]).tolist() == [9, 10]
+    assert np.flatnonzero(cap[:, 6, 3]).tolist() == [4, 5, 6, 7, 8, 9, 10]
+
+
+def test_anatomy_bone_cap_uses_axis_aligned_surface_depth_inferior():
+    mask = np.zeros((18, 9, 9), dtype=bool)
+    mask[7:9, 2:6, 2:6] = True
+    mask[12:14, 6, 3] = True
+
+    cap = generate_bone_cap_mask(
+        mask,
+        axis="x",
+        direction="down",
+        thickness=5,
+        shape="anatomy",
+        intrusion=3,
+    )
+
+    assert not np.any(cap & mask)
+    assert np.flatnonzero(cap[:, 3, 3]).tolist() == [5, 6]
+    assert np.flatnonzero(cap[:, 6, 3]).tolist() == [5, 6, 7, 8, 9, 10, 11]
+
+
 def test_fixture_box_cap_keeps_full_footprint_over_irregular_surface():
     mask = np.zeros((14, 9, 9), dtype=bool)
     mask[3:6, 2:7, 2:7] = True
@@ -94,9 +217,38 @@ def test_fixture_cap_intrudes_across_contact_plane():
         intrusion=2,
     )
 
-    assert np.all(cap[4:9, 2:7, 2:7])
+    assert np.all(cap[4:7, 2:7, 2:7])
     assert not np.any(cap[:4])
-    assert not np.any(cap[9:])
+    assert not np.any(cap[7:])
+
+
+def test_fixture_cap_intrusion_keeps_total_thickness():
+    mask = np.zeros((18, 9, 9), dtype=bool)
+    mask[8:10, 2:7, 2:7] = True
+
+    half_intrusion = generate_fixture_cap_mask(
+        mask,
+        axis="x",
+        direction="up",
+        thickness=6,
+        shape="box",
+        intrusion=3,
+    )
+    full_intrusion = generate_fixture_cap_mask(
+        mask,
+        axis="x",
+        direction="up",
+        thickness=6,
+        shape="box",
+        intrusion=6,
+    )
+
+    half_x = np.flatnonzero(half_intrusion[:, 3, 3])
+    full_x = np.flatnonzero(full_intrusion[:, 3, 3])
+    assert half_x.tolist() == [7, 8, 9, 10, 11, 12]
+    assert full_x.tolist() == [4, 5, 6, 7, 8, 9]
+    assert half_x.size == 6
+    assert full_x.size == 6
 
 
 def test_fixture_contact_crop_removes_unsupported_columns():

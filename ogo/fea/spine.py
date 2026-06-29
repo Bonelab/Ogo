@@ -14,8 +14,9 @@ Default spine workflow:
    interpolation; body/process labels use nearest-neighbor interpolation.
 5. Smooth the transformed body/process masks with one binary close/open pass
    only when at least one input spacing dimension is coarser than 2 mm. Then
-   generate fit-to-body PMMA caps on the superior and inferior body surfaces.
-   The default cap thickness is 3 mm.
+   generate fixed-thickness anatomy PMMA caps on the superior and inferior body
+   surfaces. The maintained cap thickness is 10 mm and the intrusion depth is
+   6 mm.
 6. Build materials with the same shared bone/PMMA material-table helper used by
    the femur workflow. The spine convention is trabecular material IDs 1..128
    and cortical IDs 129..256; PMMA is a separate material ID.
@@ -29,7 +30,8 @@ from pathlib import Path
 
 
 DEFAULT_SPINE_ISO_RESOLUTION_MM = 1.0
-DEFAULT_SPINE_PMMA_THICKNESS_MM = 3
+DEFAULT_SPINE_PMMA_THICKNESS_MM = 10
+DEFAULT_SPINE_PMMA_INTRUSION_MM = 6
 DEFAULT_SPINE_PMMA_MATERIAL_ID = 5000
 DEFAULT_SPINE_POISSONS_RATIO = 0.3
 DEFAULT_SPINE_PMMA_E_MPA = 2500
@@ -42,6 +44,7 @@ DEFAULT_SPINE_BOTTOM_NODE_SET_ID = 3
 DEFAULT_SPINE_REGISTRATION_SCALE = None
 DEFAULT_SPINE_REGISTRATION_MIN_SCALE = "0.8,0.8,0.75"
 DEFAULT_SPINE_REGISTRATION_MAX_SCALE = "1.2,1.2,1.3"
+DEFAULT_SPINE_REGISTRATION_BACKEND = "vtk"
 DEFAULT_SPINE_REFERENCE_FILENAME = "L4_BODY_SPINE_COMPRESSION_REF.vtk"
 
 SPINE_ALIGNMENT_METHOD = "scaled ICP to reference vertebral body"
@@ -134,7 +137,11 @@ def prepare_benchmark_images(input_image_path, input_mask_path, n_bins=128):
     binned_image, bin_centers = convert_image_to_material(
         input_image, vertebra_mask, n_bins=n_bins, cort_mask=cortical_mask
     )
-    image_with_disk = merge_vtk_images([binned_image, disk_mask], [None, 300])
+    image_with_disk = merge_vtk_images(
+        [binned_image, disk_mask],
+        [None, 300],
+        overwrite_existing=False,
+    )
     return image_with_disk, input_mask_with_disk, bin_centers
 
 

@@ -30,6 +30,65 @@ def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_
     return model
 
 
+def filter_node_set_to_dominant_coordinate_plane(
+    model,
+    node_set_name,
+    *,
+    axis="z",
+    tolerance=1.0e-5,
+):
+    """Keep only the main flat face of a boundary-condition node set.
+
+    vtkbone first finds all visible nodes on the PMMA contact geometry. For a
+    thick disk that can include small rim or side-wall nodes. In the spine
+    workflow the boundary condition belongs on the flat outside face, so Ogo
+    filters the visible node set down to the coordinate plane with the most
+    nodes.
+    """
+    import vtk
+
+    import ogo.util.Helper as ogo
+
+    axis_index = {"x": 0, "y": 1, "z": 2}[str(axis).lower()]
+    node_ids = model.GetNodeSet(node_set_name)
+    if node_ids is None or node_ids.GetNumberOfTuples() == 0:
+        ogo.message(f"No nodes found for {node_set_name}; skipping coordinate-plane filter.")
+        return model
+
+    nodes_by_coordinate_plane = {}
+    for idx in range(node_ids.GetNumberOfTuples()):
+        point_id = int(node_ids.GetValue(idx))
+        coordinate = float(model.GetPoint(point_id)[axis_index])
+        plane_key = round(coordinate / float(tolerance))
+        nodes_by_coordinate_plane.setdefault(plane_key, []).append((point_id, coordinate))
+
+    dominant_plane_nodes = []
+    dominant_plane_score = None
+    for candidate_nodes in nodes_by_coordinate_plane.values():
+        average_coordinate = sum(coordinate for _, coordinate in candidate_nodes) / len(candidate_nodes)
+        # Prefer the plane with the most nodes. The coordinate tie-breaker keeps
+        # the result deterministic when a synthetic test has two equal planes.
+        candidate_score = (len(candidate_nodes), average_coordinate)
+        if dominant_plane_score is None or candidate_score > dominant_plane_score:
+            dominant_plane_nodes = candidate_nodes
+            dominant_plane_score = candidate_score
+
+    target_coordinate = sum(coordinate for _, coordinate in dominant_plane_nodes) / len(dominant_plane_nodes)
+
+    filtered = vtk.vtkIdTypeArray()
+    filtered.SetName(node_set_name)
+    for point_id, coordinate in dominant_plane_nodes:
+        if abs(coordinate - target_coordinate) <= float(tolerance):
+            filtered.InsertNextValue(point_id)
+
+    model.AddNodeSet(filtered)
+    ogo.message(
+        f"Filtered {node_set_name} to dominant {axis}-plane {target_coordinate:g}: "
+        f"{filtered.GetNumberOfTuples()} of {node_ids.GetNumberOfTuples()} nodes retained."
+    )
+    return model
+
+
 def apply_spine_boundary_conditions(model, **kwargs):
     """Apply axial compression boundary conditions for the spine FE model."""
     import vtkbone
@@ -112,6 +171,9 @@ def create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers,
     bottom_node_set_id = kwargs.get("bottom_node_set_id", 3)
     top_node_set_name = kwargs.get("top_node_set_name", "body_top")
     bottom_node_set_name = kwargs.get("bottom_node_set_name", "body_bottom")
+    filter_bc_node_sets = kwargs.get("filter_bc_node_sets", True)
+    bc_filter_axis = kwargs.get("bc_filter_axis", "z")
+    bc_filter_tolerance = kwargs.get("bc_filter_tolerance", 1.0e-5)
     pmma_yield_compression = kwargs.get("pmma_yield_compression", None)
     pmma_yield_tension = kwargs.get("pmma_yield_tension", None)
     material_log_values = spine_material_log_values(kwargs)
@@ -129,6 +191,9 @@ def create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers,
         bottom_node_set_id=bottom_node_set_id,
         top_node_set_name=top_node_set_name,
         bottom_node_set_name=bottom_node_set_name,
+        filter_bc_node_sets=filter_bc_node_sets,
+        bc_filter_axis=bc_filter_axis,
+        bc_filter_tolerance=bc_filter_tolerance,
         pmma_yield_compression=pmma_yield_compression,
         pmma_yield_tension=pmma_yield_tension,
         **material_log_values,
@@ -175,6 +240,19 @@ def create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers,
     model = find_and_add_visible_nodes(
         model, temp_bc_mesh, bottom_direction, bottom_node_set_id, bottom_node_set_name
     )
+    if filter_bc_node_sets:
+        model = filter_node_set_to_dominant_coordinate_plane(
+            model,
+            top_node_set_name,
+            axis=bc_filter_axis,
+            tolerance=bc_filter_tolerance,
+        )
+        model = filter_node_set_to_dominant_coordinate_plane(
+            model,
+            bottom_node_set_name,
+            axis=bc_filter_axis,
+            tolerance=bc_filter_tolerance,
+        )
     model = apply_spine_boundary_conditions(model, **kwargs)
 
     ogo.message("Setting convergence criteria...")
