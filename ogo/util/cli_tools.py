@@ -356,6 +356,7 @@ def save_config_to_json(args, json_file):
 def print_image_info(infile, image, brief=False):
     """
     Print formatted image information including dimensions, spacing, orientation, and statistics.
+    Supports 2D, 3D, and 4D images.
     
     Args:
         infile: Path to the image file
@@ -366,47 +367,83 @@ def print_image_info(infile, image, brief=False):
     guard = '!-------------------------------------------------------------------------------'
     
     # Get basic image properties
-    size = image.GetSize()
-    spacing = image.GetSpacing()
-    origin = image.GetOrigin()
+    size = list(image.GetSize())
+    spacing = list(image.GetSpacing())
+    origin = list(image.GetOrigin())
+    
+    # Determine actual dimensionality
+    actual_ndim = len(size)
     
     # Calculate position
-    position = [math.floor(x / y) for x, y in zip(origin, spacing)]
+    position = [math.floor(o / s) if s != 0 else 0 for o, s in zip(origin, spacing)]
     
-    # Determine image dimensionality
-    ndim = 3 if size[2] > 1 else (2 if size[1] > 1 else 1)
-    dim_str = f'{ndim}D'
+    # Determine effective dimensionality (count non-singleton dimensions)
+    effective_ndim = sum(1 for s in size[:actual_ndim] if s > 1)
+    dim_str = f'{effective_ndim}D'
     
     # Print formatted information
     print(guard)
     print('!>')
     print(f'!> File                                    {os.path.basename(infile)}')
-    print(f'!> dim                            {size[0]:>8}  {size[1]:>8}  {size[2]:>8}')
+    
+    # Format dimension-dependent lines based on actual dimensionality
+    if actual_ndim == 2:
+        print(f'!> dim                            {size[0]:>8}  {size[1]:>8}')
+    elif actual_ndim == 3:
+        print(f'!> dim                            {size[0]:>8}  {size[1]:>8}  {size[2]:>8}')
+    else:  # 4D
+        print(f'!> dim                            {size[0]:>8}  {size[1]:>8}  {size[2]:>8}  {size[3]:>8}')
     
     if brief:
         # Brief mode: only essential fields
-        print(f'!> pos                            {position[0]:>8}  {position[1]:>8}  {position[2]:>8}')
-        print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}  {spacing[2]:>8.4f}')
+        if actual_ndim == 2:
+            print(f'!> pos                            {position[0]:>8}  {position[1]:>8}')
+            print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}')
+        elif actual_ndim == 3:
+            print(f'!> pos                            {position[0]:>8}  {position[1]:>8}  {position[2]:>8}')
+            print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}  {spacing[2]:>8.4f}')
+        else:  # 4D
+            print(f'!> pos                            {position[0]:>8}  {position[1]:>8}  {position[2]:>8}  {position[3]:>8}')
+            print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}  {spacing[2]:>8.4f}  {spacing[3]:>8.4f}')
         print(f'!> Type of data                            {image.GetPixelIDTypeAsString()}')
         print('!>')
     else:
         # Full mode: all information
-        direction = image.GetDirection()
+        direction = list(image.GetDirection())
         
-        # Calculate derived properties
-        phys_dim = [x * y for x, y in zip(size, spacing)]
-        n_image_voxels = size[0] * size[1] * size[2]
-        voxel_volume = spacing[0] * spacing[1] * spacing[2]
-        total_physical_volume = phys_dim[0] * phys_dim[1] * phys_dim[2]
+        # Calculate derived properties (only for actual dimensions)
+        phys_dim = [s * sp for s, sp in zip(size[:actual_ndim], spacing[:actual_ndim])]
+        
+        n_image_voxels = np.prod(size[:actual_ndim]).astype(int)
+        voxel_volume = np.prod(spacing[:actual_ndim])
+        total_physical_volume = np.prod(phys_dim[:actual_ndim])
         
         # Calculate physical extent (bounding box)
-        phys_min = origin
-        phys_max = image.TransformContinuousIndexToPhysicalPoint([float(size[0]), float(size[1]), float(size[2])])
+        phys_min = origin[:actual_ndim]
         
-        # Calculate direction matrix determinant (handedness)
-        direction_matrix = np.array(direction).reshape(3, 3)
-        determinant = np.linalg.det(direction_matrix)
-        handedness = "right-handed" if determinant > 0 else "left-handed"
+        phys_max_coords = [float(s) for s in size[:actual_ndim]]
+        phys_max = list(image.TransformContinuousIndexToPhysicalPoint(phys_max_coords))
+        
+        # Handle direction matrix for different dimensions
+        if actual_ndim == 2:
+            # 2D: 2x2 matrix
+            direction_matrix = np.array(direction).reshape(2, 2)
+            # For 2D, we don't calculate handedness
+            handedness = "N/A (2D)"
+        elif actual_ndim == 3:
+            # 3D: 3x3 matrix
+            direction_matrix = np.array(direction).reshape(3, 3)
+            determinant = np.linalg.det(direction_matrix)
+            handedness = "right-handed" if determinant > 0 else "left-handed"
+        elif actual_ndim == 4:
+            # 4D: 4x4 matrix
+            direction_matrix = np.array(direction).reshape(4, 4)
+            # For 4D, calculate handedness from 3x3 submatrix
+            determinant = np.linalg.det(direction_matrix[:3, :3])
+            handedness = "right-handed" if determinant > 0 else "left-handed"
+        else:
+            direction_matrix = np.eye(max(actual_ndim, 2))
+            handedness = "unknown"
         
         # Get file size with proper unit
         try:
@@ -422,33 +459,79 @@ def print_image_info(infile, image, brief=False):
             size_names = ['Bytes', 'KBytes', 'MBytes', 'GBytes']
 
         # Get image statistics
+        # Note: StatisticsImageFilter only works with 2D and 3D images
+        # For 4D images, extract the first 3D volume
         stats = sitk.StatisticsImageFilter()
-        stats.Execute(image)
+        if actual_ndim == 4:
+            # Extract first 3D volume from 4D image for statistics
+            stats_image = image[:, :, :, 0]
+            stats.Execute(stats_image)
+            stats_note = " (from first volume)"
+        else:
+            stats.Execute(image)
+            stats_note = ""
         
-        print(f'!> off                            {"-":>8}  {"-":>8}  {"-":>8}')
-        print(f'!> pos                            {position[0]:>8}  {position[1]:>8}  {position[2]:>8}')
-        print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}  {spacing[2]:>8.4f}')
-        print(f'!> phys dim in mm                 {phys_dim[0]:>8.4f}  {phys_dim[1]:>8.4f}  {phys_dim[2]:>8.4f}')
-        print(f'!> origin in mm                   {origin[0]:>8.4f}  {origin[1]:>8.4f}  {origin[2]:>8.4f}')
+        # Print dimension-dependent lines based on actual dimensionality
+        if actual_ndim == 2:
+            print(f'!> off                            {"-":>8}  {"-":>8}')
+            print(f'!> pos                            {position[0]:>8}  {position[1]:>8}')
+            print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}')
+            print(f'!> phys dim in mm                 {phys_dim[0]:>8.4f}  {phys_dim[1]:>8.4f}')
+            print(f'!> origin in mm                   {origin[0]:>8.4f}  {origin[1]:>8.4f}')
+            print('!>')
+            print(f'!> Physical extent (mm):')
+            print(f'!>   min                          {phys_min[0]:>8.4f}  {phys_min[1]:>8.4f}')
+            print(f'!>   max                          {phys_max[0]:>8.4f}  {phys_max[1]:>8.4f}')
+            print('!>')
+            print(f'!> Direction matrix ({handedness}):')
+            print(f'!>   [{direction_matrix[0,0]:>7.4f}  {direction_matrix[0,1]:>7.4f}]')
+            print(f'!>   [{direction_matrix[1,0]:>7.4f}  {direction_matrix[1,1]:>7.4f}]')
+        elif actual_ndim == 3:
+            print(f'!> off                            {"-":>8}  {"-":>8}  {"-":>8}')
+            print(f'!> pos                            {position[0]:>8}  {position[1]:>8}  {position[2]:>8}')
+            print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}  {spacing[2]:>8.4f}')
+            print(f'!> phys dim in mm                 {phys_dim[0]:>8.4f}  {phys_dim[1]:>8.4f}  {phys_dim[2]:>8.4f}')
+            print(f'!> origin in mm                   {origin[0]:>8.4f}  {origin[1]:>8.4f}  {origin[2]:>8.4f}')
+            print('!>')
+            print(f'!> Physical extent (mm):')
+            print(f'!>   min                          {phys_min[0]:>8.4f}  {phys_min[1]:>8.4f}  {phys_min[2]:>8.4f}')
+            print(f'!>   max                          {phys_max[0]:>8.4f}  {phys_max[1]:>8.4f}  {phys_max[2]:>8.4f}')
+            print('!>')
+            print(f'!> Direction matrix ({handedness}):')
+            print(f'!>   [{direction_matrix[0,0]:>7.4f}  {direction_matrix[0,1]:>7.4f}  {direction_matrix[0,2]:>7.4f}]')
+            print(f'!>   [{direction_matrix[1,0]:>7.4f}  {direction_matrix[1,1]:>7.4f}  {direction_matrix[1,2]:>7.4f}]')
+            print(f'!>   [{direction_matrix[2,0]:>7.4f}  {direction_matrix[2,1]:>7.4f}  {direction_matrix[2,2]:>7.4f}]')
+        else:  # 4D
+            print(f'!> off                            {"-":>8}  {"-":>8}  {"-":>8}  {"-":>8}')
+            print(f'!> pos                            {position[0]:>8}  {position[1]:>8}  {position[2]:>8}  {position[3]:>8}')
+            print(f'!> element size in mm             {spacing[0]:>8.4f}  {spacing[1]:>8.4f}  {spacing[2]:>8.4f}  {spacing[3]:>8.4f}')
+            print(f'!> phys dim in mm                 {phys_dim[0]:>8.4f}  {phys_dim[1]:>8.4f}  {phys_dim[2]:>8.4f}  {phys_dim[3]:>8.4f}')
+            print(f'!> origin in mm                   {origin[0]:>8.4f}  {origin[1]:>8.4f}  {origin[2]:>8.4f}  {origin[3]:>8.4f}')
+            print('!>')
+            print(f'!> Physical extent (mm):')
+            print(f'!>   min                          {phys_min[0]:>8.4f}  {phys_min[1]:>8.4f}  {phys_min[2]:>8.4f}  {phys_min[3]:>8.4f}')
+            print(f'!>   max                          {phys_max[0]:>8.4f}  {phys_max[1]:>8.4f}  {phys_max[2]:>8.4f}  {phys_max[3]:>8.4f}')
+            print('!>')
+            print(f'!> Direction matrix ({handedness}):')
+            print(f'!>   [{direction_matrix[0,0]:>7.4f}  {direction_matrix[0,1]:>7.4f}  {direction_matrix[0,2]:>7.4f}  {direction_matrix[0,3]:>7.4f}]')
+            print(f'!>   [{direction_matrix[1,0]:>7.4f}  {direction_matrix[1,1]:>7.4f}  {direction_matrix[1,2]:>7.4f}  {direction_matrix[1,3]:>7.4f}]')
+            print(f'!>   [{direction_matrix[2,0]:>7.4f}  {direction_matrix[2,1]:>7.4f}  {direction_matrix[2,2]:>7.4f}  {direction_matrix[2,3]:>7.4f}]')
+            print(f'!>   [{direction_matrix[3,0]:>7.4f}  {direction_matrix[3,1]:>7.4f}  {direction_matrix[3,2]:>7.4f}  {direction_matrix[3,3]:>7.4f}]')
         print('!>')
-        print(f'!> Physical extent (mm):')
-        print(f'!>   min                          {phys_min[0]:>8.4f}  {phys_min[1]:>8.4f}  {phys_min[2]:>8.4f}')
-        print(f'!>   max                          {phys_max[0]:>8.4f}  {phys_max[1]:>8.4f}  {phys_max[2]:>8.4f}')
-        print('!>')
-        print(f'!> Direction matrix ({handedness}):')
-        print(f'!>   [{direction[0]:>7.4f}  {direction[1]:>7.4f}  {direction[2]:>7.4f}]')
-        print(f'!>   [{direction[3]:>7.4f}  {direction[4]:>7.4f}  {direction[5]:>7.4f}]')
-        print(f'!>   [{direction[6]:>7.4f}  {direction[7]:>7.4f}  {direction[8]:>7.4f}]')
-        print('!>')
-        print(f'!> Dimensionality                          {dim_str}')
+        print(f'!> Dimensionality                          {dim_str} (actual: {actual_ndim}D)')
         print(f'!> Number of voxels                        {n_image_voxels:,}')
-        print(f'!> Voxel volume (mm^3)                     {voxel_volume:.6f}')
-        print(f'!> Total physical volume (mm^3)            {total_physical_volume:.2f}')
-        print(f'!> Total physical volume (cm^3)            {total_physical_volume/1000.0:.4f}')
+        
+        # Pre-format dimension-dependent labels for proper alignment
+        voxel_vol_label = f'Voxel volume (mm^{actual_ndim})'
+        phys_vol_label = f'Total physical volume (mm^{actual_ndim})'
+        print(f'!> {voxel_vol_label:<41} {voxel_volume:.6f}')
+        print(f'!> {phys_vol_label:<41} {total_physical_volume:.2f}')
+        if actual_ndim == 3:
+            print(f'!> Total physical volume (cm^3)            {total_physical_volume/1000.0:.4f}')
         print(f'!> Type of data                            {image.GetPixelIDTypeAsString()}')
-        print(f'!> Image min/max                           {stats.GetMinimum():.2f} / {stats.GetMaximum():.2f}')
-        print(f'!> Image mean                              {stats.GetMean():.2f}')
-        print(f'!> Image std dev                           {stats.GetSigma():.2f}')
+        print(f'!> Image min/max{stats_note:<28} {stats.GetMinimum():.2f} / {stats.GetMaximum():.2f}')
+        print(f'!> Image mean{stats_note:<30} {stats.GetMean():.2f}')
+        print(f'!> Image std dev{stats_note:<27} {stats.GetSigma():.2f}')
         print(f'!> Total memory size                       {file_size:.1f} {size_names[size_unit_index]}')
         print('!>')
     
