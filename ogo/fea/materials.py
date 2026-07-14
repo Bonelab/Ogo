@@ -221,8 +221,8 @@ def build_femur_material_table(
     """Build femur materials with the same region convention as spine.
 
     ``include_cortical`` is False for the simple whole-bone femur path and True
-    when the user supplies a compartment mask. The material IDs stay compatible
-    either way.
+    when the user supplies a compartment mask. The material IDs keep the same
+    region layout either way.
     """
     return build_bone_pmma_material_table(
         bin_centers,

@@ -276,7 +276,7 @@ Default spine boundary conditions:
 | Region | Node set | Constraint |
 | --- | --- | --- |
 | Superior PMMA cap | `body_top` | Prescribed displacement in the compression direction. |
-| Inferior PMMA cap | `body_bottom` | Fixed in the compression direction. |
+| Inferior PMMA cap | `body_bottom` | Fixed in all displacement directions. |
 
 The default high-level spine preset is `benchmark-linear`. It applies the
 spineFE benchmark linear material settings for model construction, then
@@ -309,7 +309,10 @@ The femur workflow builds one sideways-fall model per side:
 6. Standardize the distal shaft with a flat model-grid cut. The default cut
    mode detects the lesser trochanter and keeps `50 mm` distal to it. If the
    required distal field of view is missing, model generation fails.
-7. Generate PMMA fixtures for the femoral head and greater trochanter.
+7. Generate bbox-relative rectangular PMMA fixtures for the femoral head and
+   greater trochanter. The femoral-head fixture is placed on the high-y side,
+   the greater-trochanter fixture is placed on the low-y side, and both
+   footprints scale with the generated model bbox.
 8. Convert density to material IDs and construct the N88 model.
 9. Apply sideways-fall boundary conditions.
 
@@ -415,7 +418,7 @@ ogoFEA hip \
 ```
 
 This writes a boundary-condition audit PNG next to the model. For spine, debug
-mode also enables legacy quick-look output from the lower-level generator.
+mode also enables quick-look output from the lower-level generator.
 
 ## Common Adjustments
 
@@ -443,6 +446,14 @@ ogoFEA hip image.nii.gz femur_mask.nii.gz \
   --pmma_thick 6 \
   --pmma_intrusion 6
 ```
+
+For hip sideways fall, both PMMA fixtures use bbox-relative contact planes by
+default. The maintained footprint is rectangular, centered from stored bbox
+fractions, and scaled independently to `1.1 x 1.1` of the model bbox in the two
+authored in-plane axes. `--pmma_thick` controls total fixture thickness;
+`--pmma_intrusion` controls how far anatomy can occupy that fixed thickness
+before unsupported contact columns are removed. The PMMA labels do not replace
+bone voxels.
 
 For spine compression, `--pmma_thick` controls the total generated disk
 thickness and `--pmma_intrusion` controls how far anatomy can occupy that fixed

@@ -21,7 +21,6 @@ script_version = 1.0
 ##
 # Import the required modules
 import ogo.util.Helper as ogo
-import math
 import os
 import sys
 import argparse
@@ -32,42 +31,64 @@ import vtk
 import vtkbone
 
 from ogo.fea.boundary import (
-    generate_fixture_cap_vtk,
-    label_foreground_in_bounds_vtk,
+    generate_projected_material_disk_vtk,
     should_smooth_resampled_mask,
     smooth_binary_mask_vtk,
 )
 from ogo.fea.femur import (
     DEFAULT_CORTICAL_LABEL,
+    DEFAULT_FEMUR_BBOX_CROP_FROM,
+    DEFAULT_FEMUR_BBOX_RATIO,
     DEFAULT_FEMUR_FE_DISPLACEMENT,
     DEFAULT_FEMUR_CUT_MODE,
     DEFAULT_FEMUR_INPUT_MARGIN_MM,
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
     DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+    DEFAULT_FEMUR_REFERENCE_MAX_SCALE,
+    DEFAULT_FEMUR_REFERENCE_MIN_SCALE,
     DEFAULT_FEMUR_SHAFT_LENGTH_MM,
     DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
     DEFAULT_PMMA_INTRUSION_MM,
     DEFAULT_PMMA_THICKNESS_MM,
     DEFAULT_TRABECULAR_LABEL,
+    DISTAL_SHAFT_FIXTURE_CENTER_FRACTION,
+    DISTAL_SHAFT_FIXTURE_SIZE_FRACTION,
     DISTAL_FEMUR_NODE_SET,
-    FEMORAL_HEAD_FIXTURE_LONG_AXIS_EXTENSION_MM,
-    FEMORAL_HEAD_FIXTURE_WIDTH_EXTENSION_MM,
+    FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
     FEMORAL_HEAD_NODE_SET,
+    GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
     GREATER_TROCHANTER_NODE_SET,
     SIDEWAYS_FALL_NODE_SETS,
+    SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
+    bbox_relative_fixture_direction,
+    bbox_relative_fixture_plane,
+    bbox_relative_oriented_contact_plane,
     cortical_compartment_mask,
-    expand_xz_footprint,
+    crop_face_contact_plane,
+    crop_vtk_images_to_bbox_ratio,
     femur_z_coverage,
     flat_crop_vtk_image_below_z,
+    foreground_voxel_center_bounds,
     mirror_polydata_x,
     pad_vtk_images_to_foreground_margin,
-    side_rotation,
+    polydata_from_points,
+    reference_grid_from_vtk_mask,
+    projected_crop_face_surface_vtk,
+    resample_vtk_image_like_workflow,
+    scale_reference_point_cloud_to_sample,
     sideways_fall_output_name,
     standardize_femur_shaft_length,
-    swap_xz_footprint,
+    surface_points_from_vtk_mask,
+    transform_resample_vtk_image_to_reference_grid,
 )
 from ogo.fea.materials import build_femur_material_table
-from ogo.fea.model import append_postprocessing_sets, find_nodes_on_coordinate_plane, write_model
+from ogo.fea.model import (
+    append_postprocessing_sets,
+    directional_face_node_ids_from_voxel_mask,
+    find_nodes_on_coordinate_plane,
+    interface_node_ids_from_voxel_mask,
+    write_model,
+)
 from ogo.util.echo_arguments import echo_arguments
 
 
@@ -107,6 +128,8 @@ def sidewaysFallFe(args):
     pmma_yield_tension = args.pmma_yield_tension
     femur_shaft_length = args.femur_shaft_length
     femur_cut_mode = args.femur_cut_mode
+    femur_bbox_ratio = args.femur_bbox_ratio
+    femur_bbox_crop_from = args.femur_bbox_crop_from
     femur_lesser_trochanter_distal_offset = args.femur_lesser_trochanter_distal_offset
     femur_lesser_trochanter_distal_offset_percent = args.femur_lesser_trochanter_distal_offset_percent
     femur_input_margin = args.femur_input_margin
@@ -127,7 +150,6 @@ def sidewaysFallFe(args):
     
     try:
         N88_fileName = sideways_fall_output_name(output_file, femur_side)
-        rot_z = side_rotation(femur_side)
     except ValueError:
         ogo.message("Femur side not recognized. Terminating...")
         sys.exit()
@@ -157,6 +179,9 @@ def sidewaysFallFe(args):
     ogo.message("PMMA Material ID: %d" % pmma_mat_id)
     ogo.message("Applied Displacement [mm]: %8.4f" % fe_displacement)
     ogo.message("Femur Cut Mode: %s" % femur_cut_mode)
+    if femur_cut_mode == "bbox_ratio":
+        ogo.message("Femur BBox Ratio [reference, constrained, free]: %s" % str(femur_bbox_ratio))
+        ogo.message("Femur BBox Crop From [reference, constrained, free]: %s" % str(femur_bbox_crop_from))
     if compartment_mask is not None:
         ogo.message("Compartment Mask: %s" % compartment_mask)
         ogo.message("Cortical Label: %d" % cortical_label)
@@ -191,36 +216,101 @@ def sidewaysFallFe(args):
         ogo.message("Reading trabecular/cortical compartment mask...")
         compartmentData = ogo.readNii(compartment_mask)
 
-    images_to_pad = [imageData, maskThres] + ([compartmentData] if compartmentData is not None else [])
+    distal_crop_face = None
+    bbox_crop_meta = None
+    if femur_cut_mode == "bbox_ratio":
+        ogo.message("Applying bbox-ratio femur crop in input image coordinates...")
+        images_to_crop = [imageData, maskThres] + ([compartmentData] if compartmentData is not None else [])
+        cropped_images, distal_crop_face, bbox_crop_meta = crop_vtk_images_to_bbox_ratio(
+            images_to_crop,
+            maskThres,
+            bbox_ratio=femur_bbox_ratio,
+            bbox_crop_from=femur_bbox_crop_from,
+            labels={1},
+        )
+        imageData = cropped_images[0]
+        maskThres = cropped_images[1]
+        if compartmentData is not None:
+            compartmentData = cropped_images[2]
+        ogo.message(
+            "BBox-ratio crop slices xyz=%s; output shape xyz=%s; crop face voxels=%d."
+            % (
+                bbox_crop_meta["crop_slices_xyz"],
+                bbox_crop_meta["output_shape_xyz"],
+                bbox_crop_meta["crop_face_voxels"],
+            )
+        )
+
+    ogo.message("Resampling cropped femur inputs to isotropic spacing before ICP...")
+    imageData = resample_vtk_image_like_workflow(
+        imageData,
+        iso_resolution,
+        interpolation="bspline",
+    )
+    maskThres = resample_vtk_image_like_workflow(
+        maskThres,
+        iso_resolution,
+        interpolation="nearest",
+    )
+    if distal_crop_face is not None:
+        distal_crop_face = resample_vtk_image_like_workflow(
+            distal_crop_face,
+            iso_resolution,
+            interpolation="nearest",
+        )
+    if compartmentData is not None:
+        compartmentData = resample_vtk_image_like_workflow(
+            compartmentData,
+            iso_resolution,
+            interpolation="nearest",
+        )
+    registration_mask = maskThres
+
+    images_to_pad = [imageData, maskThres]
+    if distal_crop_face is not None:
+        images_to_pad.append(distal_crop_face)
+    if compartmentData is not None:
+        images_to_pad.append(compartmentData)
+    pad_constants = [0] * len(images_to_pad)
     padded_images, padding = pad_vtk_images_to_foreground_margin(
         images_to_pad,
         maskThres,
         margin_mm=femur_input_margin,
-        constants=[0] * len(images_to_pad),
+        constants=pad_constants,
     )
     imageData = padded_images[0]
     maskThres = padded_images[1]
+    next_padded_index = 2
+    if distal_crop_face is not None:
+        distal_crop_face = padded_images[next_padded_index]
+        next_padded_index += 1
     if compartmentData is not None:
-        compartmentData = padded_images[2]
+        compartmentData = padded_images[next_padded_index]
     if any(padding["lower"]) or any(padding["upper"]):
         ogo.message(
-            "Padded input image extent by lower=%s upper=%s voxels for FE transform safety."
+            "Padded isotropic input image extent by lower=%s upper=%s voxels for FE transform safety."
             % (padding["lower"], padding["upper"])
         )
     else:
-        ogo.message("Input image already has sufficient foreground safety margin.")
+        ogo.message("Isotropic input image already has sufficient foreground safety margin.")
 
     ##
-    # Pre-rotate the image and mask for better alignment
-    image_rot, mask_rot = ogo.preRotateImage(imageData, maskThres, rot_z)
-    compartment_rot = None
-    if compartmentData is not None:
-        _, compartment_rot = ogo.preRotateImage(imageData, compartmentData, rot_z)
+    # Use the cropped, isotropic input geometry directly for ICP.
+    image_rot = imageData
+    mask_rot = maskThres
+    distal_crop_face_rot = distal_crop_face
+    compartment_rot = compartmentData
 
     ##
     # Align the input femur with the reference model
     ogo.message("Aligning input with reference model...")
-    mask_surface = ogo.marchingCubes(mask_rot)
+    sample_surface_points = surface_points_from_vtk_mask(
+        registration_mask,
+        max_points=8000,
+        sample_mode="stride",
+        sample_offset=0,
+    )
+    mask_surface = polydata_from_points(sample_surface_points)
     if femur_side == 1:
         ref_poly = ogo.readPolyData(left_femur_reference)
     elif femur_side == 2:
@@ -236,14 +326,69 @@ def sidewaysFallFe(args):
         print("Error: Femur Side not defined. Terminating...")
         sys.exit()
 
+    ref_poly, reference_scale = scale_reference_point_cloud_to_sample(
+        ref_poly,
+        sample_surface_points,
+        max_points=8000,
+        reference_sample_mode="linspace",
+        min_scale=DEFAULT_FEMUR_REFERENCE_MIN_SCALE,
+        max_scale=DEFAULT_FEMUR_REFERENCE_MAX_SCALE,
+    )
+    ogo.message("Femur reference axis lengths: %s" % str(reference_scale["reference_axis_lengths"]))
+    ogo.message("Sample femur axis lengths: %s" % str(reference_scale["sample_axis_lengths"]))
+    ogo.message("Femur reference scale factors: %s" % str(reference_scale["scale_factors"]))
+
     icp = ogo.iterativeClosestPoint(ref_poly, mask_surface)
     # ogo.message("Transform:\n %s" % str(icp))
 
     ogo.message("Applying the transformation and isotropic resampling to the image and mask...")
-    image_trans = ogo.transformResample(image_rot, icp, iso_resolution)
-    mask_trans = ogo.labelTransformResample(mask_rot, icp, iso_resolution)
+    output_origin, output_size = reference_grid_from_vtk_mask(
+        mask_rot,
+        icp,
+        margin_voxels=int(round(femur_input_margin / max(iso_resolution, 1.0e-6))),
+    )
+    output_spacing = (float(iso_resolution), float(iso_resolution), float(iso_resolution))
+    ogo.message(
+        "Reference-frame output grid: origin=%s size=%s spacing=%s"
+        % (output_origin, output_size, output_spacing)
+    )
+    image_trans = transform_resample_vtk_image_to_reference_grid(
+        image_rot,
+        icp,
+        output_origin=output_origin,
+        output_size=output_size,
+        output_spacing=output_spacing,
+        interpolation="bspline",
+    )
+    mask_trans = transform_resample_vtk_image_to_reference_grid(
+        mask_rot,
+        icp,
+        output_origin=output_origin,
+        output_size=output_size,
+        output_spacing=output_spacing,
+        interpolation="nearest",
+    )
+    distal_crop_face_trans = (
+        transform_resample_vtk_image_to_reference_grid(
+            distal_crop_face_rot,
+            icp,
+            output_origin=output_origin,
+            output_size=output_size,
+            output_spacing=output_spacing,
+            interpolation="nearest",
+        )
+        if distal_crop_face_rot is not None
+        else None
+    )
     compartment_trans = (
-        ogo.labelTransformResample(compartment_rot, icp, iso_resolution)
+        transform_resample_vtk_image_to_reference_grid(
+            compartment_rot,
+            icp,
+            output_origin=output_origin,
+            output_size=output_size,
+            output_spacing=output_spacing,
+            interpolation="nearest",
+        )
         if compartment_rot is not None
         else None
     )
@@ -263,39 +408,61 @@ def sidewaysFallFe(args):
             f"{input_spacing} is <= {mask_smoothing_spacing_threshold} mm in all dimensions..."
         )
 
-    ogo.message("Applying flat distal femur crop in reference coordinates...")
-    try:
-        image_trans, mask_trans, shaft_crop = standardize_femur_shaft_length(
-            image_trans,
-            mask_trans,
-            reference_bounds=ref_poly.GetBounds(),
-            retained_length_mm=femur_shaft_length,
-            cut_mode=femur_cut_mode,
-            lesser_trochanter_distal_offset_mm=femur_lesser_trochanter_distal_offset,
-            lesser_trochanter_distal_offset_percent=femur_lesser_trochanter_distal_offset_percent,
-        )
-    except ValueError as exc:
-        ogo.message(str(exc))
-        sys.exit(1)
-    retained_length_mm = shaft_crop["retained_length_mm"]
-    ogo.message(
-        "Distal cut z=%8.4f; input mask z coverage [%8.4f, %8.4f]; retained length=%8.4f"
-        % (
-            shaft_crop["cut_z"],
-            shaft_crop["mask_z_min"],
-            shaft_crop["mask_z_max"],
-            retained_length_mm,
-        )
-    )
-    for warning in shaft_crop.get("warnings", []):
-        ogo.message("WARNING: Femur crop QC: %s" % warning)
-    if femur_cut_mode == "lesser_trochanter":
+    if femur_cut_mode == "bbox_ratio":
+        ogo.message("Using transformed bbox-ratio crop face for distal shaft standardization.")
+        try:
+            mask_z_min, mask_z_max = femur_z_coverage(mask_trans)
+        except ValueError as exc:
+            ogo.message(str(exc))
+            sys.exit(1)
+        retained_length_mm = mask_z_max - mask_z_min
+        shaft_crop = {
+            "cut_mode": "bbox_ratio",
+            "cut_plane": "transformed input crop face",
+            "bbox_ratio": bbox_crop_meta,
+            "mask_z_min": mask_z_min,
+            "mask_z_max": mask_z_max,
+            "retained_length_mm": retained_length_mm,
+            "warnings": [],
+        }
         ogo.message(
-            "Detected greater trochanter z=%8.4f; lesser trochanter z=%8.4f"
-            % (shaft_crop["greater_trochanter_z"], shaft_crop["lesser_trochanter_z"])
+            "Transformed bbox-ratio mask z coverage [%8.4f, %8.4f]; retained z-span=%8.4f"
+            % (mask_z_min, mask_z_max, retained_length_mm)
         )
-    if compartment_trans is not None:
-        compartment_trans = flat_crop_vtk_image_below_z(compartment_trans, shaft_crop["cut_z"])
+    else:
+        ogo.message("Applying flat distal femur crop in reference coordinates...")
+        try:
+            image_trans, mask_trans, shaft_crop = standardize_femur_shaft_length(
+                image_trans,
+                mask_trans,
+                reference_bounds=ref_poly.GetBounds(),
+                retained_length_mm=femur_shaft_length,
+                cut_mode=femur_cut_mode,
+                lesser_trochanter_distal_offset_mm=femur_lesser_trochanter_distal_offset,
+                lesser_trochanter_distal_offset_percent=femur_lesser_trochanter_distal_offset_percent,
+            )
+        except ValueError as exc:
+            ogo.message(str(exc))
+            sys.exit(1)
+        retained_length_mm = shaft_crop["retained_length_mm"]
+        ogo.message(
+            "Distal cut z=%8.4f; input mask z coverage [%8.4f, %8.4f]; retained length=%8.4f"
+            % (
+                shaft_crop["cut_z"],
+                shaft_crop["mask_z_min"],
+                shaft_crop["mask_z_max"],
+                retained_length_mm,
+            )
+        )
+        for warning in shaft_crop.get("warnings", []):
+            ogo.message("WARNING: Femur crop QC: %s" % warning)
+        if femur_cut_mode == "lesser_trochanter":
+            ogo.message(
+                "Detected greater trochanter z=%8.4f; lesser trochanter z=%8.4f"
+                % (shaft_crop["greater_trochanter_z"], shaft_crop["lesser_trochanter_z"])
+            )
+        if compartment_trans is not None:
+            compartment_trans = flat_crop_vtk_image_below_z(compartment_trans, shaft_crop["cut_z"])
 
     # ogo.message("Writing out temp images...")
     # ogo.writeNii(image_trans, "temp_image.nii", image_pathname)
@@ -353,24 +520,37 @@ def sidewaysFallFe(args):
     conn = ogo.imageConnectivity(bone_image)
 
 
-    change = ogo.changeInfo(conn)
-    model_z_min, model_z_max = femur_z_coverage(change)
-    model_cut_z = model_z_max - retained_length_mm
-    if model_z_min > model_cut_z:
-        if model_z_min - model_cut_z <= 2.0:
-            model_cut_z = model_z_min
-        else:
-            ogo.message(
-                "Femur scan does not include enough distal shaft after model-grid alignment "
-                "(required retained length %.1f mm, available approximately %.1f mm)."
-                % (retained_length_mm, max(0.0, model_z_max - model_z_min))
-            )
-            sys.exit(1)
-    change = flat_crop_vtk_image_below_z(change, model_cut_z)
-    ogo.message(
-        "Applied model-grid distal shaft cut z=%8.4f; model mask z coverage [%8.4f, %8.4f]"
-        % (model_cut_z, model_z_min, model_z_max)
+    change = ogo.prepareFiniteElementImage(conn)
+    femur_mask_on_model_grid = ogo.prepareFiniteElementImage(cast_mask)
+    distal_crop_face_change = (
+        ogo.prepareFiniteElementImage(distal_crop_face_trans) if distal_crop_face_trans is not None else None
     )
+    if distal_crop_face_change is not None:
+        distal_crop_face_change = ogo.applyMask(distal_crop_face_change, ogo.cast2unsignchar(change))
+    if femur_cut_mode == "bbox_ratio":
+        ogo.message("Skipping model-grid distal shaft cut; bbox-ratio crop face is already transformed.")
+    else:
+        model_z_min, model_z_max = femur_z_coverage(change)
+        model_cut_z = model_z_max - retained_length_mm
+        if model_z_min > model_cut_z:
+            if model_z_min - model_cut_z <= 2.0:
+                model_cut_z = model_z_min
+            else:
+                ogo.message(
+                    "Femur scan does not include enough distal shaft after model-grid alignment "
+                    "(required retained length %.1f mm, available approximately %.1f mm)."
+                    % (retained_length_mm, max(0.0, model_z_max - model_z_min))
+                )
+                sys.exit(1)
+        change = flat_crop_vtk_image_below_z(change, model_cut_z)
+        femur_mask_on_model_grid = flat_crop_vtk_image_below_z(
+            femur_mask_on_model_grid,
+            model_cut_z,
+        )
+        ogo.message(
+            "Applied model-grid distal shaft cut z=%8.4f; model mask z coverage [%8.4f, %8.4f]"
+            % (model_cut_z, model_z_min, model_z_max)
+        )
 
     # Convert image data to hexahedral elements
     ogo.message("Meshing image data to elements...")
@@ -402,117 +582,94 @@ def sidewaysFallFe(args):
     ogo.message("Constructing the Finite Element Model...")
     model = ogo.applyTestBase(mesh, material_table)
     model.ComputeBounds()
-    model_bounds = model.GetBounds()
-    ogo.message("Model Bounds: %s" % str(model_bounds))
+    mesh_model_bounds = model.GetBounds()
+    model_bounds = foreground_voxel_center_bounds(femur_mask_on_model_grid)
+    ogo.message("Model Mesh Bounds: %s" % str(mesh_model_bounds))
+    ogo.message("Model Foreground Voxel-Center Bounds: %s" % str(model_bounds))
 
-    # Define support vectors for later application
-    z_center = (model_bounds[4] + model_bounds[5] / 2)
+    # Define support vectors for the two PMMA contact fixtures.
     top_support_vector = (0, 1, 0)
     bottom_support_vector = (0, -1, 0)
-    side_support_vector = (0, 0, -1)
-
-    # The shaft is cut on a flat z plane, so use that cut-plane normal for the distal BC.
-    side_support_vector = (0, 0, -1)
-
-    ogo.message("Determining Femoral Head ROI...")
-    femoral_head_bounds = (
-        float(model_bounds[0]),
-        float(model_bounds[1]),
-        float(model_bounds[2]),
-        float(model_bounds[2] + (model_bounds[3]-model_bounds[2]) / 5),
-        float(model_bounds[4]),
-        float(model_bounds[5])
-    )
-    ogo.message("Extracted Femoral Head Bounds: %s" % str(femoral_head_bounds))
-    femoral_head_model = ogo.extractBox(femoral_head_bounds, model)
-    femoral_head_model_bounds = femoral_head_model.GetBounds()
-    ogo.message("Extracted Femoral Head Model Bounds: %s" % str(femoral_head_model_bounds))
-    femoral_head_model_bounds = (
-        femoral_head_model_bounds[0],
-        femoral_head_model_bounds[1] - 1,
-        femoral_head_model_bounds[2],
-        femoral_head_model_bounds[3] - 1,
-        femoral_head_model_bounds[4],
-        femoral_head_model_bounds[5] - 1
-    )
-
-    femoral_head_element_dims = (
-        femoral_head_model_bounds[1] - femoral_head_model_bounds[0],
-        femoral_head_model_bounds[3] - femoral_head_model_bounds[2],
-        femoral_head_model_bounds[5] - femoral_head_model_bounds[4]
-    )
 
     ##
-    # Extract Greater Trochater ROI
-    ogo.message("Determining Greater Trochater ROI...")
-    greater_trochanter_bounds = (
-        float(model_bounds[0]),
-        float(model_bounds[1]),
-        float(model_bounds[3]-(model_bounds[3]-model_bounds[2])/20),
-        float(model_bounds[3]),
-        float(model_bounds[4]),
-        float(model_bounds[5])
+    # Create PMMA disks from bbox-relative contact planes. The disk normal
+    # points from the contact plane toward the anatomy; the generated PMMA
+    # image clears any femur-mask voxels so PMMA never occupies the segmentation.
+    femoral_head_plane = bbox_relative_fixture_plane(
+        model_bounds,
+        center_fraction=FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
+        size_fraction=SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
+        projection_axis="y",
+        shape="rectangle",
     )
-    ogo.message("Extracted Greater Trochanter Bounds: %s" % str(greater_trochanter_bounds))
-    greater_trochanter_model = ogo.extractBox(greater_trochanter_bounds, model)
-    greater_trochanter_model_bounds = greater_trochanter_model.GetBounds()
-    ogo.message("Extracted Greater Trochanter Model Bounds: %s"
-        % str(greater_trochanter_model_bounds))
-
-    greater_trochanter_model_bounds = (
-        greater_trochanter_model_bounds[0],
-        greater_trochanter_model_bounds[1] - 1,
-        greater_trochanter_model_bounds[2],
-        greater_trochanter_model_bounds[3] - 1,
-        greater_trochanter_model_bounds[4],
-        greater_trochanter_model_bounds[5] - 1
+    femoral_head_cap_direction = bbox_relative_fixture_direction(
+        FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
+        projection_axis="y",
     )
-
-    greater_trochanter_element_dims = (
-        greater_trochanter_model_bounds[1] - greater_trochanter_model_bounds[0],
-        greater_trochanter_model_bounds[3] - greater_trochanter_model_bounds[2], greater_trochanter_model_bounds[5] - greater_trochanter_model_bounds[4]
+    ogo.message(
+        "Femoral Head PMMA Plane: center=%s normal=%s u=%s v=%s size=%s"
+        % (
+            femoral_head_plane["center"],
+            femoral_head_plane["normal"],
+            femoral_head_plane["u_axis"],
+            femoral_head_plane["v_axis"],
+            femoral_head_plane["size"],
+        )
     )
-
-    # Thickness to be added to PMMA cap.
-    thickness = max(1, int(math.ceil(pmma_thick / change.GetSpacing()[1])))
-    intrusion = max(0, int(math.ceil(pmma_intrusion / change.GetSpacing()[1])))
-
-    ##
-    # Creates the femoral head pmma cap
-    ogo.message("Creating Femoral Head PMMA Cap from contact ROI...")
-    femoral_head_fixture_bounds = expand_xz_footprint(
-        swap_xz_footprint(femoral_head_model_bounds),
-        x_extension_mm=FEMORAL_HEAD_FIXTURE_WIDTH_EXTENSION_MM,
-        z_extension_mm=FEMORAL_HEAD_FIXTURE_LONG_AXIS_EXTENSION_MM,
-    )
-    ogo.message("Femoral Head PMMA Fixture Bounds: %s" % str(femoral_head_fixture_bounds))
-    femoral_head_contact = label_foreground_in_bounds_vtk(change, femoral_head_fixture_bounds, label_value=1)
-    femoralHeadPMMA = generate_fixture_cap_vtk(
-        femoral_head_contact,
-        label_value=1,
-        axis="y",
-        direction="down",
-        thickness=thickness,
-        shape="box",
-        intrusion=intrusion,
-        crop_to_contact=True,
-        clear_contact_mask=True,
+    ogo.message("Femoral Head PMMA cap direction: %s" % femoral_head_cap_direction)
+    femoralHeadPMMA = generate_projected_material_disk_vtk(
+        change,
+        surface_vtk_image=femur_mask_on_model_grid,
+        exclusion_vtk_image=femur_mask_on_model_grid,
+        center=femoral_head_plane["center"],
+        normal=femoral_head_plane["normal"],
+        u_axis=femoral_head_plane["u_axis"],
+        v_axis=femoral_head_plane["v_axis"],
+        size=femoral_head_plane["size"],
+        shape=femoral_head_plane["shape"],
+        thickness=pmma_thick,
+        intrusion=pmma_intrusion,
+        anatomy_constrained=True,
         output_value=pmma_mat_id,
     )
 
     ##
     # Creates the greater trochanter pmma cap
-    ogo.message("Creating Greater Trochanter PMMA Cap from contact ROI...")
-    greater_trochanter_contact = label_foreground_in_bounds_vtk(change, greater_trochanter_model_bounds, label_value=1)
-    greaterTrochanterPMMA = generate_fixture_cap_vtk(
-        greater_trochanter_contact,
-        label_value=1,
-        axis="y",
-        direction="up",
-        thickness=thickness,
-        shape="round",
-        intrusion=intrusion,
-        clear_contact_mask=True,
+    greater_trochanter_plane = bbox_relative_fixture_plane(
+        model_bounds,
+        center_fraction=GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
+        size_fraction=SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
+        projection_axis="y",
+        shape="rectangle",
+    )
+    greater_trochanter_cap_direction = bbox_relative_fixture_direction(
+        GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
+        projection_axis="y",
+    )
+    ogo.message(
+        "Greater Trochanter PMMA Plane: center=%s normal=%s u=%s v=%s size=%s"
+        % (
+            greater_trochanter_plane["center"],
+            greater_trochanter_plane["normal"],
+            greater_trochanter_plane["u_axis"],
+            greater_trochanter_plane["v_axis"],
+            greater_trochanter_plane["size"],
+        )
+    )
+    ogo.message("Greater Trochanter PMMA cap direction: %s" % greater_trochanter_cap_direction)
+    greaterTrochanterPMMA = generate_projected_material_disk_vtk(
+        change,
+        surface_vtk_image=femur_mask_on_model_grid,
+        exclusion_vtk_image=femur_mask_on_model_grid,
+        center=greater_trochanter_plane["center"],
+        normal=greater_trochanter_plane["normal"],
+        u_axis=greater_trochanter_plane["u_axis"],
+        v_axis=greater_trochanter_plane["v_axis"],
+        size=greater_trochanter_plane["size"],
+        shape=greater_trochanter_plane["shape"],
+        thickness=pmma_thick,
+        intrusion=pmma_intrusion,
+        anatomy_constrained=True,
         output_value=pmma_mat_id,
     )
 
@@ -538,78 +695,128 @@ def sidewaysFallFe(args):
     model2.ComputeBounds()
     model2_bounds = model2.GetBounds()
     ogo.message("Model 2 Bounds: %s" % str(model2_bounds))
-    z_center2 = (model2_bounds[4] + model2_bounds[5] / 2)
 
     ##
     # Determine Femoral Head PMMA Cap support nodes.
     ogo.message("Determining Femoral Head PMMA Cap nodes...")
-    fh_pmma_bounds = (
-        model2_bounds[0],
-        model2_bounds[1],
-        model2_bounds[2],
-        model2_bounds[2] + 1,
-        model2_bounds[4],
-        model2_bounds[5]
+    if femoral_head_cap_direction == "up":
+        fh_pmma_bounds = (
+            model2_bounds[0],
+            model2_bounds[1],
+            model2_bounds[3] - 1,
+            model2_bounds[3],
+            model2_bounds[4],
+            model2_bounds[5],
+        )
+        femoral_head_support_vector = top_support_vector
+    else:
+        fh_pmma_bounds = (
+            model2_bounds[0],
+            model2_bounds[1],
+            model2_bounds[2],
+            model2_bounds[2] + 1,
+            model2_bounds[4],
+            model2_bounds[5],
+        )
+        femoral_head_support_vector = bottom_support_vector
+    fh_pmma_visible_node_IDS = directional_face_node_ids_from_voxel_mask(
+        model2,
+        femoralHeadPMMA,
+        direction=femoral_head_support_vector,
+        name=FEMORAL_HEAD_NODE_SET,
     )
-    ogo.message("Femoral Head PMMA Cap Bounds: %s" % str(fh_pmma_bounds))
-    fh_pmma_model = ogo.extractBox(fh_pmma_bounds, model2)
-    fh_pmma_model_bounds = fh_pmma_model.GetBounds()
-    ogo.message("Femoral Head PMMA Cap Model Bounds: %s" % str(fh_pmma_model_bounds))
 
-    # Get the visible nodes of the femoral head pmma cap
-    fh_pmma_visible_node_IDS = vtk.vtkIdTypeArray()
-    vtkbone.vtkboneNodeSetsByGeometry.FindNodesOnVisibleSurface(
-        fh_pmma_visible_node_IDS,
-        fh_pmma_model,
-        bottom_support_vector,
-        -1
-    )
-
-    ogo.message("-- found %d visible exterior nodes on Femoral Head PMMA Cap."
+    ogo.message("-- found %d outer-face nodes on Femoral Head PMMA Cap."
         % fh_pmma_visible_node_IDS.GetNumberOfTuples())
-    fh_pmma_visible_node_IDS.SetName(FEMORAL_HEAD_NODE_SET)
     model2.AddNodeSet(fh_pmma_visible_node_IDS)
 
     ##
     # Determine Greater Trochanter PMMA Cap support nodes
     ogo.message("Determining Greater Trochanter PMMA Cap support nodes...")
-    gt_pmma_bounds = (
-        model2_bounds[0],
-        model2_bounds[1],
-        model2_bounds[3] - 1,
-        model2_bounds[3],
-        model2_bounds[4],
-        model2_bounds[5]
+    if greater_trochanter_cap_direction == "up":
+        gt_pmma_bounds = (
+            model2_bounds[0],
+            model2_bounds[1],
+            model2_bounds[3] - 1,
+            model2_bounds[3],
+            model2_bounds[4],
+            model2_bounds[5],
+        )
+        greater_trochanter_support_vector = top_support_vector
+    else:
+        gt_pmma_bounds = (
+            model2_bounds[0],
+            model2_bounds[1],
+            model2_bounds[2],
+            model2_bounds[2] + 1,
+            model2_bounds[4],
+            model2_bounds[5],
+        )
+        greater_trochanter_support_vector = bottom_support_vector
+    gt_pmma_visible_node_IDS = directional_face_node_ids_from_voxel_mask(
+        model2,
+        greaterTrochanterPMMA,
+        direction=greater_trochanter_support_vector,
+        name=GREATER_TROCHANTER_NODE_SET,
     )
-    ogo.message("Greater Trochanter PMMA Cap Bounds: %s" % str(gt_pmma_bounds))
-    gt_pmma_model = ogo.extractBox(gt_pmma_bounds, model2)
-    gt_pmma_model_bounds = gt_pmma_model.GetBounds()
-    ogo.message("Greater Trochanter PMMA Cap Model Bounds: %s" % str(gt_pmma_model_bounds))
 
-    # Get the visible nodes on the Greater Trochanter PMMA Cap
-    gt_pmma_visible_node_IDS = vtk.vtkIdTypeArray()
-    vtkbone.vtkboneNodeSetsByGeometry.FindNodesOnVisibleSurface(
-        gt_pmma_visible_node_IDS,
-        gt_pmma_model,
-        top_support_vector,
-        -1
-    )
-
-    ogo.message("-- found %d visible exterior nodes on Greater Trochanter PMMA Cap."
+    ogo.message("-- found %d outer-face nodes on Greater Trochanter PMMA Cap."
         % gt_pmma_visible_node_IDS.GetNumberOfTuples())
 
-    gt_pmma_visible_node_IDS.SetName(GREATER_TROCHANTER_NODE_SET)
     model2.AddNodeSet(gt_pmma_visible_node_IDS)
 
     ##
-    # Distal Femur (df) support nodes. The shaft is cut on a flat z plane, so
-    # the fixed support is the cut face itself rather than a thick distal band.
+    # Distal Femur (df) support nodes. In bbox-ratio mode the distal shaft cut
+    # was made before alignment, so its transformed crop-face label carries the
+    # correct oblique support angle in model coordinates.
     ogo.message("Determining distal femur nodes...")
-    distal_cut_z = model2_bounds[4]
-    ogo.message("Distal Femur Cut Plane z: %8.4f" % distal_cut_z)
-    df_visible_node_IDS = find_nodes_on_coordinate_plane(model2, "z", distal_cut_z)
+    if femur_cut_mode == "bbox_ratio":
+        if distal_crop_face_change is None:
+            ogo.message("BBox-ratio cut mode requires a transformed distal crop-face mask.")
+            sys.exit(1)
+        try:
+            distal_crop_face_plane = crop_face_contact_plane(distal_crop_face_change, change)
+            distal_plane = bbox_relative_oriented_contact_plane(
+                model_bounds,
+                center_fraction=DISTAL_SHAFT_FIXTURE_CENTER_FRACTION,
+                size_fraction=DISTAL_SHAFT_FIXTURE_SIZE_FRACTION,
+                normal=distal_crop_face_plane["normal"],
+                shape="anatomy",
+            )
+        except ValueError as exc:
+            ogo.message(str(exc))
+            sys.exit(1)
+        ogo.message(
+            "Distal Femur bbox-relative oblique support plane: center=%s normal=%s outward=%s size=%s"
+            % (
+                distal_plane["center"],
+                distal_plane["normal"],
+                distal_plane["outward_normal"],
+                distal_plane["size"],
+            )
+        )
+        distal_surface = projected_crop_face_surface_vtk(
+            change,
+            distal_plane,
+            intrusion=pmma_intrusion,
+            output_value=1,
+        )
+        df_visible_node_IDS = interface_node_ids_from_voxel_mask(
+            model2,
+            distal_surface,
+            change,
+            name=DISTAL_FEMUR_NODE_SET,
+            direction=distal_plane["normal"],
+        )
+        if df_visible_node_IDS.GetNumberOfTuples() == 0:
+            ogo.message("No distal femur nodes found on the bbox-relative oblique shaft support surface.")
+            sys.exit(1)
+    else:
+        distal_cut_z = model2_bounds[4]
+        ogo.message("Distal Femur Cut Plane z: %8.4f" % distal_cut_z)
+        df_visible_node_IDS = find_nodes_on_coordinate_plane(model2, "z", distal_cut_z)
 
-    ogo.message("-- found %d visible exterior nodes on Distal Femur."
+    ogo.message("-- found %d distal shaft interface nodes."
         % df_visible_node_IDS.GetNumberOfTuples())
 
     df_visible_node_IDS.SetName(DISTAL_FEMUR_NODE_SET)
@@ -621,7 +828,7 @@ def sidewaysFallFe(args):
     model2.ApplyBoundaryCondition(
         FEMORAL_HEAD_NODE_SET,
         vtkbone.vtkboneConstraint.SENSE_Y,
-        -fe_displacement,
+        fe_displacement,
         "top_displacement")
 
     ogo.message("Constraining Greater Trochanter PMMA cap in loading direction...")
@@ -733,7 +940,7 @@ This script sets up the sideways fall FE model on the hip from the
     parser.add_argument("--pmma_v", type=float, default=0.3,
                         help="Sets the Poisson's ratio for the PMMA material(s) in the FE model. (default: %(default)s)")
     parser.add_argument("--pmma_thick", type=float, default=DEFAULT_PMMA_THICKNESS_MM,
-                        help="Sets the minimum thickness for PMMA caps in the FE model. Default value (6 [mm]) based on observed measurement of Keaveny BCT FE modeling of the femur. (default: %(default)s [mm])")
+                        help="Sets the fixed thickness for PMMA caps in the FE model. (default: %(default)s [mm])")
     parser.add_argument("--pmma_intrusion", type=float, default=DEFAULT_PMMA_INTRUSION_MM,
                         help="Sets how far anatomy can occupy the fixed PMMA fixture thickness before bone overlap is preserved during material combination. (default: %(default)s [mm])")
     parser.add_argument("--pmma_mat_id", type=int, default=5000,
@@ -742,15 +949,19 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Sets the applied displacement endpoint for the sideways-fall model. The default reports the force at 4%% displacement. (default: %(default)s)")
     parser.add_argument("--femur_shaft_length", type=float, default=DEFAULT_FEMUR_SHAFT_LENGTH_MM,
                         help="Retained proximal femur length [mm] for --femur_cut_mode fixed_length. (default: %(default)s [mm])")
-    parser.add_argument("--femur_cut_mode", choices=["lesser_trochanter", "fixed_length"],
+    parser.add_argument("--femur_cut_mode", choices=["bbox_ratio", "lesser_trochanter", "fixed_length"],
                         default=DEFAULT_FEMUR_CUT_MODE,
-                        help="Set the distal femur crop. Default detects the lesser trochanter and fails if the field of view is incomplete. (default: %(default)s)")
+                        help="Set the distal femur crop. bbox_ratio crops in input image coordinates and uses the transformed crop face for distal support. (default: %(default)s)")
+    parser.add_argument("--femur_bbox_ratio", nargs=3, default=DEFAULT_FEMUR_BBOX_RATIO,
+                        help="BBox-ratio crop in recipe order: reference constrained free. Use 'none' for a free axis. (default: %(default)s)")
+    parser.add_argument("--femur_bbox_crop_from", nargs=3, default=DEFAULT_FEMUR_BBOX_CROP_FROM,
+                        help="BBox crop side in recipe order: reference constrained free. Values are min, max, center/null. (default: %(default)s)")
     parser.add_argument("--femur_lesser_trochanter_distal_offset", type=float, default=DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
                         help="Cut this many mm distal to the detected lesser trochanter in lesser_trochanter mode. (default: %(default)s [mm])")
     parser.add_argument("--femur_lesser_trochanter_distal_offset_percent", type=float, default=None,
                         help="Optional percentage of the detected greater-to-lesser trochanter z distance to cut distal to the lesser trochanter. Overrides --femur_lesser_trochanter_distal_offset when set. (default: %(default)s)")
     parser.add_argument("--femur_input_margin", type=float, default=DEFAULT_FEMUR_INPUT_MARGIN_MM,
-                        help="Pad the input image/mask as needed so femur foreground has this margin before pre-rotation and ICP. (default: %(default)s [mm])")
+                        help="Pad the input image/mask as needed so femur foreground has this margin before ICP. (default: %(default)s [mm])")
     parser.add_argument("--compartment_mask", type=str, default=None,
                         help="Optional trabecular/cortical compartment mask aligned with the bone mask. Defaults: cortical=1, trabecular=2.")
     parser.add_argument("--cortical_label", type=int, default=DEFAULT_CORTICAL_LABEL,

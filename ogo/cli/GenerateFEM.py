@@ -29,6 +29,8 @@ from ogo.fea.spine import (
     default_spine_reference_path,
 )
 from ogo.fea.femur import (
+    DEFAULT_FEMUR_BBOX_CROP_FROM,
+    DEFAULT_FEMUR_BBOX_RATIO,
     DEFAULT_FEMUR_CUT_MODE,
     DEFAULT_FEMUR_FE_DISPLACEMENT,
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
@@ -37,6 +39,11 @@ from ogo.fea.femur import (
     DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
     DEFAULT_PMMA_INTRUSION_MM,
     DEFAULT_PMMA_THICKNESS_MM,
+    DISTAL_SHAFT_FIXTURE_CENTER_FRACTION,
+    DISTAL_SHAFT_FIXTURE_SIZE_FRACTION,
+    FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
+    GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
+    SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
 )
 
 
@@ -209,6 +216,19 @@ def option_path(argv: Sequence[str], option: str, default: Optional[Path] = None
     return None if value is None else str(value)
 
 
+def option_n_values(argv: Sequence[str], option: str, count: int, default: Sequence) -> list:
+    """Return a fixed-width option value list from an argv-style list."""
+    values = list(default)
+    for index, token in enumerate(argv):
+        if token == option and index + count < len(argv):
+            values = list(argv[index + 1 : index + 1 + count])
+    parsed = []
+    for value in values:
+        token = str(value).strip().lower() if value is not None else "none"
+        parsed.append(None if token in {"", "none", "null", "auto"} else value)
+    return parsed
+
+
 def target_displacement_percent(args: argparse.Namespace, model_type: str) -> float:
     """Return the maintained endpoint displacement percentage for this model."""
     if args.target_displacement is not None:
@@ -352,6 +372,11 @@ def write_modeling_metadata(
             "calibrated_image": str(args.calibrated_image),
             "bone_mask": str(args.bone_mask),
             "output_path": str(args.output_path) if args.output_path is not None else str(args.calibrated_image.parent),
+        },
+        "geometry": {
+            "model_coordinates": "preprocessed_image_physical_space",
+            "origin_policy": "cropping and resampling update the image origin; FE meshing preserves that origin",
+            "boundary_condition_coordinates": "defined from the generated model bounding box in the same physical space",
         },
         "post_generation_validation": {
             "bc_audit": {
@@ -541,9 +566,9 @@ def write_modeling_metadata(
                     {
                         "name": "bottom_fixed",
                         "node_set": "body_bottom",
-                        "axis": "z",
+                        "axes": ["x", "y", "z"],
                         "value_mm": 0.0,
-                        "meaning": "inferior PMMA cap fixed in compression direction",
+                        "meaning": "inferior PMMA cap fixed in all displacement directions",
                     },
                 ],
             },
@@ -552,6 +577,14 @@ def write_modeling_metadata(
         femur_side = option_value(generator_argv, "--femur_side", "1")
         side = "left" if femur_side == "1" else "right" if femur_side == "2" else "unknown"
         compartment_mask = option_path(generator_argv, "--compartment_mask")
+        femur_cut_mode = option_value(generator_argv, "--femur_cut_mode", DEFAULT_FEMUR_CUT_MODE)
+        femur_bbox_ratio = option_n_values(generator_argv, "--femur_bbox_ratio", 3, DEFAULT_FEMUR_BBOX_RATIO)
+        femur_bbox_crop_from = option_n_values(
+            generator_argv,
+            "--femur_bbox_crop_from",
+            3,
+            DEFAULT_FEMUR_BBOX_CROP_FROM,
+        )
         femur_displacement = percent_displacement_metadata(
             model_path,
             report_profile="femur",
@@ -567,13 +600,13 @@ def write_modeling_metadata(
                 "mask_threshold": option_int(generator_argv, "--mask_threshold", 1),
             },
             "alignment": {
-                "method": "pre-rotation plus ICP to side-specific femur reference",
+                "method": "ICP to side-specific femur reference from cropped/padded input geometry",
                 "reference_path": option_value(generator_argv, "--reference_path", "bundled side-specific femur reference"),
             },
             "image_processing": {
                 "iso_resolution_mm": option_float(generator_argv, "--iso_resolution", DEFAULT_FEMUR_ISO_RESOLUTION_MM),
                 "spatial_operations": (
-                    "side pre-rotation reslice, then ICP transform and isotropic output spacing in one shared VTK reslice"
+                    "ICP transform and isotropic output spacing in one shared VTK reslice"
                 ),
                 "image_interpolation": "cubic",
                 "label_interpolation": "nearest-neighbor",
@@ -613,14 +646,20 @@ def write_modeling_metadata(
                 },
             },
             "shaft_standardization": {
-                "cut_mode": option_value(generator_argv, "--femur_cut_mode", DEFAULT_FEMUR_CUT_MODE),
+                "cut_mode": femur_cut_mode,
                 "fixed_length_mm": option_float(generator_argv, "--femur_shaft_length", 100.0),
                 "lesser_trochanter_distal_offset_mm": option_float(
                     generator_argv,
                     "--femur_lesser_trochanter_distal_offset",
                     DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
                 ),
-                "cut_plane": "flat model-grid z plane",
+                "bbox_ratio": femur_bbox_ratio,
+                "bbox_crop_from": femur_bbox_crop_from,
+                "cut_plane": (
+                    "input bbox-ratio crop face transformed with the femur"
+                    if femur_cut_mode == "bbox_ratio"
+                    else "flat model-grid z plane"
+                ),
                 "incomplete_fov_behavior": "fail model generation",
             },
             "materials": {
@@ -671,21 +710,49 @@ def write_modeling_metadata(
                 "fixture_geometry": {
                     "femoral_head": {
                         "node_set": "Femoral_Head_PMMA_Nodes",
-                        "shape": "round fixture cap",
+                        "shape": "rectangle fixture cap",
+                        "relative_to": "model_bbox",
+                        "center_fraction": list(FEMORAL_HEAD_FIXTURE_CENTER_FRACTION),
+                        "size_fraction": list(SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION),
+                        "projection_axis": "y",
                         "pmma_thickness_mm": option_float(generator_argv, "--pmma_thick", DEFAULT_PMMA_THICKNESS_MM),
                         "pmma_intrusion_mm": option_float(generator_argv, "--pmma_intrusion", DEFAULT_PMMA_INTRUSION_MM),
-                        "width_extension_mm": 10.0,
-                        "long_axis_extension_mm": 80.0,
+                        "meaning": "bbox-scaled high-y contact fixture with unsupported columns cropped",
                     },
                     "greater_trochanter": {
                         "node_set": "Greater_Trochanter_PMMA_Nodes",
-                        "shape": "box fixture cap",
+                        "shape": "rectangle fixture cap",
+                        "relative_to": "model_bbox",
+                        "center_fraction": list(GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION),
+                        "size_fraction": list(SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION),
+                        "projection_axis": "y",
                         "pmma_thickness_mm": option_float(generator_argv, "--pmma_thick", DEFAULT_PMMA_THICKNESS_MM),
                         "pmma_intrusion_mm": option_float(generator_argv, "--pmma_intrusion", DEFAULT_PMMA_INTRUSION_MM),
+                        "meaning": "bbox-scaled low-y contact fixture with unsupported columns cropped",
                     },
                     "distal_shaft": {
                         "node_set": "Distal_Femur_Nodes",
-                        "support_surface": "flat distal shaft cut face",
+                        "support_surface": (
+                            "finite bbox-relative patch projected onto the transformed oblique shaft surface"
+                            if femur_cut_mode == "bbox_ratio"
+                            else "flat distal shaft cut face"
+                        ),
+                        "relative_to": "model_bbox" if femur_cut_mode == "bbox_ratio" else None,
+                        "center_fraction": (
+                            list(DISTAL_SHAFT_FIXTURE_CENTER_FRACTION)
+                            if femur_cut_mode == "bbox_ratio"
+                            else None
+                        ),
+                        "size_fraction": (
+                            list(DISTAL_SHAFT_FIXTURE_SIZE_FRACTION)
+                            if femur_cut_mode == "bbox_ratio"
+                            else None
+                        ),
+                        "normal_source": (
+                            "transformed input bbox-ratio crop face"
+                            if femur_cut_mode == "bbox_ratio"
+                            else "model-grid distal z face"
+                        ),
                     },
                 },
                 "constraints": [
@@ -848,7 +915,7 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Write debug sidecars such as BC audit PNGs and legacy spine QC quick looks.",
+        help="Write debug sidecars such as BC audit PNGs and spine QC quick looks.",
     )
     parser.add_argument(
         "--skip_bc_audit",

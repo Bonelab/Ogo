@@ -349,6 +349,7 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
 
     assert data["target"] == {"vertebra": "L1", "body_label": 2, "process_label": 3}
     assert data["alignment"]["registration_backend"] == "vtk"
+    assert data["geometry"]["model_coordinates"] == "preprocessed_image_physical_space"
     assert data["materials"]["trabecular"]["elastic_E_func"] == "kopperdahl_trab_E"
     assert data["materials"]["cortical"]["material_id_range"] == [129, 256]
     assert data["materials"]["pmma"]["material_id"] == 5000
@@ -358,6 +359,9 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
     assert "initial_generator_value_mm" not in data["boundary_conditions"]["constraints"][0]
     assert data["boundary_conditions"]["constraints"][0]["target_displacement_percent"] == 0.68
     assert data["boundary_conditions"]["constraints"][0]["value_source"].startswith("target_displacement_percent")
+    assert data["boundary_conditions"]["constraints"][1]["node_set"] == "body_bottom"
+    assert data["boundary_conditions"]["constraints"][1]["axes"] == ["x", "y", "z"]
+    assert data["boundary_conditions"]["constraints"][1]["value_mm"] == 0.0
     assert data["solve_and_reporting"]["target_displacement_percent"] == 0.68
     assert data["solve_and_reporting"]["run_pistoia"] is False
 
@@ -384,10 +388,15 @@ def test_femur_modeling_metadata_records_materials_shaft_and_bcs(tmp_path):
     data = json.loads(path.read_text())
 
     assert data["target"]["side"] == "left"
+    assert data["geometry"]["model_coordinates"] == "preprocessed_image_physical_space"
     assert data["segmentation"]["compartment_labels"] == {"cortical": 1, "trabecular": 2}
     assert data["shaft_standardization"]["lesser_trochanter_distal_offset_mm"] == 50.0
     assert data["materials"]["include_cortical_region"] is True
     assert data["materials"]["cortical"]["material_id_range"] == [129, 256]
+    assert data["boundary_conditions"]["fixture_geometry"]["femoral_head"]["relative_to"] == "model_bbox"
+    assert data["boundary_conditions"]["fixture_geometry"]["femoral_head"]["shape"] == "rectangle fixture cap"
+    assert data["boundary_conditions"]["fixture_geometry"]["greater_trochanter"]["relative_to"] == "model_bbox"
+    assert data["boundary_conditions"]["fixture_geometry"]["greater_trochanter"]["shape"] == "rectangle fixture cap"
     assert data["boundary_conditions"]["fixture_geometry"]["femoral_head"]["pmma_intrusion_mm"] == 6.0
     assert data["boundary_conditions"]["constraints"][0]["node_set"] == "Femoral_Head_PMMA_Nodes"
     assert "initial_generator_value_mm" not in data["boundary_conditions"]["constraints"][0]

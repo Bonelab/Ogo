@@ -49,15 +49,32 @@ import vtk
 import vtkbone
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
+from ogo.fea.alignment import (
+    estimate_rigid_icp,
+    invert_point_transform,
+    output_grid_for_point_transform,
+    point_cloud_axis_lengths,
+    polydata_points,
+    resample_vtk_image_with_point_transform,
+    sample_points,
+    surface_points_from_vtk_mask,
+)
 from ogo.fea.boundary import (
-    generate_bone_cap_vtk,
+    bbox_relative_contact_plane,
+    foreground_voxel_center_bounds,
+    generate_projected_material_disk_vtk,
+    pad_vtk_images_to_physical_bounds,
+    projected_material_disk_required_bounds,
     should_smooth_resampled_mask,
     smooth_binary_mask_vtk,
+    smooth_label_mask_vtk,
 )
 from ogo.fea.spine import (
     DEFAULT_SPINE_BOTTOM_NODE_SET_ID,
     DEFAULT_SPINE_FE_DISPLACEMENT_MM,
     DEFAULT_SPINE_ISO_RESOLUTION_MM,
+    DEFAULT_SPINE_LABEL_SMOOTHING_SIGMA_MM,
+    DEFAULT_SPINE_LABEL_SMOOTHING_THRESHOLD,
     DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
     DEFAULT_SPINE_PMMA_E_MPA,
     DEFAULT_SPINE_PMMA_INTRUSION_MM,
@@ -70,6 +87,9 @@ from ogo.fea.spine import (
     DEFAULT_SPINE_REGISTRATION_BACKEND,
     DEFAULT_SPINE_REGISTRATION_SCALE,
     DEFAULT_SPINE_TOP_NODE_SET_ID,
+    SPINE_CONTACT_SIZE_FRACTION,
+    SPINE_INFERIOR_CONTACT_CENTER_FRACTION,
+    SPINE_SUPERIOR_CONTACT_CENTER_FRACTION,
     default_spine_reference_path,
 )
 import ogo.util.Helper as ogo
@@ -132,11 +152,18 @@ def parse_scale_triplet(value, name="scale"):
 ###################################################################### HELPERS (VTK)
 
 
+class _NiftiImageHandle:
+    """Reader-like wrapper for NIfTI images loaded through Ogo's orientation path."""
+
+    def __init__(self, image):
+        self._image = image
+
+    def GetOutput(self):
+        return self._image
+
+
 def read(input_mask):
-    mask_reader = vtk.vtkNIFTIImageReader()
-    mask_reader.SetFileName(input_mask)
-    mask_reader.Update()
-    return mask_reader
+    return _NiftiImageHandle(ogo.readNii(input_mask))
 
 def check_vertebra_presence(mask_reader, vertebra):
     if vertebra not in vtk_to_numpy(mask_reader.GetOutput().GetPointData().GetScalars()).ravel():
@@ -231,6 +258,17 @@ def crop_to_bounding_box(image_data, bb=None):
 
     if crop.GetOutput().GetNumberOfPoints() == 0:
         raise ValueError("Cropping resulted in an empty image. Extents might be incorrect.")
+
+    output = crop.GetOutput()
+    spacing = output.GetSpacing()
+    origin = image_data.GetOrigin()
+    output.SetOrigin(
+        float(origin[0]) + float(min_x) * float(spacing[0]),
+        float(origin[1]) + float(min_y) * float(spacing[1]),
+        float(origin[2]) + float(min_z) * float(spacing[2]),
+    )
+    dims = output.GetDimensions()
+    output.SetExtent(0, dims[0] - 1, 0, dims[1] - 1, 0, dims[2] - 1)
 
     return crop, bb
 
@@ -371,33 +409,27 @@ def get_icp_with_scaling(
     max_scale=(1.2, 1.2, 1.3),
 ):
 
-    def get_principal_axes_lengths(polydata):
-        points = vtk_to_numpy(polydata.GetPoints().GetData())
-        centered = points - np.mean(points, axis=0)
-        cov = np.cov(centered.T)
-        eigvals, eigvecs = np.linalg.eigh(cov)
-        lengths = np.sqrt(eigvals) * 2  # Approx. diameter along each PCA axis
-        return lengths
+    sample_surface_points = surface_points_from_vtk_mask(
+        body.GetOutput(),
+        max_points=8000,
+        sample_mode="stride",
+    )
+    reference_polydata = ogo.readPolyData(reference_path)
+    reference_points = sample_points(
+        polydata_points(reference_polydata),
+        max_points=8000,
+        mode="linspace",
+    )
 
-    # Get sample surface from marching cubes
-    mcubes = perform_marching_cubes(body)
-    mcubes_output = mcubes.GetOutput()
-
-    # Load reference polydata
-    reference_reader = vtk.vtkPolyDataReader()
-    reference_reader.SetFileName(reference_path)
-    reference_reader.Update()
-    reference_polydata = reference_reader.GetOutput()
-
-    sample_lengths = get_principal_axes_lengths(mcubes_output)
-    ref_lengths = get_principal_axes_lengths(reference_polydata)
+    sample_lengths = point_cloud_axis_lengths(sample_surface_points)
+    ref_lengths = point_cloud_axis_lengths(reference_points)
     if scale_factors is None:
         scale_factors = sample_lengths / ref_lengths
         min_scale = parse_scale_triplet(min_scale, "registration_min_scale")
         max_scale = parse_scale_triplet(max_scale, "registration_max_scale")
         scale_factors = np.minimum(scale_factors, max_scale)
         scale_factors = np.maximum(scale_factors, min_scale)
-        scale_source = "PCA axis lengths"
+        scale_source = "voxel-surface PCA axis lengths"
     else:
         scale_factors = parse_scale_triplet(scale_factors, "registration_scale")
         scale_source = "manual override"
@@ -406,45 +438,45 @@ def get_icp_with_scaling(
     ogo.message(f"PCA axis lengths (reference): {np.round(ref_lengths, 2)}")
     ogo.message(f"Scale factors applied to reference ({scale_source}): {np.round(scale_factors, 3)}")
 
-    # Scale the reference to match the sample
-    scale_transform = vtk.vtkTransform()
-    scale_transform.Scale(*scale_factors)
+    transform = estimate_rigid_icp(
+        moving_points=reference_points * scale_factors,
+        fixed_points=sample_surface_points,
+        iterations=50,
+        tolerance=1.0e-4,
+        start_by_matching_centroids_only=False,
+        convergence="delta",
+        distance_mode="mean",
+    )
 
-    transform_filter = vtk.vtkTransformPolyDataFilter()
-    transform_filter.SetInputData(reference_polydata)
-    transform_filter.SetTransform(scale_transform)
-    transform_filter.Update()
-    scaled_reference = transform_filter.GetOutput()
+    matrix = vtk.vtkMatrix4x4()
+    matrix.Identity()
+    rotation = transform["rotation"]
+    translation = transform["translation"]
+    for row in range(3):
+        for col in range(3):
+            matrix.SetElement(row, col, float(rotation[row, col]))
+        matrix.SetElement(row, 3, float(translation[row]))
 
-    # ICP with scaled reference
-    icp = vtk.vtkIterativeClosestPointTransform()
-    icp.SetTarget(mcubes_output)
-    icp.SetSource(scaled_reference)
-    icp.StartByMatchingCentroidsOn()
-    icp.GetLandmarkTransform().SetModeToRigidBody()
-    icp.SetMeanDistanceModeToRMS()
-    icp.SetMaximumMeanDistance(0.05)
-    icp.CheckMeanDistanceOn()
-    icp.SetMaximumNumberOfLandmarks(250)
-    icp.SetMaximumNumberOfIterations(75)
-    icp.Update()
+    vtk_transform = vtk.vtkTransform()
+    vtk_transform.SetMatrix(matrix)
+    ogo.message(
+        "ICP (with scaled reference) iterations=%d mean_distance=%0.4f"
+        % (transform["iterations"], transform["mean_distance"])
+    )
+    ogo.message("ICP reference-to-sample Matrix:")
+    print_matrix(vtk_transform.GetMatrix())
 
-    ogo.message("ICP (with scaled reference) Matrix:")
-    print_matrix(icp.GetMatrix())
-
-    return icp
+    return vtk_transform
 
 def get_icp(body, reference_path):
 
     mcubes = perform_marching_cubes(body)
     mcubes_output = mcubes.GetOutput()
-    reference_bone_reader = vtk.vtkPolyDataReader()
-    reference_bone_reader.SetFileName(reference_path)
-    reference_bone_reader.Update()
+    reference_bone = ogo.readPolyData(reference_path)
     
     icp = vtk.vtkIterativeClosestPointTransform()
     icp.SetTarget(mcubes_output)
-    icp.SetSource(reference_bone_reader.GetOutput())
+    icp.SetSource(reference_bone)
     
     icp.StartByMatchingCentroidsOn()
     icp.GetLandmarkTransform().SetModeToRigidBody()
@@ -464,6 +496,15 @@ def transform_resample(image, matrix, iso_resolution, interpolation='cubic'):
     if output.GetNumberOfPoints() == 0:
         ogo.message("Reslice output contains no points. Check the input and transformation.")
     return output
+
+
+def _matrix_rotation_translation(matrix):
+    rotation = np.asarray(
+        [[matrix.GetElement(row, col) for col in range(3)] for row in range(3)],
+        dtype=float,
+    )
+    translation = np.asarray([matrix.GetElement(row, 3) for row in range(3)], dtype=float)
+    return rotation, translation
 
 ###################################################################### DISK GENERATION
 ## Functions related to disk generation (image processing)
@@ -596,9 +637,9 @@ def generate_cortical_mask(image_vtk, mask_vtk, threshold=0.2, min_th=1, max_th=
 
 
 def convert_image_to_material(image, mask, n_bins=128, cort_mask=None):     
-    change = ogo.changeInfo(image)
-    mask_change = ogo.changeInfo(mask)
-    cort_mask_change = ogo.changeInfo(cort_mask) if cort_mask is not None else None
+    change = ogo.prepareFiniteElementImage(image)
+    mask_change = ogo.prepareFiniteElementImage(mask)
+    cort_mask_change = ogo.prepareFiniteElementImage(cort_mask) if cort_mask is not None else None
     connected_image = ogo.imageConnectivity(change)
     thr_image = ogo.bmd_preprocess(connected_image, -31)
     #this was done previously - but if someone wants this they should just do it in the calib functions
@@ -610,7 +651,7 @@ def convert_image_to_material(image, mask, n_bins=128, cort_mask=None):
     return binned_image, bin_centers
 
 def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_id, node_set_name):
-    """Compatibility wrapper for shared spine FE visible-node detection."""
+    """Delegate visible-node detection to the shared FE model helper."""
     from ogo.fea.model import find_and_add_visible_nodes as _find_and_add_visible_nodes
 
     return _find_and_add_visible_nodes(
@@ -618,20 +659,20 @@ def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_
     )
 
 def resolve_func(func_or_name, module):
-    """Compatibility wrapper for material-law function resolution."""
+    """Resolve a material-law function by object or configured name."""
     from ogo.fea.materials import resolve_material_func
 
     return resolve_material_func(func_or_name, module)
 
 def apply_boundary_conditions(model,**kwargs):
-    """Compatibility wrapper for shared spine compression boundary conditions."""
+    """Apply the maintained spine compression boundary conditions."""
     from ogo.fea.model import apply_spine_boundary_conditions
 
     return apply_spine_boundary_conditions(model, **kwargs)
 
 
 def log_fe_arguments(**kwargs):
-    """Compatibility wrapper for shared FE argument logging."""
+    """Print model-building arguments through the shared FE logger."""
     from ogo.fea.model import log_fe_arguments as _log_fe_arguments
 
     return _log_fe_arguments(**kwargs)
@@ -642,7 +683,7 @@ def create_microfe_model(
     bin_centers,
     **kwargs
 ):
-    """Compatibility wrapper for shared spine compression model creation."""
+    """Create a spine compression micro-FE model from material and BC masks."""
     from ogo.fea.model import create_microfe_model as _create_microfe_model
 
     return _create_microfe_model(
@@ -897,12 +938,30 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         "mask_smoothing_spacing_threshold",
         DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
     )
+    label_smoothing_sigma_mm = float(
+        kwargs.get("label_smoothing_sigma_mm", DEFAULT_SPINE_LABEL_SMOOTHING_SIGMA_MM)
+    )
+    label_smoothing_threshold = float(
+        kwargs.get("label_smoothing_threshold", DEFAULT_SPINE_LABEL_SMOOTHING_THRESHOLD)
+    )
    
     #Read Image and Mask
     ogo.message(f"Reading image...: {input_image}")
     image_reader = read(input_image)
     ogo.message(f"Reading mask...: {input_mask}")
     mask_reader = resample_to_match(image_reader.GetOutput(), read(input_mask).GetOutput())
+    if label_smoothing_sigma_mm > 0:
+        ogo.message(
+            "smoothing input label mask "
+            f"(sigma={label_smoothing_sigma_mm} mm, threshold={label_smoothing_threshold})..."
+        )
+        mask_reader = _NiftiImageHandle(
+            smooth_label_mask_vtk(
+                mask_reader.GetOutput(),
+                sigma_mm=label_smoothing_sigma_mm,
+                threshold=label_smoothing_threshold,
+            )
+        )
     input_spacing = image_reader.GetOutput().GetSpacing()
 
     # Get and Check labels
@@ -931,19 +990,56 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     )
     
     # Transform Images and resample at the same time (less interpolation)
-    transformed_vertebra = transform_resample(
+    reference_to_sample_rotation, reference_to_sample_translation = _matrix_rotation_translation(
+        icp.GetMatrix()
+    )
+    sample_to_reference_rotation, sample_to_reference_translation = invert_point_transform(
+        reference_to_sample_rotation,
+        reference_to_sample_translation,
+    )
+    output_spacing = (float(iso_resolution), float(iso_resolution), float(iso_resolution))
+    isolated_model_mask = combine_mask(
         isolated_vertebra.GetOutput(),
-        icp.GetMatrix(),
-        iso_resolution,
-        interpolation='nearest',
-    )
-    transformed_process = transform_resample(
         isolated_process.GetOutput(),
-        icp.GetMatrix(),
-        iso_resolution,
-        interpolation='nearest',
     )
-    transformed_image = transform_resample(isolated_image.GetOutput(), icp.GetMatrix(), iso_resolution)
+    model_surface_points = surface_points_from_vtk_mask(
+        isolated_model_mask.GetOutput(),
+        max_points=None,
+    )
+    output_origin, output_size = output_grid_for_point_transform(
+        model_surface_points,
+        rotation=sample_to_reference_rotation,
+        translation=sample_to_reference_translation,
+        spacing=output_spacing,
+        margin_voxels=int(kwargs.get("registration_margin_voxels", 4)),
+    )
+    transformed_vertebra = resample_vtk_image_with_point_transform(
+        isolated_vertebra.GetOutput(),
+        rotation=sample_to_reference_rotation,
+        translation=sample_to_reference_translation,
+        output_origin=output_origin,
+        output_size=output_size,
+        output_spacing=output_spacing,
+        interpolation="nearest",
+    )
+    transformed_process = resample_vtk_image_with_point_transform(
+        isolated_process.GetOutput(),
+        rotation=sample_to_reference_rotation,
+        translation=sample_to_reference_translation,
+        output_origin=output_origin,
+        output_size=output_size,
+        output_spacing=output_spacing,
+        interpolation="nearest",
+    )
+    transformed_image = resample_vtk_image_with_point_transform(
+        isolated_image.GetOutput(),
+        rotation=sample_to_reference_rotation,
+        translation=sample_to_reference_translation,
+        output_origin=output_origin,
+        output_size=output_size,
+        output_spacing=output_spacing,
+        interpolation="bspline",
+    )
 
     if should_smooth_resampled_mask(input_spacing, mask_smoothing_spacing_threshold):
         ogo.message(
@@ -994,26 +1090,123 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     padded_mask2 = pad_vtk_image(mask2_labeled.GetOutput(), axis='x', pmma_thick=pmma_thick, pad_value=0)
 
     ogo.message(
-        "extruding fixed-thickness anatomy body-cap disks "
+        "generating fixed-thickness anatomy body-cap disks "
         f"(pmma_thick = {pmma_thick} mm total, pmma_intrusion = {pmma_intrusion} mm)..."
     )
-    inferior_disk = generate_bone_cap_vtk(
-        padded_mask1,
-        label_value=2,
-        thickness=pmma_thick,
-        intrusion=pmma_intrusion,
-        direction='down',
-        axis='x',
-        shape='anatomy',
+    transformed_body_bounds = foreground_voxel_center_bounds(padded_mask1)
+    body_bounds = transformed_body_bounds
+    inferior_plane = bbox_relative_contact_plane(
+        body_bounds,
+        center_fraction=SPINE_INFERIOR_CONTACT_CENTER_FRACTION,
+        size_fraction=SPINE_CONTACT_SIZE_FRACTION,
+        projection_axis="z",
+        shape="anatomy",
     )
-    superior_disk = generate_bone_cap_vtk(
-        padded_mask1,
-        label_value=2,
+    superior_plane = bbox_relative_contact_plane(
+        body_bounds,
+        center_fraction=SPINE_SUPERIOR_CONTACT_CENTER_FRACTION,
+        size_fraction=SPINE_CONTACT_SIZE_FRACTION,
+        projection_axis="z",
+        shape="anatomy",
+    )
+    ogo.message(
+        "Inferior PMMA Plane: center=%s normal=%s u=%s v=%s size=%s"
+        % (
+            inferior_plane["center"],
+            inferior_plane["normal"],
+            inferior_plane["u_axis"],
+            inferior_plane["v_axis"],
+            inferior_plane["size"],
+        )
+    )
+    ogo.message(
+        "Superior PMMA Plane: center=%s normal=%s u=%s v=%s size=%s"
+        % (
+            superior_plane["center"],
+            superior_plane["normal"],
+            superior_plane["u_axis"],
+            superior_plane["v_axis"],
+            superior_plane["size"],
+        )
+    )
+    required_bounds = [
+        projected_material_disk_required_bounds(
+            padded_mask1,
+            center=plane["center"],
+            normal=plane["normal"],
+            u_axis=plane["u_axis"],
+            v_axis=plane["v_axis"],
+            size=plane["size"],
+            shape=plane["shape"],
+            thickness=pmma_thick,
+            intrusion=pmma_intrusion,
+        )
+        for plane in (inferior_plane, superior_plane)
+    ]
+    required_bounds = [bounds for bounds in required_bounds if bounds is not None]
+    if required_bounds:
+        bounds_array = np.asarray(required_bounds, dtype=float)
+        desired_bounds = (
+            float(bounds_array[:, 0].min()),
+            float(bounds_array[:, 1].max()),
+            float(bounds_array[:, 2].min()),
+            float(bounds_array[:, 3].max()),
+            float(bounds_array[:, 4].min()),
+            float(bounds_array[:, 5].max()),
+        )
+        (
+            padded_image,
+            padded_transformed_image,
+            padded_mask,
+            padded_cort_mask,
+            padded_mask1,
+            padded_mask2,
+        ), contact_padding = pad_vtk_images_to_physical_bounds(
+            [
+                padded_image,
+                padded_transformed_image,
+                padded_mask,
+                padded_cort_mask,
+                padded_mask1,
+                padded_mask2,
+            ],
+            desired_bounds=desired_bounds,
+            constants=[0, 0, 0, 0, 0, 0],
+        )
+        if any(contact_padding["lower"]) or any(contact_padding["upper"]):
+            ogo.message(
+                "expanded image canvas for projected disks: lower=%s upper=%s"
+                % (contact_padding["lower"], contact_padding["upper"])
+            )
+    inferior_disk = generate_projected_material_disk_vtk(
+        padded_image,
+        surface_vtk_image=padded_mask1,
+        exclusion_vtk_image=padded_mask1,
+        center=inferior_plane["center"],
+        normal=inferior_plane["normal"],
+        u_axis=inferior_plane["u_axis"],
+        v_axis=inferior_plane["v_axis"],
+        size=inferior_plane["size"],
+        shape=inferior_plane["shape"],
         thickness=pmma_thick,
         intrusion=pmma_intrusion,
-        direction='up',
-        axis='x',
-        shape='anatomy',
+        anatomy_constrained=True,
+        output_value=1,
+    )
+    superior_disk = generate_projected_material_disk_vtk(
+        padded_image,
+        surface_vtk_image=padded_mask1,
+        exclusion_vtk_image=padded_mask1,
+        center=superior_plane["center"],
+        normal=superior_plane["normal"],
+        u_axis=superior_plane["u_axis"],
+        v_axis=superior_plane["v_axis"],
+        size=superior_plane["size"],
+        shape=superior_plane["shape"],
+        thickness=pmma_thick,
+        intrusion=pmma_intrusion,
+        anatomy_constrained=True,
+        output_value=1,
     )
 
     ogo.message(f"merging disks with image...")
@@ -1030,7 +1223,16 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     # This is the final model that we will use for the FEA. 
     # For the future --> pull out material table to have option without disks
     ogo.message("generating n88model file...")
-    model = create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers, **kwargs)
+    model = create_microfe_model(
+        image_with_pads,
+        boundary_masks_with_pads,
+        bin_centers,
+        top_boundary_mask_image=superior_disk,
+        bottom_boundary_mask_image=inferior_disk,
+        top_boundary_mask_label=1,
+        bottom_boundary_mask_label=1,
+        **kwargs,
+    )
 
     if kwargs.get("export_nifti", False):
         ogo.message("generating nifti files...")
@@ -1141,7 +1343,7 @@ def main():
     parser.add_argument("--registration_max_scale", type=str, default=DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
                         help="Maximum sx,sy,sz clamp for automatic PCA registration scaling. (default: %(default)s)")
     parser.add_argument("--registration_backend", choices=("vtk",), default=DEFAULT_SPINE_REGISTRATION_BACKEND,
-                        help="Compatibility option; spine reference alignment uses VTK ICP. (default: %(default)s)")
+                        help="Spine reference alignment backend. (default: %(default)s)")
     parser.add_argument("--top_node_set_id", type=int, default=DEFAULT_SPINE_TOP_NODE_SET_ID,
                         help="ID for the top node set. (default: %(default)s)")
     parser.add_argument("--bottom_node_set_id", type=int, default=DEFAULT_SPINE_BOTTOM_NODE_SET_ID,

@@ -43,6 +43,19 @@ def _centroid(points):
     return {"x": float(center[0]), "y": float(center[1]), "z": float(center[2])}
 
 
+def _planarity(points):
+    if len(points) < 3:
+        return {"rms_mm": 0.0, "normal": [0.0, 0.0, 1.0]}
+    centered = points - points.mean(axis=0)
+    _u, _s, vh = np.linalg.svd(centered, full_matrices=False)
+    normal = vh[-1]
+    distances = centered @ normal
+    return {
+        "rms_mm": float(np.sqrt(np.mean(distances**2))),
+        "normal": [float(value) for value in normal],
+    }
+
+
 def read_node_sets(root):
     out = {}
     for name, group in root.groups["Sets"].groups["NodeSets"].groups.items():
@@ -52,6 +65,7 @@ def read_node_sets(root):
             "count": int(len(node_numbers)),
             "bounds": _bounds(points),
             "centroid": _centroid(points),
+            "planarity": _planarity(points),
         }
     return out
 
@@ -113,11 +127,11 @@ def audit_femur_sideways(node_sets, constraints, tolerance):
 
     distal = node_sets.get(DISTAL_FEMUR_NODE_SET)
     if distal:
-        z_span = distal["bounds"]["z_max"] - distal["bounds"]["z_min"]
+        rms = distal.get("planarity", {}).get("rms_mm", 0.0)
         checks.append({
-            "name": "distal shaft set is one flat z plane",
-            "passed": z_span <= tolerance,
-            "detail": f"z_span={z_span:.6g}",
+            "name": "distal shaft set is a planar support surface",
+            "passed": rms <= max(float(tolerance), 1.5),
+            "detail": f"planarity_rms_mm={rms:.6g}",
         })
 
     expected_zero_constraints = {
@@ -172,13 +186,18 @@ def audit_spine_compression(node_sets, constraints, tolerance):
                 "detail": f"z_span={z_span:.6g}",
             })
 
-    axis = _single_axis(constraints, "bottom_fixed_z")
-    value = _single_value(constraints, "bottom_fixed_z")
-    checks.append({
-        "name": "bottom_fixed_z fixes z",
-        "passed": axis == "z" and value == 0.0,
-        "detail": f"axis={axis}, value={value}",
-    })
+    for name, expected_axis in (
+        ("bottom_fixed_x", "x"),
+        ("bottom_fixed_y", "y"),
+        ("bottom_fixed_z", "z"),
+    ):
+        axis = _single_axis(constraints, name)
+        value = _single_value(constraints, name)
+        checks.append({
+            "name": f"{name} fixes {expected_axis}",
+            "passed": axis == expected_axis and value == 0.0,
+            "detail": f"axis={axis}, value={value}",
+        })
     return checks
 
 

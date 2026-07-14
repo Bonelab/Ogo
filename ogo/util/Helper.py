@@ -714,11 +714,10 @@ def cast2sameScalarType(vtk_image, template_image):
     return cast.GetOutput()
 
 
-def changeInfo(vtk_image):
-    """Changes the origin of image to 0,0,0"""
+def prepareFiniteElementImage(vtk_image):
+    """Prepare image data for FE meshing while preserving physical metadata."""
     change = vtk.vtkImageChangeInformation()
     change.SetInputData(vtk_image)
-    change.SetOutputOrigin(0, 0, 0)
     change.Update()
     return change.GetOutput()
 
@@ -1410,11 +1409,11 @@ def iterativeClosestPoint(source, target):
     icp.SetTarget(target)
     icp.StartByMatchingCentroidsOn()
     icp.GetLandmarkTransform().SetModeToRigidBody()
-    icp.SetMeanDistanceModeToRMS()
+    icp.SetMeanDistanceModeToAbsoluteValue()
     icp.SetMaximumMeanDistance(0.05)
     icp.CheckMeanDistanceOn()
-    icp.SetMaximumNumberOfLandmarks(250)
-    icp.SetMaximumNumberOfIterations(75)
+    icp.SetMaximumNumberOfLandmarks(8000)
+    icp.SetMaximumNumberOfIterations(50)
     icp.Update()
     return icp.GetMatrix()
 
@@ -1748,7 +1747,7 @@ def point2cellData(vtk_image):
 
 
 def preRotateImage(image, mask, z_rotation):
-    """Pre-rotation the image for ICP alignment."""
+    """Rotate an image/mask pair around the image z axis for ICP initialization."""
     message("Pre-rotating image...")
     spacing = image.GetSpacing()
     origin = image.GetOrigin()
@@ -1761,7 +1760,6 @@ def preRotateImage(image, mask, z_rotation):
 
     transform = vtk.vtkTransform()
     transform.Translate(center[0], center[1], center[2])
-    transform.RotateY(180)
     transform.RotateZ(z_rotation)
     transform.Translate(-center[0], -center[1], -center[2])
 
@@ -1784,14 +1782,17 @@ def preRotateImage(image, mask, z_rotation):
 
 
 def readPolyData(vtk_poly):
-    """Reads a VTK Legacy file in PolyData Format.
-    The first argument is the filename.
-    Returns the Poly Data reader output.
-    """
+    """Read VTK polydata as RAS physical reference geometry."""
     poly = vtk.vtkPolyDataReader()
     poly.SetFileName(vtk_poly)
     poly.Update()
-    return poly.GetOutput()
+    transform = vtk.vtkTransform()
+    transform.Scale(-1.0, -1.0, 1.0)
+    transform_filter = vtk.vtkTransformPolyDataFilter()
+    transform_filter.SetInputData(poly.GetOutput())
+    transform_filter.SetTransform(transform)
+    transform_filter.Update()
+    return transform_filter.GetOutput()
 
 
 def readTransform(transform_file):
@@ -2655,11 +2656,14 @@ def readDCM(fileDir):
     return flip2.GetOutput()
 # 
 def readNii(filename):
-     """Reads a NIFTI image.
-     The first argument is the image filename.
-     Returns the Image as vtk Output Data
-     """
-     image = vtk.vtkNIFTIImageReader()
-     image.SetFileName(filename)
-     image.Update()
-     return image.GetOutput()
+     """Read a NIfTI image into a RAS physical-space VTK image."""
+     image = sitk.DICOMOrient(sitk.ReadImage(str(filename)), "RAS")
+     array_xyz = np.ascontiguousarray(np.transpose(sitk.GetArrayFromImage(image), (2, 1, 0)))
+
+     vtk_image = vtk.vtkImageData()
+     vtk_image.SetDimensions(array_xyz.shape)
+     vtk_image.SetSpacing(tuple(float(value) for value in image.GetSpacing()))
+     origin_lps = image.GetOrigin()
+     vtk_image.SetOrigin(-float(origin_lps[0]), -float(origin_lps[1]), float(origin_lps[2]))
+     vtk_image.GetPointData().SetScalars(numpy_to_vtk(array_xyz.ravel(order="F"), deep=True))
+     return vtk_image

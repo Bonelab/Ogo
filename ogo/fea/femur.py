@@ -4,32 +4,30 @@ Default femur workflow:
 1. Read the calibrated density image and whole-femur mask. The public wrapper
    chooses left/right from ``--side`` and the lower-level script uses
    ``femur_side=1`` for left and ``2`` for right.
-2. Pre-rotate the femur by side to provide a stable starting orientation for
-   ICP. This is a VTK reslice in the native input grid.
-3. Run ICP to the bundled side-specific femur reference, then apply the ICP
-   transform and set the final output spacing to 1.0 x 1.0 x 1.0 mm in one
-   shared VTK reslice helper. Image data use cubic interpolation; bone and
-   compartment labels use nearest-neighbor interpolation.
-4. Smooth the transformed femur mask with one binary close/open pass only when
+2. Run ICP to the bundled side-specific femur reference from the cropped and
+   padded input geometry, then build an explicit reference-frame output grid
+   from the transformed femur surface. Density is resampled with B-spline
+   interpolation; bone, crop-face, and compartment labels use nearest-neighbor
+   interpolation on the same grid.
+3. Smooth the transformed femur mask with one binary close/open pass only when
    at least one input spacing dimension is coarser than 2 mm. If a compartment
    mask is supplied, the derived cortical binary mask follows the same rule.
-5. Standardize the distal shaft by cutting on a flat model-grid z plane. The
+4. Standardize the distal shaft by cutting on a flat model-grid z plane. The
    default cut mode detects the lesser-trochanter cross-section peak and keeps
    the femur to 50 mm distal to that landmark. If the scan does not include the
    required distal field of view, model generation fails instead of silently
    using a shorter shaft. ``fixed_length`` mode is available for debugging.
-6. Generate two geometric PMMA fixtures: a round femoral-head loading fixture
-   and a box-like greater-trochanter contact fixture. Defaults are 6 mm PMMA
-   thickness and 6 mm intrusion through that fixed thickness. The fixture masks
-   themselves do not overwrite bone voxels; intrusion only determines
-   which anatomy is close enough to support the cap. The femoral-head footprint
-   is widened by 10 mm and lengthened by 80 mm so the anatomical cropping
-   determines the actual contact.
-7. Apply sideways-fall boundary conditions: prescribed displacement at the
+5. Generate two geometric PMMA fixtures from bbox-relative contact planes:
+   a femoral-head loading fixture on the high-y side and a greater-trochanter
+   contact fixture on the low-y side. Defaults are 10 mm PMMA thickness and
+   6 mm intrusion through that fixed thickness. The square fixture footprints
+   scale with the generated model bbox, and the fixture masks themselves do
+   not overwrite bone voxels.
+6. Apply sideways-fall boundary conditions: prescribed displacement at the
    femoral-head PMMA cap toward the greater trochanter, loading-direction
    constraint at the greater-trochanter PMMA cap, and distal shaft constraints
    to remove rigid-body motion.
-8. Build materials with the same shared bone/PMMA material-table helper used by
+7. Build materials with the same shared bone/PMMA material-table helper used by
    the spine workflow. If no compartment mask is supplied, femur bone is one
    trabecular-style region. If supplied, cortical=1 and trabecular=2 by default.
 """
@@ -46,11 +44,20 @@ DEFAULT_FEMUR_TARGET_DISPLACEMENT_PERCENT = 4.0
 DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM = 2.0
 FEMORAL_HEAD_FIXTURE_WIDTH_EXTENSION_MM = 10.0
 FEMORAL_HEAD_FIXTURE_LONG_AXIS_EXTENSION_MM = 80.0
-DEFAULT_PMMA_THICKNESS_MM = 6.0
+SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION = (1.1, 1.1)
+FEMORAL_HEAD_FIXTURE_CENTER_FRACTION = (0.5, 1.0278767152, 0.9650933279)
+GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION = (0.5, 0.0151983839, 0.6551527108)
+DISTAL_SHAFT_FIXTURE_CENTER_FRACTION = (0.1958514895, 0.5708725889, 0.0601674635)
+DISTAL_SHAFT_FIXTURE_SIZE_FRACTION = (0.3640088821, 0.6351022953)
+DEFAULT_FEMUR_BBOX_RATIO = (1.0, 1.2, None)
+DEFAULT_FEMUR_BBOX_CROP_FROM = (None, "min", None)
+DEFAULT_FEMUR_REFERENCE_MIN_SCALE = (0.8, 0.8, 0.75)
+DEFAULT_FEMUR_REFERENCE_MAX_SCALE = (1.2, 1.2, 1.3)
+DEFAULT_PMMA_THICKNESS_MM = 10.0
 DEFAULT_PMMA_INTRUSION_MM = 6.0
 DEFAULT_FEMUR_INPUT_MARGIN_MM = DEFAULT_PMMA_THICKNESS_MM + DEFAULT_PMMA_INTRUSION_MM
 DEFAULT_FEMUR_SHAFT_LENGTH_MM = 100.0
-DEFAULT_FEMUR_CUT_MODE = "lesser_trochanter"
+DEFAULT_FEMUR_CUT_MODE = "bbox_ratio"
 DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM = 50.0
 DEFAULT_CORTICAL_LABEL = 1
 DEFAULT_TRABECULAR_LABEL = 2
@@ -74,19 +81,1001 @@ def side_suffix(femur_side):
     raise ValueError("femur_side must be 1 for left or 2 for right.")
 
 
-def side_rotation(femur_side):
-    """Return the pre-alignment z rotation for a femur side."""
-    if femur_side == LEFT_FEMUR:
-        return 90
-    if femur_side == RIGHT_FEMUR:
-        return -90
-    raise ValueError("femur_side must be 1 for left or 2 for right.")
-
-
 def sideways_fall_output_name(output_file, femur_side):
     """Return the compact side-specific sideways-fall output path."""
     output_path = Path(output_file)
     return str(output_path.with_name(f"{output_path.stem}_{side_suffix(femur_side)}.n88model"))
+
+
+def _axis_index(axis):
+    axis_map = {"x": 0, "y": 1, "z": 2}
+    try:
+        return axis_map[str(axis).lower()]
+    except KeyError as exc:
+        raise ValueError("projection_axis must be 'x', 'y', or 'z'.") from exc
+
+
+def _axis_bounds(model_bounds, axis):
+    index = 2 * int(axis)
+    return float(model_bounds[index]), float(model_bounds[index + 1])
+
+
+def foreground_voxel_center_bounds_from_mask(mask, *, origin, spacing):
+    """Return x/y/z physical bounds of nonzero voxel centers.
+
+    Bbox-relative workflow fixtures are authored against the occupied voxel
+    centers, matching the image-space convention used by interactive workflow
+    replay. FE mesh/node bounds are wider by the element faces and should not
+    be used to resolve those recipe planes.
+    """
+    import numpy as np
+
+    active = np.asarray(mask) != 0
+    coords = np.argwhere(active)
+    if coords.size == 0:
+        raise ValueError("Cannot compute foreground bounds from an empty mask.")
+    origin = np.asarray(origin, dtype=np.float64)
+    spacing = np.asarray(spacing, dtype=np.float64)
+    if origin.shape != (3,) or spacing.shape != (3,):
+        raise ValueError("origin and spacing must contain three values.")
+    lo = origin + coords.min(axis=0).astype(np.float64) * spacing
+    hi = origin + coords.max(axis=0).astype(np.float64) * spacing
+    return (
+        float(lo[0]),
+        float(hi[0]),
+        float(lo[1]),
+        float(hi[1]),
+        float(lo[2]),
+        float(hi[2]),
+    )
+
+
+def foreground_voxel_center_bounds(vtk_image):
+    """Return physical foreground bounds for a VTK image using voxel centers."""
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    return foreground_voxel_center_bounds_from_mask(
+        vtk_image_to_numpy(vtk_image),
+        origin=vtk_image.GetOrigin(),
+        spacing=vtk_image.GetSpacing(),
+    )
+
+
+def matrix4x4_to_numpy(matrix):
+    """Return a 4 x 4 NumPy matrix from a VTK matrix or array-like value."""
+    import numpy as np
+
+    if hasattr(matrix, "GetElement"):
+        return np.asarray(
+            [[float(matrix.GetElement(row, col)) for col in range(4)] for row in range(4)],
+            dtype=np.float64,
+        )
+    values = np.asarray(matrix, dtype=np.float64)
+    if values.shape != (4, 4):
+        raise ValueError("transform matrix must have shape 4 x 4.")
+    return values
+
+
+def reference_grid_from_output_to_input_matrix(
+    points_xyz,
+    output_to_input_matrix,
+    *,
+    spacing,
+    margin_voxels=4,
+):
+    """Return an explicit output grid for a transformed surface point cloud.
+
+    Registration matrices used by image resampling map output coordinates back
+    to input coordinates. To build the output lattice, first map input surface
+    points through the inverse matrix, then pad the transformed bounds by a
+    fixed number of voxels. This keeps the final model grid stable and
+    independent of toolkit-specific automatic crop rules.
+    """
+    import numpy as np
+
+    points = np.asarray(points_xyz, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
+        raise ValueError("points_xyz must have shape (n, 3) with at least one point.")
+    matrix = matrix4x4_to_numpy(output_to_input_matrix)
+    inverse = np.linalg.inv(matrix)
+    homogeneous = np.column_stack([points, np.ones(points.shape[0], dtype=np.float64)])
+    transformed = (homogeneous @ inverse.T)[:, :3]
+    spacing_arr = np.asarray(spacing, dtype=np.float64)
+    if spacing_arr.shape != (3,) or np.any(spacing_arr <= 0.0):
+        raise ValueError("spacing must contain three positive values.")
+    margin = max(0, int(margin_voxels))
+    lower = transformed.min(axis=0) - margin * spacing_arr
+    upper = transformed.max(axis=0) + margin * spacing_arr
+    size = np.maximum(1, np.ceil((upper - lower) / spacing_arr).astype(int) + 1)
+    return tuple(float(value) for value in lower), tuple(int(value) for value in size)
+
+
+def reference_grid_from_vtk_mask(
+    vtk_mask,
+    output_to_input_matrix,
+    *,
+    margin_voxels=4,
+):
+    """Return an explicit reference-frame output grid for a transformed mask."""
+    points = surface_points_from_vtk_mask(vtk_mask, max_points=None)
+    return reference_grid_from_output_to_input_matrix(
+        points,
+        output_to_input_matrix,
+        spacing=vtk_mask.GetSpacing(),
+        margin_voxels=margin_voxels,
+    )
+
+
+def transform_resample_vtk_image_to_reference_grid(
+    vtk_image,
+    output_to_input_matrix,
+    *,
+    output_origin,
+    output_size,
+    output_spacing,
+    interpolation="nearest",
+):
+    """Resample a VTK image onto an explicit reference-frame grid."""
+    import numpy as np
+    import SimpleITK as sitk
+    import vtk
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    matrix = matrix4x4_to_numpy(output_to_input_matrix)
+    array_zyx = vtk_image_to_numpy(vtk_image, processing_order=True)
+    image = sitk.GetImageFromArray(array_zyx)
+    image.SetSpacing(tuple(float(value) for value in vtk_image.GetSpacing()))
+    image.SetOrigin(tuple(float(value) for value in vtk_image.GetOrigin()))
+    image.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+
+    transform = sitk.AffineTransform(3)
+    transform.SetMatrix(tuple(float(value) for value in matrix[:3, :3].reshape(-1)))
+    transform.SetTranslation(tuple(float(value) for value in matrix[:3, 3]))
+
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetSize([int(value) for value in output_size])
+    resampler.SetOutputSpacing(tuple(float(value) for value in output_spacing))
+    resampler.SetOutputOrigin(tuple(float(value) for value in output_origin))
+    resampler.SetOutputDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+    resampler.SetTransform(transform)
+    resampler.SetDefaultPixelValue(0)
+    resampler.SetInterpolator(
+        sitk.sitkNearestNeighbor
+        if interpolation == "nearest"
+        else sitk.sitkBSpline
+        if interpolation == "bspline"
+        else sitk.sitkLinear
+    )
+    out_zyx = sitk.GetArrayFromImage(resampler.Execute(image))
+    out_xyz = np.transpose(out_zyx, (2, 1, 0))
+    vtk_type = vtk.VTK_UNSIGNED_CHAR if interpolation == "nearest" else vtk_image.GetScalarType()
+    out = _vtk_image_from_array(
+        out_xyz,
+        vtk_image,
+        origin=tuple(float(value) for value in output_origin),
+        vtk_array_type=vtk_type,
+    )
+    out.SetSpacing(tuple(float(value) for value in output_spacing))
+    return out
+
+
+def bbox_relative_fixture_bounds(
+    model_bounds,
+    *,
+    center_fraction,
+    size_fraction,
+    projection_axis="y",
+    shape="rectangle",
+):
+    """Return physical contact ROI bounds from model-bbox-relative plane values.
+
+    ``center_fraction`` has x/y/z fractions relative to the model bbox. The two
+    ``size_fraction`` values scale the lateral axes of the projection plane in
+    coordinate order. When ``shape="square"``, the smaller scaled lateral
+    length is used on both axes. The projection axis itself spans the whole
+    model bbox so the cap builder can find the nearest supported anatomy
+    column.
+    """
+    from ogo.fea.boundary import bbox_relative_contact_bounds
+
+    return bbox_relative_contact_bounds(
+        model_bounds,
+        center_fraction=center_fraction,
+        size_fraction=size_fraction,
+        projection_axis=projection_axis,
+        shape=shape,
+    )
+
+
+def bbox_relative_fixture_direction(center_fraction, *, projection_axis="y"):
+    """Return the cap side implied by a bbox-relative plane fraction."""
+    from ogo.fea.boundary import bbox_relative_contact_direction
+
+    return bbox_relative_contact_direction(
+        center_fraction,
+        projection_axis=projection_axis,
+    )
+
+
+def _axis_extent_from_vector(model_bounds, vector):
+    import numpy as np
+
+    spans = np.asarray(
+        [
+            float(model_bounds[1]) - float(model_bounds[0]),
+            float(model_bounds[3]) - float(model_bounds[2]),
+            float(model_bounds[5]) - float(model_bounds[4]),
+        ],
+        dtype=float,
+    )
+    return float(np.sum(np.abs(np.asarray(vector, dtype=float)) * spans))
+
+
+def _fixture_plane_axes(projection_axis, normal_sign):
+    """Return stable in-plane axes for bbox-relative fixture planes."""
+    axis = _axis_index(projection_axis)
+    sign = 1.0 if float(normal_sign) >= 0.0 else -1.0
+    if axis == 0:
+        return (0.0, 0.0, sign), (0.0, -1.0, 0.0)
+    if axis == 1:
+        return (0.0, 0.0, -sign), (-1.0, 0.0, 0.0)
+    return (1.0, 0.0, 0.0), (0.0, sign, 0.0)
+
+
+def bbox_relative_fixture_plane(
+    model_bounds,
+    *,
+    center_fraction,
+    size_fraction,
+    projection_axis="y",
+    shape="square",
+):
+    """Return a physical contact-plane definition from bbox-relative values."""
+    from ogo.fea.boundary import bbox_relative_contact_plane
+
+    return bbox_relative_contact_plane(
+        model_bounds,
+        center_fraction=center_fraction,
+        size_fraction=size_fraction,
+        projection_axis=projection_axis,
+        shape=shape,
+    )
+
+
+def _scale_triplet(values, name):
+    import numpy as np
+
+    parsed = np.asarray(values, dtype=float)
+    if parsed.shape != (3,):
+        raise ValueError(f"{name} must contain three x/y/z values.")
+    return parsed
+
+
+def principal_axis_lengths(polydata):
+    """Return approximate principal-axis diameters for a VTK polydata surface."""
+    import numpy as np
+    from vtk.util.numpy_support import vtk_to_numpy
+
+    points = polydata.GetPoints()
+    if points is None or points.GetNumberOfPoints() == 0:
+        raise ValueError("Cannot measure principal axes for empty polydata.")
+    coordinates = np.asarray(vtk_to_numpy(points.GetData()), dtype=float)
+    centered = coordinates - coordinates.mean(axis=0)
+    covariance = np.cov(centered.T)
+    eigvals = np.linalg.eigvalsh(covariance)
+    return np.sqrt(np.maximum(eigvals, 0.0)) * 2.0
+
+
+def polydata_points(polydata):
+    """Return VTK polydata point coordinates as an ``(n, 3)`` NumPy array."""
+    import numpy as np
+    from vtk.util.numpy_support import vtk_to_numpy
+
+    points = polydata.GetPoints()
+    if points is None or points.GetNumberOfPoints() == 0:
+        raise ValueError("Polydata contains no points.")
+    coordinates = np.asarray(vtk_to_numpy(points.GetData()), dtype=float)
+    if coordinates.ndim != 2 or coordinates.shape[1] != 3:
+        raise ValueError("Polydata points must have shape (n, 3).")
+    return coordinates[np.all(np.isfinite(coordinates), axis=1)]
+
+
+def polydata_from_points(points):
+    """Create a vertex-only VTK polydata from an ``(n, 3)`` point cloud."""
+    import numpy as np
+    import vtk
+
+    coordinates = np.asarray(points, dtype=float)
+    if coordinates.ndim != 2 or coordinates.shape[1] != 3 or coordinates.shape[0] < 3:
+        raise ValueError("points must have shape (n, 3) with at least three rows.")
+
+    vtk_points = vtk.vtkPoints()
+    vertices = vtk.vtkCellArray()
+    for point in coordinates:
+        point_id = vtk_points.InsertNextPoint(float(point[0]), float(point[1]), float(point[2]))
+        vertices.InsertNextCell(1)
+        vertices.InsertCellPoint(point_id)
+
+    polydata = vtk.vtkPolyData()
+    polydata.SetPoints(vtk_points)
+    polydata.SetVerts(vertices)
+    return polydata
+
+
+def sample_points(points, *, max_points=None, mode="linspace", offset=0):
+    """Sample a point cloud using the same small deterministic modes as workflows."""
+    import numpy as np
+
+    coordinates = np.asarray(points, dtype=float)
+    if max_points is None or int(max_points) <= 0 or coordinates.shape[0] <= int(max_points):
+        return coordinates
+
+    token = str(mode).strip().lower()
+    if token == "stride":
+        step = max(1, int(np.ceil(coordinates.shape[0] / int(max_points))))
+        start = int(offset) % step
+        indices = np.arange(start, coordinates.shape[0], step, dtype=int)
+        if indices.size < int(max_points):
+            fallback = np.linspace(0, coordinates.shape[0] - 1, int(max_points), dtype=int)
+            indices = np.unique(np.concatenate([indices, fallback]))
+        indices = indices[: int(max_points)]
+    else:
+        indices = np.linspace(0, coordinates.shape[0] - 1, int(max_points), dtype=int)
+    return coordinates[indices]
+
+
+def _binary_erosion_6(mask):
+    import numpy as np
+
+    padded = np.pad(mask, 1, mode="constant", constant_values=False)
+    center = padded[1:-1, 1:-1, 1:-1]
+    eroded = center.copy()
+    eroded &= padded[:-2, 1:-1, 1:-1]
+    eroded &= padded[2:, 1:-1, 1:-1]
+    eroded &= padded[1:-1, :-2, 1:-1]
+    eroded &= padded[1:-1, 2:, 1:-1]
+    eroded &= padded[1:-1, 1:-1, :-2]
+    eroded &= padded[1:-1, 1:-1, 2:]
+    return eroded
+
+
+def surface_points_from_vtk_mask(
+    vtk_mask,
+    *,
+    max_points=8000,
+    sample_mode="stride",
+    sample_offset=0,
+):
+    """Return physical x/y/z points from the 6-connected voxel mask surface."""
+    import numpy as np
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    mask = np.asarray(vtk_image_to_numpy(vtk_mask), dtype=bool)
+    if not np.any(mask):
+        raise ValueError("mask contains no foreground voxels.")
+
+    surface = mask & ~_binary_erosion_6(mask)
+    # Match the workflow-replay path: enumerate the voxel surface in z/y/x
+    # NumPy order, then convert those indices back to physical x/y/z points.
+    surface_zyx = np.transpose(surface if np.any(surface) else mask, (2, 1, 0))
+    coords_xyz = np.argwhere(surface_zyx)[:, [2, 1, 0]].astype(float)
+    points = np.asarray(vtk_mask.GetOrigin(), dtype=float) + coords_xyz * np.asarray(
+        vtk_mask.GetSpacing(),
+        dtype=float,
+    )
+    return sample_points(
+        points,
+        max_points=max_points,
+        mode=sample_mode,
+        offset=sample_offset,
+    )
+
+
+def point_cloud_axis_lengths(points):
+    """Return approximate principal-axis diameters for an ``(n, 3)`` point cloud."""
+    import numpy as np
+
+    coordinates = np.asarray(points, dtype=float)
+    if coordinates.ndim != 2 or coordinates.shape[1] != 3 or coordinates.shape[0] < 3:
+        raise ValueError("points must have shape (n, 3) with at least three rows.")
+    centered = coordinates - coordinates.mean(axis=0)
+    covariance = np.cov(centered.T)
+    eigvals = np.linalg.eigvalsh(covariance)
+    return np.sqrt(np.maximum(eigvals, 0.0)) * 2.0
+
+
+def scale_reference_point_cloud_to_sample(
+    reference_polydata,
+    sample_surface_points,
+    *,
+    max_points=8000,
+    reference_sample_mode="linspace",
+    min_scale=DEFAULT_FEMUR_REFERENCE_MIN_SCALE,
+    max_scale=DEFAULT_FEMUR_REFERENCE_MAX_SCALE,
+):
+    """Scale sampled reference points to the sampled voxel-surface point cloud."""
+    import numpy as np
+
+    reference_points = sample_points(
+        polydata_points(reference_polydata),
+        max_points=max_points,
+        mode=reference_sample_mode,
+    )
+    sample_points_array = np.asarray(sample_surface_points, dtype=float)
+    reference_lengths = point_cloud_axis_lengths(reference_points)
+    sample_lengths = point_cloud_axis_lengths(sample_points_array)
+    scale = sample_lengths / np.maximum(reference_lengths, 1.0e-6)
+    min_values = _scale_triplet(min_scale, "min_scale")
+    max_values = _scale_triplet(max_scale, "max_scale")
+    scale = np.clip(scale, min_values, max_values)
+
+    scaled_points = reference_points * scale
+    return polydata_from_points(scaled_points), {
+        "source": "voxel_surface_point_cloud",
+        "reference_axis_lengths": reference_lengths.tolist(),
+        "sample_axis_lengths": sample_lengths.tolist(),
+        "scale_factors": scale.tolist(),
+        "min_scale": min_values.tolist(),
+        "max_scale": max_values.tolist(),
+    }
+
+
+def scale_reference_to_sample_principal_lengths(
+    reference_polydata,
+    sample_polydata,
+    *,
+    min_scale=DEFAULT_FEMUR_REFERENCE_MIN_SCALE,
+    max_scale=DEFAULT_FEMUR_REFERENCE_MAX_SCALE,
+):
+    """Scale a femur reference so its principal lengths match the sample."""
+    import numpy as np
+    import vtk
+
+    reference_lengths = principal_axis_lengths(reference_polydata)
+    sample_lengths = principal_axis_lengths(sample_polydata)
+    scale = sample_lengths / np.maximum(reference_lengths, 1.0e-6)
+    min_values = _scale_triplet(min_scale, "min_scale")
+    max_values = _scale_triplet(max_scale, "max_scale")
+    scale = np.clip(scale, min_values, max_values)
+
+    transform = vtk.vtkTransform()
+    transform.Scale(float(scale[0]), float(scale[1]), float(scale[2]))
+
+    transform_filter = vtk.vtkTransformPolyDataFilter()
+    transform_filter.SetInputData(reference_polydata)
+    transform_filter.SetTransform(transform)
+    transform_filter.Update()
+
+    return transform_filter.GetOutput(), {
+        "reference_axis_lengths": reference_lengths.tolist(),
+        "sample_axis_lengths": sample_lengths.tolist(),
+        "scale_factors": scale.tolist(),
+        "min_scale": min_values.tolist(),
+        "max_scale": max_values.tolist(),
+    }
+
+
+def _parse_bbox_ratio_recipe(values):
+    """Return bbox-ratio values in Ogo's x/y/z image order.
+
+    Saved workflows store bbox ratios in recipe order:
+    ``reference, constrained, free``. For the hip sideways-fall recipe the
+    reference axis is y, the constrained crop axis is z, and x is left free.
+    Ogo image arrays are x/y/z, so the mapped order is ``free, reference,
+    constrained``.
+    """
+    if len(values) != 3:
+        raise ValueError("bbox_ratio must contain reference/constrained/free values.")
+    parsed = []
+    for item in values:
+        if item is None:
+            parsed.append(None)
+            continue
+        token = str(item).strip().lower()
+        if token in {"", "none", "null", "auto"}:
+            parsed.append(None)
+            continue
+        value = float(item)
+        if value <= 0:
+            raise ValueError("bbox_ratio values must be positive or null.")
+        parsed.append(value)
+    reference, constrained, free = parsed
+    return free, reference, constrained
+
+
+def _crop_from_value(value):
+    if value is None:
+        return None
+    token = str(value).strip().lower()
+    if token in {"", "none", "null", "auto", "center", "centre"}:
+        return None
+    if token in {"min", "low", "lo", "start"}:
+        return "min"
+    if token in {"max", "high", "hi", "end"}:
+        return "max"
+    raise ValueError("bbox_crop_from values must be min, max, center, or null.")
+
+
+def _parse_bbox_crop_from_recipe(values):
+    """Return bbox crop-end values in Ogo's x/y/z image order.
+
+    The recipe uses the same reference/constrained/free convention as the
+    Slicer-authored workflow. For the hip sideways-fall recipe the mapped order
+    is ``free, reference, constrained`` in Ogo's x/y/z image axes.
+    """
+    if values is None:
+        return None, None, None
+    if len(values) != 3:
+        raise ValueError("bbox_crop_from must contain reference/constrained/free values.")
+    reference, constrained, free = (_crop_from_value(item) for item in values)
+    return free, reference, constrained
+
+
+def _vtk_image_from_array(array, template_vtk_image, *, origin, vtk_array_type=None):
+    """Create a zero-based VTK image from an x/y/z NumPy array."""
+    import numpy as np
+    import vtk
+    from vtk.util.numpy_support import numpy_to_vtk
+
+    data = np.ascontiguousarray(array)
+    image = vtk.vtkImageData()
+    image.SetDimensions(data.shape)
+    image.SetOrigin(*origin)
+    image.SetSpacing(*template_vtk_image.GetSpacing())
+    if vtk_array_type is None:
+        vtk_array_type = template_vtk_image.GetScalarType()
+    scalars = numpy_to_vtk(data.ravel(order="F"), deep=True, array_type=vtk_array_type)
+    image.GetPointData().SetScalars(scalars)
+    return image
+
+
+def resample_vtk_image_like_workflow(vtk_image, target_spacing_mm, *, interpolation="nearest"):
+    """Resample a VTK image with the same output-size rule as workflow replay."""
+    import numpy as np
+    import SimpleITK as sitk
+    import vtk
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    target = float(target_spacing_mm)
+    target_spacing = (target, target, target)
+    array_zyx = vtk_image_to_numpy(vtk_image, processing_order=True)
+    image = sitk.GetImageFromArray(array_zyx)
+    image.SetSpacing(tuple(float(value) for value in vtk_image.GetSpacing()))
+    image.SetOrigin(tuple(float(value) for value in vtk_image.GetOrigin()))
+    original_size = np.asarray(image.GetSize(), dtype=np.int64)
+    original_spacing = np.asarray(image.GetSpacing(), dtype=np.float64)
+    new_spacing = np.asarray(target_spacing, dtype=np.float64)
+    new_size = np.maximum(1, np.round(original_size * original_spacing / new_spacing)).astype(int)
+
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetOutputSpacing(target_spacing)
+    resampler.SetSize([int(value) for value in new_size])
+    resampler.SetOutputOrigin(image.GetOrigin())
+    resampler.SetOutputDirection(image.GetDirection())
+    resampler.SetDefaultPixelValue(0)
+    resampler.SetInterpolator(
+        sitk.sitkNearestNeighbor
+        if interpolation == "nearest"
+        else sitk.sitkBSpline
+        if interpolation == "bspline"
+        else sitk.sitkLinear
+    )
+    out_zyx = sitk.GetArrayFromImage(resampler.Execute(image))
+    out_xyz = np.transpose(out_zyx, (2, 1, 0))
+    vtk_type = vtk.VTK_UNSIGNED_CHAR if interpolation == "nearest" else vtk_image.GetScalarType()
+    out = _vtk_image_from_array(
+        out_xyz,
+        vtk_image,
+        origin=vtk_image.GetOrigin(),
+        vtk_array_type=vtk_type,
+    )
+    out.SetSpacing(*target_spacing)
+    return out
+
+
+def crop_vtk_images_to_bbox_ratio(
+    vtk_images,
+    vtk_mask,
+    *,
+    bbox_ratio=DEFAULT_FEMUR_BBOX_RATIO,
+    bbox_crop_from=None,
+    labels=None,
+):
+    """Crop VTK images to a mask-bbox ratio and return the retained crop face.
+
+    Ratios are interpreted in Ogo's x/y/z VTK image order. The returned
+    crop-face image has value 1 on the newly exposed one-sided crop surface.
+    For the hip recipe this is the z-min face created by
+    ``bbox_ratio=(1, 1.2, None)`` and ``bbox_crop_from=(None, "min", None)``.
+    """
+    import numpy as np
+    import vtk
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    images = list(vtk_images)
+    mask_data = vtk_image_to_numpy(vtk_mask)
+    if labels:
+        active = np.isin(mask_data, sorted(int(label) for label in labels))
+    else:
+        active = mask_data != 0
+    if not np.any(active):
+        raise ValueError("Cannot apply bbox-ratio crop to an empty femur mask.")
+
+    ratio_xyz = _parse_bbox_ratio_recipe(bbox_ratio)
+    crop_from_xyz = _parse_bbox_crop_from_recipe(bbox_crop_from)
+    numeric_axes = [axis for axis, value in enumerate(ratio_xyz) if value is not None]
+    if not numeric_axes:
+        empty_face = np.zeros(mask_data.shape, dtype=np.uint8)
+        return images, _vtk_image_from_array(empty_face, vtk_mask, origin=vtk_mask.GetOrigin(), vtk_array_type=vtk.VTK_UNSIGNED_CHAR), {
+            "enabled": False,
+            "ratio_recipe": tuple(bbox_ratio),
+            "ratio_xyz": ratio_xyz,
+            "crop_from_xyz": crop_from_xyz,
+        }
+
+    reference_axes = [axis for axis in numeric_axes if np.isclose(float(ratio_xyz[axis]), 1.0)]
+    if not reference_axes:
+        raise ValueError("bbox_ratio must contain one preserved axis with value 1.")
+
+    coords = np.argwhere(active)
+    lo = coords.min(axis=0).astype(np.int64)
+    hi = (coords.max(axis=0) + 1).astype(np.int64)
+    size = hi - lo
+    spacing = np.asarray(vtk_mask.GetSpacing(), dtype=np.float64)
+    physical_size = size.astype(np.float64) * spacing
+    reference_axis = min(reference_axes, key=lambda axis: float(physical_size[axis]))
+    reference_length_mm = float(size[reference_axis]) * float(spacing[reference_axis])
+
+    out_lo = lo.copy()
+    out_hi = hi.copy()
+    crop_surface = None
+    for axis, axis_ratio in enumerate(ratio_xyz):
+        if axis_ratio is None:
+            continue
+        target_mm = reference_length_mm * float(axis_ratio)
+        target_voxels = max(1, int(round(target_mm / float(spacing[axis]))))
+        target_voxels = min(int(size[axis]), target_voxels)
+        mode = crop_from_xyz[axis]
+        if mode == "min":
+            start = int(hi[axis]) - target_voxels
+            crop_surface = {"axis": axis, "side": "min", "local_index": 0, "normal_sign": -1.0}
+        elif mode == "max":
+            start = int(lo[axis])
+            crop_surface = {
+                "axis": axis,
+                "side": "max",
+                "local_index": target_voxels - 1,
+                "normal_sign": 1.0,
+            }
+        else:
+            center = 0.5 * (float(lo[axis]) + float(hi[axis]))
+            start = int(round(center - 0.5 * float(target_voxels)))
+        start = max(int(lo[axis]), min(start, int(hi[axis]) - target_voxels))
+        out_lo[axis] = start
+        out_hi[axis] = start + target_voxels
+
+    slices = tuple(slice(int(out_lo[axis]), int(out_hi[axis])) for axis in range(3))
+    origin = tuple(
+        float(vtk_mask.GetOrigin()[axis]) + float(out_lo[axis]) * float(spacing[axis])
+        for axis in range(3)
+    )
+    cropped_images = [
+        _vtk_image_from_array(vtk_image_to_numpy(image)[slices], image, origin=origin)
+        for image in images
+    ]
+
+    cropped_active = active[slices]
+    crop_face = np.zeros(cropped_active.shape, dtype=np.uint8)
+    if crop_surface is not None:
+        axis = int(crop_surface["axis"])
+        index = int(crop_surface["local_index"])
+        face_slice = [slice(None), slice(None), slice(None)]
+        face_slice[axis] = index
+        crop_face[tuple(face_slice)] = cropped_active[tuple(face_slice)].astype(np.uint8)
+
+    crop_face_image = _vtk_image_from_array(
+        crop_face,
+        vtk_mask,
+        origin=origin,
+        vtk_array_type=vtk.VTK_UNSIGNED_CHAR,
+    )
+    meta = {
+        "enabled": True,
+        "ratio_recipe": tuple(bbox_ratio),
+        "crop_from_recipe": tuple(bbox_crop_from) if bbox_crop_from is not None else None,
+        "ratio_xyz": ratio_xyz,
+        "crop_from_xyz": crop_from_xyz,
+        "reference_axis": "xyz"[reference_axis],
+        "reference_length_mm": reference_length_mm,
+        "input_bbox_xyz": tuple((int(lo[axis]), int(hi[axis])) for axis in range(3)),
+        "crop_slices_xyz": tuple((int(out_lo[axis]), int(out_hi[axis])) for axis in range(3)),
+        "output_shape_xyz": tuple(int(value) for value in cropped_active.shape),
+        "output_origin": origin,
+        "crop_surface": None
+        if crop_surface is None
+        else {
+            "axis": "xyz"[int(crop_surface["axis"])],
+            "side": crop_surface["side"],
+            "normal_sign": crop_surface["normal_sign"],
+        },
+        "crop_face_voxels": int(crop_face.sum()),
+    }
+    return cropped_images, crop_face_image, meta
+
+
+def crop_face_support_vector(crop_face_vtk, mask_vtk):
+    """Estimate the outward normal of a transformed crop-face label image."""
+    import numpy as np
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    face = vtk_image_to_numpy(crop_face_vtk) != 0
+    bone = vtk_image_to_numpy(mask_vtk) != 0
+    if not np.any(face):
+        raise ValueError("Cannot estimate crop-face support vector from an empty face mask.")
+    if not np.any(bone):
+        raise ValueError("Cannot orient crop-face support vector from an empty femur mask.")
+
+    spacing = np.asarray(crop_face_vtk.GetSpacing(), dtype=np.float64)
+    origin = np.asarray(crop_face_vtk.GetOrigin(), dtype=np.float64)
+    face_coords = np.argwhere(face).astype(np.float64)
+    bone_coords = np.argwhere(bone).astype(np.float64)
+    face_points = origin + face_coords * spacing
+    bone_points = origin + bone_coords * spacing
+    if face_points.shape[0] < 3:
+        raise ValueError("At least three crop-face voxels are required to estimate a surface normal.")
+
+    centered = face_points - face_points.mean(axis=0)
+    _u, _s, vh = np.linalg.svd(centered, full_matrices=False)
+    normal = np.asarray(vh[-1], dtype=np.float64)
+    norm = float(np.linalg.norm(normal))
+    if norm <= 0.0:
+        raise ValueError("Cannot estimate crop-face support vector from degenerate face points.")
+    normal /= norm
+
+    # The vector should point out of the retained bone, toward the cropped-away
+    # side. Orient it by comparing the face centroid to the retained-bone
+    # centroid.
+    into_bone = bone_points.mean(axis=0) - face_points.mean(axis=0)
+    if float(np.dot(normal, into_bone)) > 0.0:
+        normal = -normal
+    return tuple(float(value) for value in normal)
+
+
+def _image_index_points(vtk_image, indices):
+    """Return physical center coordinates for VTK image array indices."""
+    import numpy as np
+
+    extent = vtk_image.GetExtent()
+    offset = np.asarray([extent[0], extent[2], extent[4]], dtype=np.float64)
+    spacing = np.asarray(vtk_image.GetSpacing(), dtype=np.float64)
+    origin = np.asarray(vtk_image.GetOrigin(), dtype=np.float64)
+    return origin + (np.asarray(indices, dtype=np.float64) + offset) * spacing
+
+
+def _unit_vector(vector, name):
+    import numpy as np
+
+    values = np.asarray(vector, dtype=np.float64)
+    if values.shape != (3,) or not np.all(np.isfinite(values)):
+        raise ValueError(f"{name} must be a finite 3-vector.")
+    norm = float(np.linalg.norm(values))
+    if norm <= 0.0:
+        raise ValueError(f"{name} must be non-zero.")
+    return values / norm
+
+
+def bbox_relative_oriented_contact_plane(
+    model_bounds,
+    *,
+    center_fraction,
+    size_fraction,
+    normal,
+    width_axis=(-1.0, 0.0, 0.0),
+    shape="anatomy",
+):
+    """Return a bbox-relative plane that keeps a measured contact normal.
+
+    The center and footprint scale with the generated model bounding box. The
+    normal comes from measured geometry, such as a transformed crop face, so the
+    plane can follow an oblique distal shaft cut while still using a stable
+    recipe-sized contact patch.
+    """
+    import numpy as np
+
+    if len(model_bounds) != 6:
+        raise ValueError("model_bounds must contain x/y/z min/max values.")
+    if len(center_fraction) != 3:
+        raise ValueError("center_fraction must contain x/y/z fractions.")
+    if len(size_fraction) != 2:
+        raise ValueError("size_fraction must contain the two in-plane scale factors.")
+
+    normal_vec = _unit_vector(normal, "contact plane normal")
+    width_vec = np.asarray(width_axis, dtype=np.float64)
+    if width_vec.shape != (3,) or not np.all(np.isfinite(width_vec)):
+        raise ValueError("width_axis must be a finite 3-vector.")
+
+    width_vec = width_vec - normal_vec * float(np.dot(width_vec, normal_vec))
+    if float(np.linalg.norm(width_vec)) <= 1.0e-8:
+        fallback_axes = np.eye(3, dtype=np.float64)
+        width_vec = max(
+            (axis - normal_vec * float(np.dot(axis, normal_vec)) for axis in fallback_axes),
+            key=lambda candidate: float(np.linalg.norm(candidate)),
+        )
+    v_axis = _unit_vector(width_vec, "contact plane width axis")
+    u_axis = _unit_vector(np.cross(v_axis, normal_vec), "contact plane long axis")
+
+    center = []
+    for axis in range(3):
+        lo, hi = _axis_bounds(model_bounds, axis)
+        center.append(lo + float(center_fraction[axis]) * (hi - lo))
+
+    size = (
+        _axis_extent_from_vector(model_bounds, u_axis) * float(size_fraction[0]),
+        _axis_extent_from_vector(model_bounds, v_axis) * float(size_fraction[1]),
+    )
+    if size[0] <= 0.0 or size[1] <= 0.0:
+        raise ValueError("size_fraction values must produce positive plane dimensions.")
+
+    return {
+        "center": tuple(float(value) for value in center),
+        "normal": tuple(float(value) for value in normal_vec),
+        "outward_normal": tuple(float(value) for value in -normal_vec),
+        "u_axis": tuple(float(value) for value in u_axis),
+        "v_axis": tuple(float(value) for value in v_axis),
+        "size": tuple(float(value) for value in size),
+        "shape": str(shape).strip().lower(),
+    }
+
+
+def _inside_plane_shape(shape, u_values, v_values, half_u, half_v, *, tolerance):
+    import numpy as np
+
+    token = str(shape).strip().lower()
+    if token == "square":
+        half = min(float(half_u), float(half_v))
+        return (np.abs(u_values) <= half + tolerance) & (np.abs(v_values) <= half + tolerance)
+    if token in {"round", "circle", "circular", "oval"}:
+        safe_u = max(float(half_u) + tolerance, 1.0e-9)
+        safe_v = max(float(half_v) + tolerance, 1.0e-9)
+        return ((u_values / safe_u) ** 2 + (v_values / safe_v) ** 2) <= 1.0
+    return (np.abs(u_values) <= float(half_u) + tolerance) & (
+        np.abs(v_values) <= float(half_v) + tolerance
+    )
+
+
+def _plane_bucket_key(u_value, v_value, *, spacing):
+    import math
+
+    resolution = max(min(float(value) for value in spacing), 1.0e-6)
+    return (
+        int(math.floor(float(u_value) / resolution + 0.5)),
+        int(math.floor(float(v_value) / resolution + 0.5)),
+    )
+
+
+def crop_face_contact_plane(crop_face_vtk, mask_vtk):
+    """Fit the transformed distal crop face as a contact plane.
+
+    The returned ``normal`` points from the crop face into the retained femur.
+    ``outward_normal`` points toward the cropped-away shaft. Both are derived
+    from the transformed crop-face label, so the shaft support angle follows the
+    same registration transform as the femur.
+    """
+    import numpy as np
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    face = vtk_image_to_numpy(crop_face_vtk) != 0
+    bone = vtk_image_to_numpy(mask_vtk) != 0
+    if not np.any(face):
+        raise ValueError("Cannot fit a contact plane from an empty crop-face mask.")
+    if not np.any(bone):
+        raise ValueError("Cannot orient a crop-face contact plane from an empty femur mask.")
+
+    face_indices = np.argwhere(face)
+    if face_indices.shape[0] < 3:
+        raise ValueError("At least three crop-face voxels are required to fit a contact plane.")
+    face_points = _image_index_points(crop_face_vtk, face_indices)
+    bone_points = _image_index_points(mask_vtk, np.argwhere(bone))
+
+    center = face_points.mean(axis=0)
+    centered = face_points - center
+    _u_svd, _s_svd, vh = np.linalg.svd(centered, full_matrices=False)
+    u_axis = _unit_vector(vh[0], "crop-face u axis")
+    v_axis = _unit_vector(vh[1], "crop-face v axis")
+    normal = _unit_vector(vh[-1], "crop-face normal")
+
+    into_bone = bone_points.mean(axis=0) - center
+    if float(np.dot(normal, into_bone)) < 0.0:
+        normal = -normal
+    if float(np.dot(np.cross(u_axis, v_axis), normal)) < 0.0:
+        v_axis = -v_axis
+
+    u_values = centered @ u_axis
+    v_values = centered @ v_axis
+    min_spacing = min(float(value) for value in crop_face_vtk.GetSpacing())
+    size = (
+        max(float(np.ptp(u_values)) + min_spacing, min_spacing),
+        max(float(np.ptp(v_values)) + min_spacing, min_spacing),
+    )
+    return {
+        "center": tuple(float(value) for value in center),
+        "normal": tuple(float(value) for value in normal),
+        "outward_normal": tuple(float(value) for value in -normal),
+        "u_axis": tuple(float(value) for value in u_axis),
+        "v_axis": tuple(float(value) for value in v_axis),
+        "size": tuple(float(value) for value in size),
+        "shape": "anatomy",
+    }
+
+
+def projected_crop_face_surface_vtk(material_vtk, plane, *, intrusion=0.0, output_value=1):
+    """Project a fitted crop-face plane onto the first active femur surface."""
+    import numpy as np
+    import vtk
+
+    from ogo.util.vtk_image import numpy_to_vtk_image, vtk_image_to_numpy
+
+    active = vtk_image_to_numpy(material_vtk) != 0
+    out = np.zeros(active.shape, dtype=np.uint8)
+    if not np.any(active):
+        return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
+
+    center = np.asarray(plane["center"], dtype=np.float64)
+    normal = _unit_vector(plane["normal"], "plane normal")
+    u_axis = _unit_vector(plane["u_axis"], "plane u axis")
+    v_axis = _unit_vector(plane["v_axis"], "plane v axis")
+    size = plane.get("size", (0.0, 0.0))
+    half_u = max(float(size[0]) / 2.0, 0.5)
+    half_v = max(float(size[1]) / 2.0, 0.5)
+    spacing = tuple(float(value) for value in material_vtk.GetSpacing())
+    tolerance = max(min(spacing) * 0.75, 1.0e-6)
+
+    indices = np.argwhere(active)
+    points = _image_index_points(material_vtk, indices)
+    relative = points - center
+    distances = relative @ normal
+    u_values = relative @ u_axis
+    v_values = relative @ v_axis
+    inside = _inside_plane_shape(
+        plane.get("shape", "anatomy"),
+        u_values,
+        v_values,
+        half_u,
+        half_v,
+        tolerance=tolerance,
+    )
+    candidates = inside & (distances >= -tolerance)
+    if not np.any(candidates):
+        return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
+
+    best = {}
+    for voxel, distance, u_value, v_value in zip(
+        indices[candidates],
+        distances[candidates],
+        u_values[candidates],
+        v_values[candidates],
+        strict=True,
+    ):
+        if float(distance) < -tolerance:
+            continue
+        key = _plane_bucket_key(u_value, v_value, spacing=spacing)
+        current = best.get(key)
+        if current is None or float(distance) < current[0]:
+            best[key] = (float(distance), np.asarray(voxel, dtype=np.int64))
+    if not best:
+        return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
+
+    first_distance = min(value[0] for value in best.values())
+    max_distance = first_distance + max(float(intrusion), 0.0) + tolerance
+    kept = [voxel for distance, voxel in best.values() if distance <= max_distance]
+    if kept:
+        kept_indices = np.stack(kept, axis=0)
+        out[tuple(kept_indices.T)] = np.uint8(output_value)
+    return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
 
 
 def mirror_polydata_x(polydata):
@@ -323,6 +1312,15 @@ def pad_vtk_images_to_foreground_margin(
         pad.Update()
         out = vtk.vtkImageData()
         out.DeepCopy(pad.GetOutput())
+        dims_out = out.GetDimensions()
+        spacing_out = out.GetSpacing()
+        origin = image.GetOrigin()
+        out.SetOrigin(
+            float(origin[0]) + float(output_extent[0]) * float(spacing_out[0]),
+            float(origin[1]) + float(output_extent[2]) * float(spacing_out[1]),
+            float(origin[2]) + float(output_extent[4]) * float(spacing_out[2]),
+        )
+        out.SetExtent(0, dims_out[0] - 1, 0, dims_out[1] - 1, 0, dims_out[2] - 1)
         padded.append(out)
 
     return padded, {
@@ -486,7 +1484,7 @@ def standardize_femur_shaft_length(
 
     In the default mode, the cut plane is detected from the lesser-trochanter
     cross-section profile. A fixed retained length can be requested explicitly
-    for debugging or legacy comparisons.
+    for controlled debugging runs.
     """
     cut_mode = str(cut_mode).lower()
     if cut_mode == "lesser_trochanter":

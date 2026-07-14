@@ -13,6 +13,186 @@ def axis_index(axis):
         raise ValueError("axis must be 'x', 'y', or 'z'.") from exc
 
 
+def _axis_bounds(bounds, axis):
+    index = 2 * int(axis)
+    return float(bounds[index]), float(bounds[index + 1])
+
+
+def _axis_extent_from_vector(bounds, vector):
+    import numpy as np
+
+    spans = np.asarray(
+        [
+            float(bounds[1]) - float(bounds[0]),
+            float(bounds[3]) - float(bounds[2]),
+            float(bounds[5]) - float(bounds[4]),
+        ],
+        dtype=float,
+    )
+    return float(np.sum(np.abs(np.asarray(vector, dtype=float)) * spans))
+
+
+def _contact_plane_axes(projection_axis, normal_sign):
+    """Return stable in-plane axes for a coordinate-axis contact plane."""
+    axis = axis_index(projection_axis)
+    sign = 1.0 if float(normal_sign) >= 0.0 else -1.0
+    if axis == 0:
+        return (0.0, 0.0, sign), (0.0, -1.0, 0.0)
+    if axis == 1:
+        return (0.0, 0.0, -sign), (-1.0, 0.0, 0.0)
+    return (1.0, 0.0, 0.0), (0.0, sign, 0.0)
+
+
+def bbox_relative_contact_bounds(
+    model_bounds,
+    *,
+    center_fraction,
+    size_fraction,
+    projection_axis="y",
+    shape="rectangle",
+):
+    """Return physical contact ROI bounds from bbox-relative plane values.
+
+    ``center_fraction`` is authored in x/y/z order against voxel-center bounds.
+    The two ``size_fraction`` values scale the lateral axes of the projection
+    plane in coordinate order. The projection axis itself spans the full input
+    bounds so downstream geometry can find the nearest supported anatomy.
+    """
+    if len(model_bounds) != 6:
+        raise ValueError("model_bounds must contain x/y/z min/max values.")
+    if len(center_fraction) != 3:
+        raise ValueError("center_fraction must contain x/y/z fractions.")
+    if len(size_fraction) != 2:
+        raise ValueError("size_fraction must contain the two in-plane scale factors.")
+
+    projection_index = axis_index(projection_axis)
+    out = [float(value) for value in model_bounds]
+    lateral_axes = [axis for axis in (0, 1, 2) if axis != projection_index]
+    lateral_lengths = []
+    for size_value, axis in zip(size_fraction, lateral_axes):
+        lo, hi = _axis_bounds(model_bounds, axis)
+        span = hi - lo
+        if span <= 0.0:
+            raise ValueError("model_bounds must have positive span on every lateral axis.")
+        length = span * float(size_value)
+        if length <= 0.0:
+            raise ValueError("size_fraction values must be positive.")
+        lateral_lengths.append(length)
+
+    if str(shape).strip().lower() == "square":
+        lateral_lengths = [min(lateral_lengths)] * len(lateral_lengths)
+
+    for length, axis in zip(lateral_lengths, lateral_axes):
+        lo, hi = _axis_bounds(model_bounds, axis)
+        span = hi - lo
+        center = lo + float(center_fraction[axis]) * span
+        out[2 * axis] = center - length / 2.0
+        out[2 * axis + 1] = center + length / 2.0
+
+    lo, hi = _axis_bounds(model_bounds, projection_index)
+    out[2 * projection_index] = lo
+    out[2 * projection_index + 1] = hi
+    return tuple(out)
+
+
+def bbox_relative_contact_direction(center_fraction, *, projection_axis="y"):
+    """Return the cap side implied by a bbox-relative plane fraction."""
+    if len(center_fraction) != 3:
+        raise ValueError("center_fraction must contain x/y/z fractions.")
+    return "up" if float(center_fraction[axis_index(projection_axis)]) >= 0.5 else "down"
+
+
+def bbox_relative_contact_plane(
+    model_bounds,
+    *,
+    center_fraction,
+    size_fraction,
+    projection_axis="y",
+    shape="square",
+):
+    """Return a physical contact-plane definition from bbox-relative values."""
+    if len(model_bounds) != 6:
+        raise ValueError("model_bounds must contain x/y/z min/max values.")
+    if len(center_fraction) != 3:
+        raise ValueError("center_fraction must contain x/y/z fractions.")
+    if len(size_fraction) != 2:
+        raise ValueError("size_fraction must contain the two in-plane scale factors.")
+
+    projection_index = axis_index(projection_axis)
+    center = []
+    for axis in range(3):
+        lo, hi = _axis_bounds(model_bounds, axis)
+        center.append(lo + float(center_fraction[axis]) * (hi - lo))
+
+    normal_sign = -1.0 if float(center_fraction[projection_index]) >= 0.5 else 1.0
+    normal = [0.0, 0.0, 0.0]
+    normal[projection_index] = normal_sign
+    u_axis, v_axis = _contact_plane_axes(projection_axis, normal_sign)
+    size = (
+        _axis_extent_from_vector(model_bounds, u_axis) * float(size_fraction[0]),
+        _axis_extent_from_vector(model_bounds, v_axis) * float(size_fraction[1]),
+    )
+    return {
+        "center": tuple(float(value) for value in center),
+        "normal": tuple(float(value) for value in normal),
+        "u_axis": tuple(float(value) for value in u_axis),
+        "v_axis": tuple(float(value) for value in v_axis),
+        "size": tuple(float(value) for value in size),
+        "shape": str(shape).strip().lower(),
+    }
+
+
+def bounds_with_reference_extent(current_bounds, reference_bounds):
+    """Return bounds centered on ``current_bounds`` with ``reference_bounds`` extents."""
+    import numpy as np
+
+    current = np.asarray(current_bounds, dtype=float)
+    reference = np.asarray(reference_bounds, dtype=float)
+    if current.shape != (6,) or reference.shape != (6,):
+        raise ValueError("bounds must contain x/y/z min/max values.")
+    out = []
+    for axis in range(3):
+        current_lo, current_hi = current[2 * axis], current[2 * axis + 1]
+        reference_lo, reference_hi = reference[2 * axis], reference[2 * axis + 1]
+        center = (current_lo + current_hi) / 2.0
+        extent = reference_hi - reference_lo
+        out.extend([center - extent / 2.0, center + extent / 2.0])
+    return tuple(float(value) for value in out)
+
+
+def foreground_voxel_center_bounds_from_mask(mask, *, origin, spacing):
+    """Return x/y/z physical bounds of nonzero voxel centers."""
+    import numpy as np
+
+    active = np.asarray(mask) != 0
+    coords = np.argwhere(active)
+    if coords.size == 0:
+        raise ValueError("Cannot compute foreground bounds from an empty mask.")
+    origin = np.asarray(origin, dtype=np.float64)
+    spacing = np.asarray(spacing, dtype=np.float64)
+    if origin.shape != (3,) or spacing.shape != (3,):
+        raise ValueError("origin and spacing must contain three values.")
+    lo = origin + coords.min(axis=0).astype(np.float64) * spacing
+    hi = origin + coords.max(axis=0).astype(np.float64) * spacing
+    return (
+        float(lo[0]),
+        float(hi[0]),
+        float(lo[1]),
+        float(hi[1]),
+        float(lo[2]),
+        float(hi[2]),
+    )
+
+
+def foreground_voxel_center_bounds(vtk_image):
+    """Return physical foreground bounds for a VTK image using voxel centers."""
+    return foreground_voxel_center_bounds_from_mask(
+        vtk_image_to_numpy(vtk_image),
+        origin=vtk_image.GetOrigin(),
+        spacing=vtk_image.GetSpacing(),
+    )
+
+
 def largest_connected_component(mask):
     """Keep the largest connected component in a binary NumPy mask."""
     import numpy as np
@@ -52,6 +232,47 @@ def smooth_binary_mask_vtk(mask_vtk, *, close_iter=1, open_iter=1):
     )
 
 
+def smooth_label_mask_vtk(label_vtk, *, sigma_mm=1.0, threshold=0.5):
+    """Smooth a multi-label mask by smoothing each label probability separately."""
+    import numpy as np
+    import SimpleITK as sitk
+    import vtk
+
+    labels_xyz = np.asarray(vtk_image_to_numpy(label_vtk))
+    unique_labels = [int(value) for value in np.unique(labels_xyz) if int(value) != 0]
+    if not unique_labels:
+        return numpy_to_vtk_image(
+            labels_xyz.astype(np.uint8, copy=False),
+            label_vtk,
+            vtk.VTK_UNSIGNED_CHAR,
+        )
+
+    labels_zyx = np.transpose(labels_xyz, (2, 1, 0))
+    scores = []
+    for label_value in unique_labels:
+        image = sitk.GetImageFromArray((labels_zyx == label_value).astype(np.float32))
+        image.SetSpacing(tuple(float(value) for value in label_vtk.GetSpacing()))
+        smoothed = sitk.SmoothingRecursiveGaussian(image, float(sigma_mm))
+        scores.append(sitk.GetArrayFromImage(smoothed))
+    stacked = np.stack(scores, axis=0)
+    best_index = np.argmax(stacked, axis=0)
+    best_score = np.take_along_axis(
+        stacked,
+        best_index[np.newaxis, ...],
+        axis=0,
+    )[0]
+    out_zyx = np.zeros(labels_zyx.shape, dtype=labels_xyz.dtype)
+    label_values = np.asarray(unique_labels, dtype=labels_xyz.dtype)
+    active = best_score >= float(threshold)
+    out_zyx[active] = label_values[best_index[active]]
+    out_xyz = np.transpose(out_zyx, (2, 1, 0))
+    return numpy_to_vtk_image(
+        out_xyz.astype(np.uint8, copy=False),
+        label_vtk,
+        vtk.VTK_UNSIGNED_CHAR,
+    )
+
+
 def _bounding_box(mask):
     import numpy as np
 
@@ -78,18 +299,6 @@ def _expanded_bbox(mask, extrusion_axis, direction, thickness):
         )
     else:
         raise ValueError("direction must be 'up' or 'down'.")
-    return tuple(bb_list), bb
-
-
-def _expanded_bbox_for_fixed_thickness_fixture(mask, extrusion_axis, thickness, intrusion):
-    """Return a crop wide enough for a fixture that may straddle the bone surface."""
-    bb = _bounding_box(mask)
-    bb_list = list(bb)
-    margin = max(int(thickness), int(intrusion), 0)
-    bb_list[extrusion_axis] = slice(
-        max(bb[extrusion_axis].start - margin, 0),
-        min(bb[extrusion_axis].stop + margin, mask.shape[extrusion_axis]),
-    )
     return tuple(bb_list), bb
 
 
@@ -348,7 +557,7 @@ def _apply_requested_footprint_shape(mask, *, shape):
     yy, xx = np.indices(values.shape, dtype=np.float64)
     center = (lo + hi) / 2.0
     half = np.maximum((hi - lo + 1) / 2.0, 0.5)
-    if mode in {"box", "square"}:
+    if mode in {"box", "rectangle", "rectangular", "square"}:
         shaped = np.ones(values.shape, dtype=bool)
     elif mode in {"round", "circle", "circular"}:
         norm_y = (yy - center[0]) / half[0]
@@ -359,17 +568,426 @@ def _apply_requested_footprint_shape(mask, *, shape):
         norm_x = np.abs((xx - center[1]) / half[1])
         shaped = (norm_x <= 1.0) & (norm_y <= 1.0) & (norm_x + norm_y / 2.0 <= 1.0)
     else:
-        raise ValueError("disk shape must be one of anatomy, square, round, or hex")
+        raise ValueError("disk shape must be one of anatomy, rectangle, square, round, or hex")
     return shaped
+
+
+def _unit_vector(vector, name):
+    """Return a unit vector from a physical-space direction."""
+    import numpy as np
+
+    values = np.asarray(vector, dtype=float)
+    if values.shape != (3,):
+        raise ValueError(f"{name} must contain three values.")
+    norm = float(np.linalg.norm(values))
+    if norm <= 1.0e-12:
+        raise ValueError(f"{name} must have nonzero length.")
+    return values / norm
+
+
+def _plane_axes_from_normal(normal):
+    """Return a stable orthonormal in-plane basis for a plane normal."""
+    import numpy as np
+
+    helper = np.asarray([1.0, 0.0, 0.0], dtype=float)
+    if abs(float(np.dot(normal, helper))) > 0.85:
+        helper = np.asarray([0.0, 1.0, 0.0], dtype=float)
+    u_axis = _unit_vector(np.cross(normal, helper), "u_axis")
+    v_axis = _unit_vector(np.cross(normal, u_axis), "v_axis")
+    return u_axis, v_axis
+
+
+def pad_vtk_images_to_physical_bounds(vtk_images, *, desired_bounds, constants=None):
+    """Pad aligned VTK images so the requested physical x/y/z bounds fit."""
+    import numpy as np
+    import vtk
+
+    images = list(vtk_images)
+    if not images:
+        return [], {"lower": (0, 0, 0), "upper": (0, 0, 0)}
+    constants = [0] * len(images) if constants is None else list(constants)
+    if len(constants) != len(images):
+        raise ValueError("constants must match vtk_images length.")
+    if len(desired_bounds) != 6:
+        raise ValueError("desired_bounds must contain x/y/z min/max values.")
+
+    reference = images[0]
+    spacing = np.asarray(reference.GetSpacing(), dtype=float)
+    if np.any(spacing <= 0.0):
+        raise ValueError("VTK image spacing must be positive.")
+    extent = reference.GetExtent()
+    current_min = np.asarray(
+        [
+            reference.GetOrigin()[0] + float(extent[0]) * spacing[0],
+            reference.GetOrigin()[1] + float(extent[2]) * spacing[1],
+            reference.GetOrigin()[2] + float(extent[4]) * spacing[2],
+        ],
+        dtype=float,
+    )
+    current_max = np.asarray(
+        [
+            reference.GetOrigin()[0] + float(extent[1]) * spacing[0],
+            reference.GetOrigin()[1] + float(extent[3]) * spacing[1],
+            reference.GetOrigin()[2] + float(extent[5]) * spacing[2],
+        ],
+        dtype=float,
+    )
+    desired = np.asarray(desired_bounds, dtype=float)
+    desired_min = desired[[0, 2, 4]]
+    desired_max = desired[[1, 3, 5]]
+    lower = np.maximum(0, np.ceil((current_min - desired_min) / spacing).astype(int))
+    upper = np.maximum(0, np.ceil((desired_max - current_max) / spacing).astype(int))
+
+    if not np.any(lower) and not np.any(upper):
+        return images, {
+            "lower": tuple(int(value) for value in lower),
+            "upper": tuple(int(value) for value in upper),
+        }
+
+    output_extent = (
+        int(extent[0] - lower[0]),
+        int(extent[1] + upper[0]),
+        int(extent[2] - lower[1]),
+        int(extent[3] + upper[1]),
+        int(extent[4] - lower[2]),
+        int(extent[5] + upper[2]),
+    )
+    padded = []
+    for image, constant in zip(images, constants, strict=True):
+        pad = vtk.vtkImageConstantPad()
+        pad.SetInputData(image)
+        pad.SetOutputWholeExtent(output_extent)
+        pad.SetConstant(float(constant))
+        pad.Update()
+        out = vtk.vtkImageData()
+        out.DeepCopy(pad.GetOutput())
+        dims_out = out.GetDimensions()
+        image_origin = image.GetOrigin()
+        image_spacing = out.GetSpacing()
+        out.SetOrigin(
+            float(image_origin[0]) + float(output_extent[0]) * float(image_spacing[0]),
+            float(image_origin[1]) + float(output_extent[2]) * float(image_spacing[1]),
+            float(image_origin[2]) + float(output_extent[4]) * float(image_spacing[2]),
+        )
+        out.SetExtent(0, dims_out[0] - 1, 0, dims_out[1] - 1, 0, dims_out[2] - 1)
+        padded.append(out)
+
+    return padded, {
+        "lower": tuple(int(value) for value in lower),
+        "upper": tuple(int(value) for value in upper),
+    }
+
+
+def projected_material_disk_required_bounds(
+    surface_vtk_image,
+    *,
+    center,
+    normal,
+    u_axis=None,
+    v_axis=None,
+    size=(24.0, 24.0),
+    shape="anatomy",
+    thickness=3.0,
+    intrusion=2.0,
+):
+    """Return conservative physical bounds needed for a plane-projected disk."""
+    import numpy as np
+
+    active = vtk_image_to_numpy(surface_vtk_image) != 0
+    if not np.any(active):
+        return None
+
+    spacing = tuple(float(value) for value in surface_vtk_image.GetSpacing())
+    origin = tuple(float(value) for value in surface_vtk_image.GetOrigin())
+    extent = surface_vtk_image.GetExtent()
+    extent_start = (extent[0], extent[2], extent[4])
+    center = np.asarray(center, dtype=float)
+    if center.shape != (3,):
+        raise ValueError("center must contain three values.")
+    normal = _unit_vector(normal, "normal")
+    if u_axis is None or v_axis is None:
+        u_axis, v_axis = _plane_axes_from_normal(normal)
+    else:
+        u_axis = _unit_vector(u_axis, "u_axis")
+        v_axis = _unit_vector(v_axis, "v_axis")
+    if len(size) != 2:
+        raise ValueError("size must contain two in-plane lengths.")
+
+    half_u = max(float(size[0]) / 2.0, 0.0)
+    half_v = max(float(size[1]) / 2.0, 0.0)
+    active_indices = np.argwhere(active)
+    active_points = _physical_points_from_indices(
+        active_indices,
+        spacing=spacing,
+        origin=origin,
+        extent_start=extent_start,
+    )
+    rel = active_points - center
+    distance = rel @ normal
+    u = rel @ u_axis
+    v = rel @ v_axis
+    tolerance = max(min(spacing) * 0.75, 1.0e-6)
+    inside = _inside_projected_shape(
+        shape,
+        u,
+        v,
+        half_u,
+        half_v,
+        tolerance=tolerance,
+    )
+    forward = distance >= -tolerance
+    if not np.any(inside & forward):
+        return None
+
+    surface_distance = float(np.min(distance[inside & forward]))
+    cap_inner_distance = surface_distance + max(float(intrusion), 0.0)
+    cap_outer_distance = cap_inner_distance - max(float(thickness), 0.0)
+    d_min = min(cap_inner_distance, cap_outer_distance)
+    d_max = max(cap_inner_distance, cap_outer_distance)
+    corners = []
+    for u_value in (-half_u, half_u):
+        for v_value in (-half_v, half_v):
+            for d_value in (d_min, d_max):
+                corners.append(center + u_value * u_axis + v_value * v_axis + d_value * normal)
+    points = np.vstack(corners)
+    margin = np.asarray(spacing, dtype=float)
+    lower = points.min(axis=0) - margin
+    upper = points.max(axis=0) + margin
+    return (
+        float(lower[0]),
+        float(upper[0]),
+        float(lower[1]),
+        float(upper[1]),
+        float(lower[2]),
+        float(upper[2]),
+    )
+
+
+def _physical_points_from_indices(indices, *, spacing, origin, extent_start=(0, 0, 0)):
+    """Convert x/y/z array indices to physical image coordinates."""
+    import numpy as np
+
+    idx = np.asarray(indices, dtype=float)
+    return np.asarray(origin, dtype=float) + (
+        idx + np.asarray(extent_start, dtype=float)
+    ) * np.asarray(spacing, dtype=float)
+
+
+def _projected_bucket_key(u, v, *, spacing):
+    resolution = max(min(float(value) for value in spacing), 1.0e-6)
+    return int(round(float(u) / resolution)), int(round(float(v) / resolution))
+
+
+def _inside_projected_shape(shape, u, v, half_u, half_v, *, tolerance):
+    import numpy as np
+
+    token = str(shape).strip().lower()
+    if token in {"anatomy", "rectangle", "rectangular", "box"}:
+        return (np.abs(u) <= half_u + tolerance) & (np.abs(v) <= half_v + tolerance)
+    if token == "square":
+        half = min(float(half_u), float(half_v))
+        return (np.abs(u) <= half + tolerance) & (np.abs(v) <= half + tolerance)
+    if token in {"round", "circle", "circular", "oval"}:
+        half_u = max(float(half_u) + tolerance, 1.0e-9)
+        half_v = max(float(half_v) + tolerance, 1.0e-9)
+        return ((u / half_u) ** 2 + (v / half_v) ** 2) <= 1.0
+    if token in {"hex", "hexagon", "hexagonal"}:
+        half = max(min(float(half_u), float(half_v)), 1.0e-9)
+        uu = u / half
+        vv = v / half
+        hex_tol = tolerance / half
+        return (
+            (np.abs(uu) <= 1.0 + hex_tol)
+            & (np.abs(0.5 * uu + 0.8660254 * vv) <= 1.0 + hex_tol)
+            & (np.abs(0.5 * uu - 0.8660254 * vv) <= 1.0 + hex_tol)
+        )
+    raise ValueError("disk shape must be one of anatomy, rectangle, square, round, or hex.")
+
+
+def _surface_distance_by_projected_bucket(
+    indices,
+    distance,
+    u,
+    v,
+    *,
+    spacing,
+):
+    import numpy as np
+
+    best = {}
+    for voxel, dist, uu, vv in zip(indices, distance, u, v, strict=True):
+        if float(dist) < 0.0:
+            continue
+        key = _projected_bucket_key(float(uu), float(vv), spacing=spacing)
+        current = best.get(key)
+        if current is None or float(dist) < current[0]:
+            best[key] = (float(dist), np.asarray(voxel, dtype=np.int64))
+    if not best:
+        return 0.0, {}
+    first_distance = min(value[0] for value in best.values())
+    return float(first_distance), {key: float(value[0]) for key, value in best.items()}
+
+
+def generate_projected_material_disk_mask(
+    active_mask,
+    *,
+    spacing,
+    origin,
+    center,
+    normal,
+    u_axis=None,
+    v_axis=None,
+    size=(24.0, 24.0),
+    shape="square",
+    thickness=3.0,
+    intrusion=2.0,
+    anatomy_constrained=True,
+    material_mask=None,
+    extent_start=(0, 0, 0),
+):
+    """Generate a physical-space material disk from an interactive contact plane.
+
+    The plane normal points from the authored plane toward the anatomy. The
+    disk has a fixed total ``thickness`` in physical units. ``intrusion`` lets
+    the local anatomy occupy that much of the fixed disk thickness; generated
+    disk voxels are then cleared anywhere material already exists, so bone is
+    preserved.
+    """
+    import numpy as np
+
+    active = np.asarray(active_mask, dtype=bool)
+    if active.ndim != 3:
+        raise ValueError("active_mask must be a 3D x/y/z array.")
+    material = active if material_mask is None else np.asarray(material_mask) > 0
+    if material.shape != active.shape:
+        raise ValueError("material_mask must match active_mask shape.")
+    if not np.any(active):
+        return np.zeros(active.shape, dtype=bool)
+
+    spacing = tuple(float(value) for value in spacing)
+    origin = tuple(float(value) for value in origin)
+    center = np.asarray(center, dtype=float)
+    if center.shape != (3,):
+        raise ValueError("center must contain three values.")
+    normal = _unit_vector(normal, "normal")
+    if u_axis is None or v_axis is None:
+        u_axis, v_axis = _plane_axes_from_normal(normal)
+    else:
+        u_axis = _unit_vector(u_axis, "u_axis")
+        v_axis = _unit_vector(v_axis, "v_axis")
+    if len(size) != 2:
+        raise ValueError("size must contain two in-plane lengths.")
+    half_u = max(float(size[0]) / 2.0, 0.5)
+    half_v = max(float(size[1]) / 2.0, 0.5)
+    thickness = max(float(thickness), 0.0)
+    intrusion = max(float(intrusion), 0.0)
+    if thickness <= 0.0:
+        return np.zeros(active.shape, dtype=bool)
+
+    active_indices = np.argwhere(active)
+    active_points = _physical_points_from_indices(
+        active_indices,
+        spacing=spacing,
+        origin=origin,
+        extent_start=extent_start,
+    )
+    active_rel = active_points - center
+    active_distance = active_rel @ normal
+    active_u = active_rel @ u_axis
+    active_v = active_rel @ v_axis
+    tolerance = max(min(spacing) * 0.75, 1.0e-6)
+    active_inside = _inside_projected_shape(
+        shape,
+        active_u,
+        active_v,
+        half_u,
+        half_v,
+        tolerance=tolerance,
+    )
+    forward = active_distance >= -tolerance
+    candidate = active_inside & forward
+    if not np.any(candidate):
+        return np.zeros(active.shape, dtype=bool)
+
+    first_distance, distance_by_key = _surface_distance_by_projected_bucket(
+        active_indices[candidate],
+        active_distance[candidate],
+        active_u[candidate],
+        active_v[candidate],
+        spacing=spacing,
+    )
+    if not distance_by_key:
+        return np.zeros(active.shape, dtype=bool)
+
+    if anatomy_constrained:
+        depth_limit = first_distance + intrusion + tolerance
+        distance_by_key = {
+            key: distance
+            for key, distance in distance_by_key.items()
+            if distance <= depth_limit
+        }
+        if not distance_by_key:
+            return np.zeros(active.shape, dtype=bool)
+
+    cap_inner_distance = first_distance + intrusion
+    cap_outer_distance = cap_inner_distance - thickness
+    full_indices = np.argwhere(np.ones(active.shape, dtype=bool))
+    full_points = _physical_points_from_indices(
+        full_indices,
+        spacing=spacing,
+        origin=origin,
+        extent_start=extent_start,
+    )
+    rel = full_points - center
+    distance = rel @ normal
+    u = rel @ u_axis
+    v = rel @ v_axis
+    inside = _inside_projected_shape(
+        shape,
+        u,
+        v,
+        half_u,
+        half_v,
+        tolerance=tolerance,
+    )
+    empty = ~material[tuple(full_indices.T)]
+
+    if anatomy_constrained:
+        keys = [
+            _projected_bucket_key(float(uu), float(vv), spacing=spacing)
+            for uu, vv in zip(u, v, strict=True)
+        ]
+        local_surface = np.asarray(
+            [distance_by_key.get(key, np.nan) for key in keys],
+            dtype=float,
+        )
+        bucket_mask = np.isfinite(local_surface)
+        flat_outer = cap_outer_distance
+        if flat_outer >= first_distance:
+            flat_outer = first_distance - thickness
+        local_min = np.minimum(flat_outer, local_surface)
+        local_max = np.maximum(flat_outer, local_surface)
+        depth_ok = (distance >= local_min - tolerance) & (distance <= local_max + tolerance)
+    else:
+        bucket_mask = np.ones(full_indices.shape[0], dtype=bool)
+        depth_ok = (
+            (distance >= cap_outer_distance - tolerance)
+            & (distance <= cap_inner_distance + tolerance)
+        )
+
+    keep = inside & depth_ok & empty & bucket_mask
+    disk = np.zeros(active.shape, dtype=bool)
+    if np.any(keep):
+        disk[tuple(full_indices[keep].T)] = True
+    return disk
 
 
 def _generate_projected_bone_caps_from_mask(mask, *, extrusion_axis, thickness, intrusion_depth, shape):
     """Generate inferior and superior bone caps from projected surface footprints.
 
-    This is the older Ogo-style cap builder used for non-``anatomy`` shapes. It
-    looks at each material column, records the first and last bone voxel, then
-    builds a flat cap from columns close enough to the global inferior/superior
-    surfaces.
+    The builder looks at each material column, records the first and last bone
+    voxel, then builds a flat cap from columns close enough to the global
+    inferior/superior surfaces.
     """
     import numpy as np
 
@@ -462,9 +1080,9 @@ def _generate_axis_aligned_anatomy_cap_from_mask(mask, *, extrusion_axis, direct
         return cap
 
     # Keep columns whose surface is close enough to the outermost contact
-    # surface. This preserves a flat outer cap while allowing the inner side to
-    # follow nearby anatomy.
-    maximum_supported_surface_depth = thickness + intrusion
+    # surface. Intrusion is the amount of the fixed cap thickness that anatomy
+    # may occupy; deeper columns would make the PMMA thicker than requested.
+    maximum_supported_surface_depth = intrusion
     if direction == "up":
         flat_contact_position = int(np.max(surface_position_by_column[has_bone_in_column]))
         included_columns = has_bone_in_column & (
@@ -502,27 +1120,6 @@ def _generate_axis_aligned_anatomy_cap_from_mask(mask, *, extrusion_axis, direct
     return cap
 
 
-def _projected_contact_within_depth(mask, extrusion_axis, direction, depth):
-    """Project only columns with bone near the flat fixture contact plane."""
-    import numpy as np
-
-    hit = np.where(mask)[extrusion_axis]
-    contact = int(hit.max() if direction == "up" else hit.min())
-    depth = max(int(depth), 1)
-    if direction == "up":
-        support_slice = slice(max(contact - depth + 1, 0), contact + 1)
-    elif direction == "down":
-        support_slice = slice(contact, min(contact + depth, mask.shape[extrusion_axis]))
-    else:
-        raise ValueError("direction must be 'up' or 'down'.")
-
-    if extrusion_axis == 0:
-        return mask[support_slice, :, :].any(axis=0)
-    if extrusion_axis == 1:
-        return mask[:, support_slice, :].any(axis=1)
-    return mask[:, :, support_slice].any(axis=2)
-
-
 def _shaped_contact_cap(mask, surface, extrusion_axis, direction, thickness, shape):
     import numpy as np
 
@@ -558,52 +1155,11 @@ def _shaped_contact_cap(mask, surface, extrusion_axis, direction, thickness, sha
     return cap
 
 
-def _full_fixture_cap(
-    mask,
-    surface,
-    extrusion_axis,
-    direction,
-    thickness,
-    shape,
-    intrusion=0,
-    crop_to_contact=False,
-):
-    import numpy as np
-
-    footprint = _projected_footprint(surface, extrusion_axis, shape)
-    if crop_to_contact:
-        footprint &= _projected_contact_within_depth(mask, extrusion_axis, direction, intrusion)
-    cap = np.zeros_like(mask, dtype=bool)
-    hit = np.where(mask)[extrusion_axis]
-    contact = int(hit.min() if direction == "down" else hit.max())
-    thickness = max(int(thickness), 0)
-    intrusion = max(int(intrusion), 0)
-    if direction == "up":
-        slab_start = contact - intrusion + 1
-        slab_stop = slab_start + thickness
-    elif direction == "down":
-        slab_stop = contact + intrusion
-        slab_start = slab_stop - thickness
-    else:
-        raise ValueError("direction must be 'up' or 'down'.")
-    slab = slice(
-        max(slab_start, 0),
-        min(slab_stop, mask.shape[extrusion_axis]),
-    )
-    if extrusion_axis == 0:
-        cap[slab, :, :] = footprint
-    elif extrusion_axis == 1:
-        cap[:, slab, :] = footprint[:, None, :]
-    else:
-        cap[:, :, slab] = footprint[:, :, None]
-    return cap
-
-
 def generate_bone_cap_mask(mask, *, axis="x", direction="up", thickness=5, shape="fit", intrusion=None):
     """Generate a one-sided cap mask from a binary bone/contact mask.
 
-    Without ``intrusion`` this uses the historical Ogo surface-projection path.
-    With ``intrusion`` it uses the newer fixed-thickness cap convention:
+    Without ``intrusion`` this uses the surface-projection path. With
+    ``intrusion`` it uses the fixed-thickness cap convention:
 
     * ``thickness`` is the total requested cap thickness.
     * ``intrusion`` is how far the anatomy is allowed to occupy that thickness.
@@ -660,80 +1216,6 @@ def generate_bone_cap_mask(mask, *, axis="x", direction="up", thickness=5, shape
     return largest_connected_component(output)
 
 
-def generate_fixture_cap_mask(
-    mask,
-    *,
-    axis="x",
-    direction="up",
-    thickness=5,
-    shape="box",
-    intrusion=0,
-    crop_to_contact=False,
-):
-    """Generate a full geometric fixture cap from a binary ROI/contact mask.
-
-    Fixture caps are used for hip/sideways-fall style contact fixtures. They
-    keep the full square/round footprint instead of trimming to a bone-fit
-    surface.
-
-    ``thickness`` is the total fixture thickness. ``intrusion`` shifts that
-    fixed-thickness slab toward the anatomy; it does not request a thicker cap.
-    The cap mask may overlap bone, so callers that merge it into a material
-    image should preserve existing bone material IDs.
-    """
-    import numpy as np
-
-    shape = str(shape).lower()
-    if shape not in {"box", "round"}:
-        raise ValueError("fixture cap shape must be 'box' or 'round'.")
-    thickness = int(thickness)
-    extrusion_axis = axis_index(axis)
-    work_bb, _ = _expanded_bbox_for_fixed_thickness_fixture(mask, extrusion_axis, thickness, intrusion)
-    cropped = mask[work_bb].astype(bool)
-    surface = _contact_surface(cropped, extrusion_axis, direction)
-    cap = _full_fixture_cap(
-        cropped,
-        surface,
-        extrusion_axis,
-        direction,
-        thickness,
-        shape,
-        intrusion=intrusion,
-        crop_to_contact=crop_to_contact,
-    )
-
-    output = np.zeros_like(mask, dtype=bool)
-    output[work_bb] = cap
-    return largest_connected_component(output)
-
-
-def label_foreground_in_bounds_vtk(vtk_image, bounds, *, label_value=1):
-    """Label nonzero voxels inside physical bounds for contact-cap generation."""
-    import numpy as np
-    import vtk
-
-    dims = vtk_image.GetDimensions()
-    extent = vtk_image.GetExtent()
-    spacing = vtk_image.GetSpacing()
-    origin = vtk_image.GetOrigin()
-    data = vtk_image_to_numpy(vtk_image)
-
-    x = origin[0] + (np.arange(dims[0]) + extent[0]) * spacing[0]
-    y = origin[1] + (np.arange(dims[1]) + extent[2]) * spacing[1]
-    z = origin[2] + (np.arange(dims[2]) + extent[4]) * spacing[2]
-    in_bounds = (
-        (x[:, None, None] >= bounds[0])
-        & (x[:, None, None] <= bounds[1])
-        & (y[None, :, None] >= bounds[2])
-        & (y[None, :, None] <= bounds[3])
-        & (z[None, None, :] >= bounds[4])
-        & (z[None, None, :] <= bounds[5])
-    )
-
-    output_data = np.where((data != 0) & in_bounds, label_value, 0).astype(np.uint16)
-    return numpy_to_vtk_image(output_data, vtk_image, vtk_array_type=vtk.VTK_UNSIGNED_SHORT)
-
-
 def generate_bone_cap_vtk(
     labelled_vtk_image,
     *,
@@ -764,33 +1246,64 @@ def generate_bone_cap_vtk(
     )
 
 
-def generate_fixture_cap_vtk(
-    labelled_vtk_image,
+def generate_projected_material_disk_vtk(
+    material_vtk_image,
     *,
-    label_value,
-    axis="x",
-    direction="up",
-    thickness=5,
-    shape="box",
-    intrusion=0,
-    crop_to_contact=False,
+    surface_vtk_image=None,
+    exclusion_vtk_image=None,
+    center,
+    normal,
+    u_axis=None,
+    v_axis=None,
+    size=(24.0, 24.0),
+    shape="square",
+    thickness=3.0,
+    intrusion=2.0,
+    anatomy_constrained=True,
     output_value=1,
 ):
-    """Generate a full geometric VTK fixture cap from a labelled ROI mask."""
-    import numpy as np
+    """Generate a VTK material disk from a physical-space contact plane.
 
-    labels = vtk_image_to_numpy(labelled_vtk_image, processing_order=True)
-    cap = generate_fixture_cap_mask(
-        labels == label_value,
-        axis=axis,
-        direction=direction,
-        thickness=thickness,
+    ``surface_vtk_image`` can be supplied when the anatomical surface should be
+    traced from a mask rather than from the binned material image. Nonzero
+    voxels in ``exclusion_vtk_image`` are treated as protected anatomy that the
+    generated disk must never occupy.
+    """
+    import numpy as np
+    import vtk
+
+    material = vtk_image_to_numpy(material_vtk_image)
+    surface = (
+        material
+        if surface_vtk_image is None
+        else vtk_image_to_numpy(surface_vtk_image)
+    )
+    exclusion = material > 0
+    if exclusion_vtk_image is not None:
+        exclusion = exclusion | (vtk_image_to_numpy(exclusion_vtk_image) > 0)
+    if surface.shape != material.shape:
+        raise ValueError("surface_vtk_image must match material_vtk_image shape.")
+    if exclusion.shape != material.shape:
+        raise ValueError("exclusion_vtk_image must match material_vtk_image shape.")
+    extent = material_vtk_image.GetExtent()
+    disk = generate_projected_material_disk_mask(
+        surface > 0,
+        spacing=material_vtk_image.GetSpacing(),
+        origin=material_vtk_image.GetOrigin(),
+        center=center,
+        normal=normal,
+        u_axis=u_axis,
+        v_axis=v_axis,
+        size=size,
         shape=shape,
+        thickness=thickness,
         intrusion=intrusion,
-        crop_to_contact=crop_to_contact,
+        anatomy_constrained=anatomy_constrained,
+        material_mask=exclusion,
+        extent_start=(extent[0], extent[2], extent[4]),
     )
     return numpy_to_vtk_image(
-        (cap.astype(np.uint16) * int(output_value)),
-        labelled_vtk_image,
-        processing_order=True,
+        disk.astype(np.uint16) * int(output_value),
+        material_vtk_image,
+        vtk_array_type=vtk.VTK_UNSIGNED_SHORT,
     )
