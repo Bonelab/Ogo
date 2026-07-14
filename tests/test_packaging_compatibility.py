@@ -1,4 +1,5 @@
 import ast
+import re
 from pathlib import Path
 
 
@@ -26,3 +27,18 @@ def test_build_system_declares_pbr_dependency():
     text = pyproject_toml.read_text(encoding="utf-8")
     assert "[build-system]" in text
     assert '"pbr' in text
+
+
+def test_ci_conda_install_is_non_interactive():
+    """Cache misses in CI should not wait for an install confirmation prompt."""
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow = repo_root / ".github" / "workflows" / "main.yml"
+    text = workflow.read_text(encoding="utf-8")
+
+    install_lines = re.findall(r"^\s*conda install\b.*$", text, flags=re.MULTILINE)
+    assert install_lines, "The CI workflow should install conda dependencies."
+    for line in install_lines:
+        assert " -y " in " {0} ".format(line), (
+            "conda install commands in CI should include -y so cache misses "
+            "cannot block on confirmation."
+        )

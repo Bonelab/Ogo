@@ -47,7 +47,7 @@ jobs:
       - name: Create and install dependencies
         if: steps.conda-env-cache.outputs.cache-hit != 'true'
         run: |
-          conda install -n test n88tools click flake8 matplotlib nose numpy opencv pandas pbr pytest scipy simpleitk six sphinx pydicom gdcm
+          conda install -y -n test n88tools click flake8 matplotlib nose numpy opencv pandas pbr pytest scipy simpleitk six sphinx pydicom gdcm
       - name: Install package
         run: |
           conda activate test
