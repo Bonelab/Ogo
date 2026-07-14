@@ -5,6 +5,15 @@ This directory contains the maintained model-building code used by
 `ogo/cli/GenerateFEM.py`; the lower-level spine and femur modules in this
 directory should stay implementation details.
 
+The workflow builders are organized by anatomy:
+
+- `spine.py` owns spine-compression defaults, preprocessing, model building,
+  and the lower-level spine command parser.
+- `femur.py` owns hip sideways-fall defaults, preprocessing, model building,
+  and the lower-level femur command parser.
+- Shared helper modules such as `alignment.py`, `boundary.py`, `materials.py`,
+  and `model.py` contain reusable mechanics used by both anatomy workflows.
+
 ## Inputs
 
 All FEA workflows expect a density-calibrated CT image and an aligned

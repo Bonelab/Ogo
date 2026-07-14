@@ -9,9 +9,9 @@ def test_sideways_fall_icp_path_does_not_pre_rotate_input_images():
     pytest.importorskip("vtk")
     pytest.importorskip("vtkbone")
 
-    from ogo.fea import sideways_fall
+    from ogo.fea import femur
 
-    source = textwrap.dedent(inspect.getsource(sideways_fall.sidewaysFallFe))
+    source = textwrap.dedent(inspect.getsource(femur.sidewaysFallFe))
     tree = ast.parse(source)
     pre_rotation_calls = [
         node
@@ -26,9 +26,9 @@ def test_sideways_fall_icp_path_uses_voxel_surface_points():
     pytest.importorskip("vtk")
     pytest.importorskip("vtkbone")
 
-    from ogo.fea import sideways_fall
+    from ogo.fea import femur
 
-    source = textwrap.dedent(inspect.getsource(sideways_fall.sidewaysFallFe))
+    source = textwrap.dedent(inspect.getsource(femur.sidewaysFallFe))
     tree = ast.parse(source)
     called_names = {
         node.func.id

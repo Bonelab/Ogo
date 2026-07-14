@@ -47,7 +47,7 @@ def test_filter_node_set_to_dominant_coordinate_plane_removes_small_rim():
 
 
 def test_spine_qc_filename_parser_handles_compact_generated_names():
-    from ogo.fea.spine_compression import parse_filename
+    from ogo.fea.spine import parse_filename
 
     metadata = parse_filename("/tmp/density_L4_BCcheck.csv")
 
@@ -80,7 +80,7 @@ def test_merge_vtk_images_can_preserve_existing_material_voxels():
     vtk = pytest.importorskip("vtk")
     from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
-    from ogo.fea.spine_compression import merge_vtk_images
+    from ogo.fea.spine import merge_vtk_images
 
     material = np.zeros((3, 3, 3), dtype=np.float32)
     material[1, 1, 1] = 42
@@ -110,9 +110,9 @@ def test_merge_vtk_images_can_preserve_existing_material_voxels():
 def test_spine_workflow_uses_projected_contact_disks():
     pytest.importorskip("vtk")
 
-    from ogo.fea import spine_compression
+    from ogo.fea import spine
 
-    source = textwrap.dedent(inspect.getsource(spine_compression.process_vertebra))
+    source = textwrap.dedent(inspect.getsource(spine.process_vertebra))
     tree = ast.parse(source)
     called_names = {
         node.func.id
@@ -127,9 +127,9 @@ def test_spine_workflow_uses_projected_contact_disks():
 def test_spine_registration_scaling_uses_voxel_surface_points():
     pytest.importorskip("vtk")
 
-    from ogo.fea import spine_compression
+    from ogo.fea import spine
 
-    source = textwrap.dedent(inspect.getsource(spine_compression.get_icp_with_scaling))
+    source = textwrap.dedent(inspect.getsource(spine.get_icp_with_scaling))
 
     assert "surface_points_from_vtk_mask" in source
     assert "point_cloud_axis_lengths" in source
@@ -139,9 +139,9 @@ def test_spine_registration_scaling_uses_voxel_surface_points():
 def test_spine_workflow_resamples_to_explicit_reference_grid():
     pytest.importorskip("vtk")
 
-    from ogo.fea import spine_compression
+    from ogo.fea import spine
 
-    source = textwrap.dedent(inspect.getsource(spine_compression.process_vertebra))
+    source = textwrap.dedent(inspect.getsource(spine.process_vertebra))
 
     assert "output_grid_for_point_transform" in source
     assert "resample_vtk_image_with_point_transform" in source
@@ -151,9 +151,9 @@ def test_spine_workflow_resamples_to_explicit_reference_grid():
 def test_spine_contact_planes_use_generated_model_bbox():
     pytest.importorskip("vtk")
 
-    from ogo.fea import spine_compression
+    from ogo.fea import spine
 
-    source = textwrap.dedent(inspect.getsource(spine_compression.process_vertebra))
+    source = textwrap.dedent(inspect.getsource(spine.process_vertebra))
 
     assert "bounds_with_reference_extent" not in source
     assert "body_bounds = transformed_body_bounds" in source
@@ -162,9 +162,9 @@ def test_spine_contact_planes_use_generated_model_bbox():
 def test_spine_projected_disks_pad_to_contact_plane_bounds():
     pytest.importorskip("vtk")
 
-    from ogo.fea import spine_compression
+    from ogo.fea import spine
 
-    source = textwrap.dedent(inspect.getsource(spine_compression.process_vertebra))
+    source = textwrap.dedent(inspect.getsource(spine.process_vertebra))
 
     assert "projected_material_disk_required_bounds" in source
     assert "pad_vtk_images_to_physical_bounds" in source
@@ -198,7 +198,7 @@ def test_spine_crop_to_bounding_box_updates_origin_and_extent():
     vtk = pytest.importorskip("vtk")
     from vtk.util.numpy_support import numpy_to_vtk
 
-    from ogo.fea.spine_compression import crop_to_bounding_box
+    from ogo.fea.spine import crop_to_bounding_box
 
     values = np.zeros((6, 7, 8), dtype=np.uint8)
     values[2:5, 3:6, 4:7] = 1
@@ -221,7 +221,7 @@ def test_spine_compression_read_preserves_reader_get_output_contract(tmp_path):
     sitk = pytest.importorskip("SimpleITK")
     pytest.importorskip("vtk")
 
-    from ogo.fea.spine_compression import read
+    from ogo.fea.spine import read
 
     image_path = tmp_path / "image.nii.gz"
     image = sitk.GetImageFromArray(np.ones((2, 3, 4), dtype=np.uint8))

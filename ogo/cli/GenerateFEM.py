@@ -168,13 +168,13 @@ def build_femur_command(
 
 
 def expected_spine_model_path(calibrated_image: Path, output_path: Optional[Path], target: SpineTarget) -> Path:
-    """Predict the spine model path written by ``OgoSpineCompressionFe``."""
+    """Predict the spine model path written by the spine builder."""
     output_dir = output_path if output_path is not None else calibrated_image.parent
     return output_dir / "{}_{}.n88model".format(remove_extension(calibrated_image), target.level)
 
 
 def expected_femur_model_path(calibrated_image: Path, output_path: Optional[Path], side: str) -> Path:
-    """Predict the femur model path written by ``OgoSidewaysFallFe``."""
+    """Predict the femur model path written by the femur builder."""
     output_dir = output_path if output_path is not None else calibrated_image.parent
     stem = "LF" if side == "left" else "RF"
     return output_dir / "{}_{}.n88model".format(remove_extension(calibrated_image), stem)
@@ -839,15 +839,15 @@ def _call_cli(main_func: Callable[[], None], program: str, argv: Sequence[str]) 
 
 
 def run_spine_command(argv: Sequence[str]) -> None:
-    from ogo.fea.spine_compression import main as spine_compression_main
+    from ogo.fea.spine import main as spine_main
 
-    _call_cli(spine_compression_main, "OgoSpineCompressionFe", argv)
+    _call_cli(spine_main, "ogoFEA-spine-builder", argv)
 
 
 def run_femur_command(argv: Sequence[str]) -> None:
-    from ogo.fea.sideways_fall import main as sideways_fall_main
+    from ogo.fea.femur import main as femur_main
 
-    _call_cli(sideways_fall_main, "OgoSidewaysFallFe", argv)
+    _call_cli(femur_main, "ogoFEA-hip-builder", argv)
 
 
 def print_dry_run(program: str, argv: Sequence[str]) -> None:
@@ -1016,7 +1016,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 extra_args=spine_extra_args,
             )
             if args.dry_run:
-                print_dry_run("OgoSpineCompressionFe", cmd)
+                print_dry_run("ogoFEA-spine-builder", cmd)
             else:
                 run_spine_command(cmd)
                 model_path = expected_spine_model_path(args.calibrated_image, args.output_path, target)
@@ -1045,7 +1045,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 extra_args=extra_args,
             )
             if args.dry_run:
-                print_dry_run("OgoSidewaysFallFe", cmd)
+                print_dry_run("ogoFEA-hip-builder", cmd)
             else:
                 run_femur_command(cmd)
                 model_path = expected_femur_model_path(args.calibrated_image, args.output_path, side)
