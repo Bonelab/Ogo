@@ -58,7 +58,8 @@ def solve_calls(monkeypatch):
     return calls
 
 
-def test_spine_runs_each_requested_vertebra(monkeypatch, solve_calls):
+def test_spine_runs_each_requested_vertebra(monkeypatch, tmp_path, solve_calls):
+    monkeypatch.chdir(tmp_path)
     calls = []
     monkeypatch.setattr(GenerateFEM, "run_spine_command", lambda argv: calls.append(list(argv)))
 
@@ -118,7 +119,8 @@ def test_spine_runs_each_requested_vertebra(monkeypatch, solve_calls):
     ]
 
 
-def test_hip_defaults_to_both_sides(monkeypatch, solve_calls):
+def test_hip_defaults_to_both_sides(monkeypatch, tmp_path, solve_calls):
+    monkeypatch.chdir(tmp_path)
     calls = []
     monkeypatch.setattr(GenerateFEM, "run_femur_command", lambda argv: calls.append(list(argv)))
 
@@ -132,6 +134,32 @@ def test_hip_defaults_to_both_sides(monkeypatch, solve_calls):
         (Path("models/density_LF.n88model"), "hip", calls[0]),
         (Path("models/density_RF.n88model"), "hip", calls[1]),
     ]
+
+
+def test_output_path_is_created_before_generator_runs(monkeypatch, tmp_path):
+    output_path = tmp_path / "new" / "models"
+    calls = []
+
+    def record_run(argv):
+        assert output_path.is_dir()
+        calls.append(list(argv))
+
+    monkeypatch.setattr(GenerateFEM, "run_spine_command", record_run)
+
+    GenerateFEM.main(
+        [
+            "spine",
+            "density.nii.gz",
+            "spine_mask.nii.gz",
+            "--output_path",
+            str(output_path),
+            "--vertebra",
+            "L1:2:1",
+            "--no-solve",
+        ]
+    )
+
+    assert len(calls) == 1
 
 
 def test_hip_can_run_one_side(monkeypatch, solve_calls):

@@ -722,9 +722,15 @@ def check_values(features, checks):
     return results
 
 def parse_filename(filepath):
-    base_name = os.path.basename(filepath)
+    base_name = os.path.splitext(os.path.basename(filepath))[0]
     parts = base_name.split('_')
-    return {'ID': parts[0], 'TREATMENT': parts[1], 'LOCATION': parts[2], 'NUMBER': parts[4], 'filename':'_'.join(parts[:-3])}
+    return {
+        'ID': parts[0] if len(parts) > 0 else '',
+        'TREATMENT': parts[1] if len(parts) > 1 else '',
+        'LOCATION': parts[2] if len(parts) > 2 else '',
+        'NUMBER': parts[4] if len(parts) > 4 else '',
+        'filename': '_'.join(parts[:-3]) if len(parts) > 3 else base_name,
+    }
 
 def visualize_slice(image, filepath):
     # Get the dimensions of the vtkImageData object

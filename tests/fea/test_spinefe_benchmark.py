@@ -46,6 +46,20 @@ def test_filter_node_set_to_dominant_coordinate_plane_removes_small_rim():
     assert [filtered.GetValue(i) for i in range(filtered.GetNumberOfTuples())] == [0, 1, 2, 3]
 
 
+def test_spine_qc_filename_parser_handles_compact_generated_names():
+    from ogo.fea.spine_compression import parse_filename
+
+    metadata = parse_filename("/tmp/density_L4_BCcheck.csv")
+
+    assert metadata == {
+        "ID": "density",
+        "TREATMENT": "L4",
+        "LOCATION": "BCcheck",
+        "NUMBER": "",
+        "filename": "density_L4_BCcheck",
+    }
+
+
 def _node_set_count(model, name):
     node_set = model.GetNodeSet(name)
     if node_set is None:

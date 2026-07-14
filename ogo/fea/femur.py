@@ -1402,8 +1402,7 @@ def detect_lesser_trochanter_cut_z(
     if not np.any(proximal_mask):
         raise ValueError("Cannot identify greater trochanter from femur profile.")
     proximal_indices = np.where(proximal_mask)[0]
-    greater_index = int(proximal_indices[np.argmax(y_max[proximal_indices])])
-    greater_z = float(z[greater_index])
+    greater_index, greater_z = _peak_center_z(z, y_max, proximal_indices)
 
     distal_mask = (
         (z <= greater_z - float(min_distal_to_greater_mm))

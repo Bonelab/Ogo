@@ -180,6 +180,12 @@ def expected_femur_model_path(calibrated_image: Path, output_path: Optional[Path
     return output_dir / "{}_{}.n88model".format(remove_extension(calibrated_image), stem)
 
 
+def ensure_output_directory(output_path: Optional[Path]) -> None:
+    """Create an explicit model output directory before generation starts."""
+    if output_path is not None:
+        output_path.mkdir(parents=True, exist_ok=True)
+
+
 def option_value(argv: Sequence[str], option: str, default: Optional[str] = None) -> Optional[str]:
     """Return the final value for an option from an argv-style list."""
     value = default
@@ -992,6 +998,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     if args.model_type is None:
         parser.error("model type is required: choose spine or hip")
+
+    if not args.dry_run:
+        ensure_output_directory(args.output_path)
 
     if args.model_type == "spine":
         spine_extra_args = spine_preset_args(args.preset) + list(extra_args) + [
