@@ -35,10 +35,20 @@ def test_ci_conda_install_is_non_interactive():
     workflow = repo_root / ".github" / "workflows" / "main.yml"
     text = workflow.read_text(encoding="utf-8")
 
-    install_lines = re.findall(r"^\s*conda install\b.*$", text, flags=re.MULTILINE)
-    assert install_lines, "The CI workflow should install conda dependencies."
+    install_lines = re.findall(r"^\s*(?:conda|mamba) install\b.*$", text, flags=re.MULTILINE)
+    assert install_lines, "The CI workflow should install dependencies."
     for line in install_lines:
         assert " -y " in " {0} ".format(line), (
-            "conda install commands in CI should include -y so cache misses "
+            "CI install commands should include -y so cache misses "
             "cannot block on confirmation."
         )
+
+
+def test_ci_uses_mamba_for_dependency_resolution():
+    """Cold CI environments should use the faster conda-compatible solver."""
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow = repo_root / ".github" / "workflows" / "main.yml"
+    text = workflow.read_text(encoding="utf-8")
+
+    assert "mamba-version:" in text
+    assert re.search(r"^\s*mamba install\b", text, flags=re.MULTILINE)
