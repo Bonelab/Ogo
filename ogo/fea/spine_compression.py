@@ -92,6 +92,12 @@ from ogo.fea.spine import (
     SPINE_SUPERIOR_CONTACT_CENTER_FRACTION,
     default_spine_reference_path,
 )
+from ogo.fea.model import (
+    apply_spine_boundary_conditions as apply_boundary_conditions,
+    create_microfe_model,
+    find_and_add_visible_nodes,
+    log_fe_arguments,
+)
 import ogo.util.Helper as ogo
 from ogo.util.echo_arguments import echo_arguments
 from scipy.ndimage import gaussian_filter
@@ -650,45 +656,11 @@ def convert_image_to_material(image, mask, n_bins=128, cort_mask=None):
 
     return binned_image, bin_centers
 
-def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_id, node_set_name):
-    """Delegate visible-node detection to the shared FE model helper."""
-    from ogo.fea.model import find_and_add_visible_nodes as _find_and_add_visible_nodes
-
-    return _find_and_add_visible_nodes(
-        model, bc_geometry, normal_vector, bone_material_id, node_set_name
-    )
-
 def resolve_func(func_or_name, module):
     """Resolve a material-law function by object or configured name."""
     from ogo.fea.materials import resolve_material_func
 
     return resolve_material_func(func_or_name, module)
-
-def apply_boundary_conditions(model,**kwargs):
-    """Apply the maintained spine compression boundary conditions."""
-    from ogo.fea.model import apply_spine_boundary_conditions
-
-    return apply_spine_boundary_conditions(model, **kwargs)
-
-
-def log_fe_arguments(**kwargs):
-    """Print model-building arguments through the shared FE logger."""
-    from ogo.fea.model import log_fe_arguments as _log_fe_arguments
-
-    return _log_fe_arguments(**kwargs)
-
-def create_microfe_model(
-    image_with_pads,
-    boundary_masks_with_pads,
-    bin_centers,
-    **kwargs
-):
-    """Create a spine compression micro-FE model from material and BC masks."""
-    from ogo.fea.model import create_microfe_model as _create_microfe_model
-
-    return _create_microfe_model(
-        image_with_pads, boundary_masks_with_pads, bin_centers, **kwargs
-    )
 
 ###################################################################### QUALITY CONTROL
 ## Functions to check image and boundary conditions 

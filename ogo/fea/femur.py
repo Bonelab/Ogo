@@ -1,5 +1,10 @@
 """Femur-specific defaults and helpers for sideways-fall FE generation.
 
+Shared point-cloud and boundary-contact primitives live in ``alignment`` and
+``boundary``. They are re-exported here so older femur workflow imports keep
+working while this module stays focused on femur defaults and femur-only
+geometry.
+
 Default femur workflow:
 1. Read the calibrated density image and whole-femur mask. The public wrapper
    chooses left/right from ``--side`` and the lower-level script uses
@@ -33,6 +38,23 @@ Default femur workflow:
 """
 
 from pathlib import Path
+
+from ogo.fea.alignment import (
+    point_cloud_axis_lengths,
+    polydata_from_points,
+    polydata_points,
+    sample_points,
+    surface_points_from_vtk_mask,
+)
+from ogo.fea.boundary import (
+    _axis_bounds,
+    _axis_extent_from_vector,
+    bbox_relative_contact_bounds as bbox_relative_fixture_bounds,
+    bbox_relative_contact_direction as bbox_relative_fixture_direction,
+    bbox_relative_contact_plane as bbox_relative_fixture_plane,
+    foreground_voxel_center_bounds,
+    foreground_voxel_center_bounds_from_mask,
+)
 
 
 LEFT_FEMUR = 1
@@ -85,60 +107,6 @@ def sideways_fall_output_name(output_file, femur_side):
     """Return the compact side-specific sideways-fall output path."""
     output_path = Path(output_file)
     return str(output_path.with_name(f"{output_path.stem}_{side_suffix(femur_side)}.n88model"))
-
-
-def _axis_index(axis):
-    axis_map = {"x": 0, "y": 1, "z": 2}
-    try:
-        return axis_map[str(axis).lower()]
-    except KeyError as exc:
-        raise ValueError("projection_axis must be 'x', 'y', or 'z'.") from exc
-
-
-def _axis_bounds(model_bounds, axis):
-    index = 2 * int(axis)
-    return float(model_bounds[index]), float(model_bounds[index + 1])
-
-
-def foreground_voxel_center_bounds_from_mask(mask, *, origin, spacing):
-    """Return x/y/z physical bounds of nonzero voxel centers.
-
-    Bbox-relative workflow fixtures are authored against the occupied voxel
-    centers, matching the image-space convention used by the FE recipe
-    parameters. FE mesh/node bounds are wider by the element faces and should
-    not be used to resolve those contact planes.
-    """
-    import numpy as np
-
-    active = np.asarray(mask) != 0
-    coords = np.argwhere(active)
-    if coords.size == 0:
-        raise ValueError("Cannot compute foreground bounds from an empty mask.")
-    origin = np.asarray(origin, dtype=np.float64)
-    spacing = np.asarray(spacing, dtype=np.float64)
-    if origin.shape != (3,) or spacing.shape != (3,):
-        raise ValueError("origin and spacing must contain three values.")
-    lo = origin + coords.min(axis=0).astype(np.float64) * spacing
-    hi = origin + coords.max(axis=0).astype(np.float64) * spacing
-    return (
-        float(lo[0]),
-        float(hi[0]),
-        float(lo[1]),
-        float(hi[1]),
-        float(lo[2]),
-        float(hi[2]),
-    )
-
-
-def foreground_voxel_center_bounds(vtk_image):
-    """Return physical foreground bounds for a VTK image using voxel centers."""
-    from ogo.util.vtk_image import vtk_image_to_numpy
-
-    return foreground_voxel_center_bounds_from_mask(
-        vtk_image_to_numpy(vtk_image),
-        origin=vtk_image.GetOrigin(),
-        spacing=vtk_image.GetSpacing(),
-    )
 
 
 def matrix4x4_to_numpy(matrix):
@@ -260,89 +228,6 @@ def transform_resample_vtk_image_to_reference_grid(
     return out
 
 
-def bbox_relative_fixture_bounds(
-    model_bounds,
-    *,
-    center_fraction,
-    size_fraction,
-    projection_axis="y",
-    shape="rectangle",
-):
-    """Return physical contact ROI bounds from model-bbox-relative plane values.
-
-    ``center_fraction`` has x/y/z fractions relative to the model bbox. The two
-    ``size_fraction`` values scale the lateral axes of the projection plane in
-    coordinate order. When ``shape="square"``, the smaller scaled lateral
-    length is used on both axes. The projection axis itself spans the whole
-    model bbox so the cap builder can find the nearest supported anatomy
-    column.
-    """
-    from ogo.fea.boundary import bbox_relative_contact_bounds
-
-    return bbox_relative_contact_bounds(
-        model_bounds,
-        center_fraction=center_fraction,
-        size_fraction=size_fraction,
-        projection_axis=projection_axis,
-        shape=shape,
-    )
-
-
-def bbox_relative_fixture_direction(center_fraction, *, projection_axis="y"):
-    """Return the cap side implied by a bbox-relative plane fraction."""
-    from ogo.fea.boundary import bbox_relative_contact_direction
-
-    return bbox_relative_contact_direction(
-        center_fraction,
-        projection_axis=projection_axis,
-    )
-
-
-def _axis_extent_from_vector(model_bounds, vector):
-    import numpy as np
-
-    spans = np.asarray(
-        [
-            float(model_bounds[1]) - float(model_bounds[0]),
-            float(model_bounds[3]) - float(model_bounds[2]),
-            float(model_bounds[5]) - float(model_bounds[4]),
-        ],
-        dtype=float,
-    )
-    return float(np.sum(np.abs(np.asarray(vector, dtype=float)) * spans))
-
-
-def _fixture_plane_axes(projection_axis, normal_sign):
-    """Return stable in-plane axes for bbox-relative fixture planes."""
-    axis = _axis_index(projection_axis)
-    sign = 1.0 if float(normal_sign) >= 0.0 else -1.0
-    if axis == 0:
-        return (0.0, 0.0, sign), (0.0, -1.0, 0.0)
-    if axis == 1:
-        return (0.0, 0.0, -sign), (-1.0, 0.0, 0.0)
-    return (1.0, 0.0, 0.0), (0.0, sign, 0.0)
-
-
-def bbox_relative_fixture_plane(
-    model_bounds,
-    *,
-    center_fraction,
-    size_fraction,
-    projection_axis="y",
-    shape="square",
-):
-    """Return a physical contact-plane definition from bbox-relative values."""
-    from ogo.fea.boundary import bbox_relative_contact_plane
-
-    return bbox_relative_contact_plane(
-        model_bounds,
-        center_fraction=center_fraction,
-        size_fraction=size_fraction,
-        projection_axis=projection_axis,
-        shape=shape,
-    )
-
-
 def _scale_triplet(values, name):
     import numpy as np
 
@@ -354,135 +239,12 @@ def _scale_triplet(values, name):
 
 def principal_axis_lengths(polydata):
     """Return approximate principal-axis diameters for a VTK polydata surface."""
-    import numpy as np
-    from vtk.util.numpy_support import vtk_to_numpy
-
-    points = polydata.GetPoints()
-    if points is None or points.GetNumberOfPoints() == 0:
-        raise ValueError("Cannot measure principal axes for empty polydata.")
-    coordinates = np.asarray(vtk_to_numpy(points.GetData()), dtype=float)
-    centered = coordinates - coordinates.mean(axis=0)
-    covariance = np.cov(centered.T)
-    eigvals = np.linalg.eigvalsh(covariance)
-    return np.sqrt(np.maximum(eigvals, 0.0)) * 2.0
-
-
-def polydata_points(polydata):
-    """Return VTK polydata point coordinates as an ``(n, 3)`` NumPy array."""
-    import numpy as np
-    from vtk.util.numpy_support import vtk_to_numpy
-
-    points = polydata.GetPoints()
-    if points is None or points.GetNumberOfPoints() == 0:
-        raise ValueError("Polydata contains no points.")
-    coordinates = np.asarray(vtk_to_numpy(points.GetData()), dtype=float)
-    if coordinates.ndim != 2 or coordinates.shape[1] != 3:
-        raise ValueError("Polydata points must have shape (n, 3).")
-    return coordinates[np.all(np.isfinite(coordinates), axis=1)]
-
-
-def polydata_from_points(points):
-    """Create a vertex-only VTK polydata from an ``(n, 3)`` point cloud."""
-    import numpy as np
-    import vtk
-
-    coordinates = np.asarray(points, dtype=float)
-    if coordinates.ndim != 2 or coordinates.shape[1] != 3 or coordinates.shape[0] < 3:
-        raise ValueError("points must have shape (n, 3) with at least three rows.")
-
-    vtk_points = vtk.vtkPoints()
-    vertices = vtk.vtkCellArray()
-    for point in coordinates:
-        point_id = vtk_points.InsertNextPoint(float(point[0]), float(point[1]), float(point[2]))
-        vertices.InsertNextCell(1)
-        vertices.InsertCellPoint(point_id)
-
-    polydata = vtk.vtkPolyData()
-    polydata.SetPoints(vtk_points)
-    polydata.SetVerts(vertices)
-    return polydata
-
-
-def sample_points(points, *, max_points=None, mode="linspace", offset=0):
-    """Sample a point cloud using the same small deterministic modes as workflows."""
-    import numpy as np
-
-    coordinates = np.asarray(points, dtype=float)
-    if max_points is None or int(max_points) <= 0 or coordinates.shape[0] <= int(max_points):
-        return coordinates
-
-    token = str(mode).strip().lower()
-    if token == "stride":
-        step = max(1, int(np.ceil(coordinates.shape[0] / int(max_points))))
-        start = int(offset) % step
-        indices = np.arange(start, coordinates.shape[0], step, dtype=int)
-        if indices.size < int(max_points):
-            fallback = np.linspace(0, coordinates.shape[0] - 1, int(max_points), dtype=int)
-            indices = np.unique(np.concatenate([indices, fallback]))
-        indices = indices[: int(max_points)]
-    else:
-        indices = np.linspace(0, coordinates.shape[0] - 1, int(max_points), dtype=int)
-    return coordinates[indices]
-
-
-def _binary_erosion_6(mask):
-    import numpy as np
-
-    padded = np.pad(mask, 1, mode="constant", constant_values=False)
-    center = padded[1:-1, 1:-1, 1:-1]
-    eroded = center.copy()
-    eroded &= padded[:-2, 1:-1, 1:-1]
-    eroded &= padded[2:, 1:-1, 1:-1]
-    eroded &= padded[1:-1, :-2, 1:-1]
-    eroded &= padded[1:-1, 2:, 1:-1]
-    eroded &= padded[1:-1, 1:-1, :-2]
-    eroded &= padded[1:-1, 1:-1, 2:]
-    return eroded
-
-
-def surface_points_from_vtk_mask(
-    vtk_mask,
-    *,
-    max_points=8000,
-    sample_mode="stride",
-    sample_offset=0,
-):
-    """Return physical x/y/z points from the 6-connected voxel mask surface."""
-    import numpy as np
-    from ogo.util.vtk_image import vtk_image_to_numpy
-
-    mask = np.asarray(vtk_image_to_numpy(vtk_mask), dtype=bool)
-    if not np.any(mask):
-        raise ValueError("mask contains no foreground voxels.")
-
-    surface = mask & ~_binary_erosion_6(mask)
-    # Match the workflow-replay path: enumerate the voxel surface in z/y/x
-    # NumPy order, then convert those indices back to physical x/y/z points.
-    surface_zyx = np.transpose(surface if np.any(surface) else mask, (2, 1, 0))
-    coords_xyz = np.argwhere(surface_zyx)[:, [2, 1, 0]].astype(float)
-    points = np.asarray(vtk_mask.GetOrigin(), dtype=float) + coords_xyz * np.asarray(
-        vtk_mask.GetSpacing(),
-        dtype=float,
-    )
-    return sample_points(
-        points,
-        max_points=max_points,
-        mode=sample_mode,
-        offset=sample_offset,
-    )
-
-
-def point_cloud_axis_lengths(points):
-    """Return approximate principal-axis diameters for an ``(n, 3)`` point cloud."""
-    import numpy as np
-
-    coordinates = np.asarray(points, dtype=float)
-    if coordinates.ndim != 2 or coordinates.shape[1] != 3 or coordinates.shape[0] < 3:
-        raise ValueError("points must have shape (n, 3) with at least three rows.")
-    centered = coordinates - coordinates.mean(axis=0)
-    covariance = np.cov(centered.T)
-    eigvals = np.linalg.eigvalsh(covariance)
-    return np.sqrt(np.maximum(eigvals, 0.0)) * 2.0
+    try:
+        return point_cloud_axis_lengths(polydata_points(polydata))
+    except ValueError as exc:
+        if "contains no points" in str(exc):
+            raise ValueError("Cannot measure principal axes for empty polydata.") from exc
+        raise
 
 
 def scale_reference_point_cloud_to_sample(
