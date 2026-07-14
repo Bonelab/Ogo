@@ -230,7 +230,7 @@ def interface_node_ids_from_voxel_mask(
                 lateral_axes = [idx for idx in range(3) if idx != axis]
                 for offsets in itertools.product((-0.5, 0.5), repeat=2):
                     point = face_center.copy()
-                    for lateral_axis, offset_value in zip(lateral_axes, offsets, strict=True):
+                    for lateral_axis, offset_value in zip(lateral_axes, offsets):
                         point[lateral_axis] += offset_value * spacing[lateral_axis]
                     point_id = model_point_ids.get(key(point))
                     if point_id is not None:
@@ -305,7 +305,7 @@ def directional_face_node_ids_from_voxel_mask(
             lateral_axes = [idx for idx in range(3) if idx != axis]
             for offsets in itertools.product((-0.5, 0.5), repeat=2):
                 point = face_center.copy()
-                for lateral_axis, offset_value in zip(lateral_axes, offsets, strict=True):
+                for lateral_axis, offset_value in zip(lateral_axes, offsets):
                     point[lateral_axis] += offset_value * spacing[lateral_axis]
                 point_id = model_point_ids.get(key(point))
                 if point_id is not None:

@@ -652,8 +652,11 @@ def pad_vtk_images_to_physical_bounds(vtk_images, *, desired_bounds, constants=N
         int(extent[4] - lower[2]),
         int(extent[5] + upper[2]),
     )
+    if len(images) != len(constants):
+        raise ValueError("images and constants must contain the same number of items.")
+
     padded = []
-    for image, constant in zip(images, constants, strict=True):
+    for image, constant in zip(images, constants):
         pad = vtk.vtkImageConstantPad()
         pad.SetInputData(image)
         pad.SetOutputWholeExtent(output_extent)
@@ -815,7 +818,11 @@ def _surface_distance_by_projected_bucket(
     import numpy as np
 
     best = {}
-    for voxel, dist, uu, vv in zip(indices, distance, u, v, strict=True):
+    lengths = {len(indices), len(distance), len(u), len(v)}
+    if len(lengths) != 1:
+        raise ValueError("indices, distance, u, and v must have the same length.")
+
+    for voxel, dist, uu, vv in zip(indices, distance, u, v):
         if float(dist) < 0.0:
             continue
         key = _projected_bucket_key(float(uu), float(vv), spacing=spacing)
@@ -953,10 +960,9 @@ def generate_projected_material_disk_mask(
     empty = ~material[tuple(full_indices.T)]
 
     if anatomy_constrained:
-        keys = [
-            _projected_bucket_key(float(uu), float(vv), spacing=spacing)
-            for uu, vv in zip(u, v, strict=True)
-        ]
+        if len(u) != len(v):
+            raise ValueError("u and v must have the same length.")
+        keys = [_projected_bucket_key(float(uu), float(vv), spacing=spacing) for uu, vv in zip(u, v)]
         local_surface = np.asarray(
             [distance_by_key.get(key, np.nan) for key in keys],
             dtype=float,

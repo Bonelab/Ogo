@@ -104,9 +104,9 @@ def foreground_voxel_center_bounds_from_mask(mask, *, origin, spacing):
     """Return x/y/z physical bounds of nonzero voxel centers.
 
     Bbox-relative workflow fixtures are authored against the occupied voxel
-    centers, matching the image-space convention used by interactive workflow
-    replay. FE mesh/node bounds are wider by the element faces and should not
-    be used to resolve those recipe planes.
+    centers, matching the image-space convention used by the FE recipe
+    parameters. FE mesh/node bounds are wider by the element faces and should
+    not be used to resolve those contact planes.
     """
     import numpy as np
 
@@ -631,7 +631,7 @@ def _vtk_image_from_array(array, template_vtk_image, *, origin, vtk_array_type=N
 
 
 def resample_vtk_image_like_workflow(vtk_image, target_spacing_mm, *, interpolation="nearest"):
-    """Resample a VTK image with the same output-size rule as workflow replay."""
+    """Resample a VTK image using the FE reference-grid output-size rule."""
     import numpy as np
     import SimpleITK as sitk
     import vtk
@@ -1053,12 +1053,24 @@ def projected_crop_face_surface_vtk(material_vtk, plane, *, intrusion=0.0, outpu
         return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
 
     best = {}
+    candidate_indices = indices[candidates]
+    candidate_distances = distances[candidates]
+    candidate_u_values = u_values[candidates]
+    candidate_v_values = v_values[candidates]
+    candidate_lengths = {
+        len(candidate_indices),
+        len(candidate_distances),
+        len(candidate_u_values),
+        len(candidate_v_values),
+    }
+    if len(candidate_lengths) != 1:
+        raise ValueError("candidate indices, distances, and plane coordinates must have the same length.")
+
     for voxel, distance, u_value, v_value in zip(
-        indices[candidates],
-        distances[candidates],
-        u_values[candidates],
-        v_values[candidates],
-        strict=True,
+        candidate_indices,
+        candidate_distances,
+        candidate_u_values,
+        candidate_v_values,
     ):
         if float(distance) < -tolerance:
             continue
