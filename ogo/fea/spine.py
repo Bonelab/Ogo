@@ -40,6 +40,7 @@ DEFAULT_SPINE_FE_DISPLACEMENT_MM = -1.0
 DEFAULT_SPINE_TARGET_DISPLACEMENT_PERCENT = 0.68
 DEFAULT_SPINE_LABEL_SMOOTHING_SIGMA_MM = 1.0
 DEFAULT_SPINE_LABEL_SMOOTHING_THRESHOLD = 0.5
+SPINE_PREPROCESSING_CROP_MARGIN_MM = 8.0
 DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM = 2.0
 DEFAULT_SPINE_TOP_NODE_SET_ID = 4
 DEFAULT_SPINE_BOTTOM_NODE_SET_ID = 3
@@ -221,6 +222,7 @@ from ogo.fea.boundary import (
     generate_projected_material_disk_vtk,
     pad_vtk_images_to_physical_bounds,
     projected_material_disk_required_bounds,
+    resample_vtk_image_to_spacing,
     should_smooth_resampled_mask,
     smooth_binary_mask_vtk,
     smooth_label_mask_vtk,
@@ -520,15 +522,36 @@ def merge_vtk_images(image_list, label_list=None, overwrite_existing=True):
 ## functions related to ICP registration
 ###################################################################### REGISTRATION
 
-def crop_and_transform(fullvertebra, body_output, process_output, image):
+def _expand_bounding_box_by_margin(bb, image_data, margin_mm):
+    spacing = image_data.GetSpacing()
+    extent = image_data.GetExtent()
+    margins = [
+        int(np.ceil(float(margin_mm) / max(float(spacing[0]), 1.0e-12))),
+        int(np.ceil(float(margin_mm) / max(float(spacing[1]), 1.0e-12))),
+        int(np.ceil(float(margin_mm) / max(float(spacing[2]), 1.0e-12))),
+    ]
+    return [
+        max(int(extent[0]), int(bb[0]) - margins[0]),
+        min(int(extent[1]), int(bb[1]) + margins[0]),
+        max(int(extent[2]), int(bb[2]) - margins[1]),
+        min(int(extent[3]), int(bb[3]) + margins[1]),
+        max(int(extent[4]), int(bb[4]) - margins[2]),
+        min(int(extent[5]), int(bb[5]) + margins[2]),
+    ]
+
+
+def crop_and_transform(fullvertebra, body_output, process_output, image, label_output=None, *, margin_mm=0.0):
 
     _, bb = crop_to_bounding_box(fullvertebra.GetOutput())
+    if float(margin_mm) > 0.0:
+        bb = _expand_bounding_box_by_margin(bb, fullvertebra.GetOutput(), margin_mm)
     isolated_vertebra, _ = crop_to_bounding_box(body_output, bb)
     isolated_process, _ = crop_to_bounding_box(process_output, bb)
     isolated_image, _ = crop_to_bounding_box(image, bb)
-
-
-    return isolated_vertebra, isolated_process, isolated_image
+    if label_output is None:
+        return isolated_vertebra, isolated_process, isolated_image
+    isolated_label, _ = crop_to_bounding_box(label_output, bb)
+    return isolated_vertebra, isolated_process, isolated_image, isolated_label
 
 def perform_marching_cubes(body_output):
     mcubes = vtk.vtkImageMarchingCubes()
@@ -1061,18 +1084,6 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     image_reader = read(input_image)
     ogo.message(f"Reading mask...: {input_mask}")
     mask_reader = resample_to_match(image_reader.GetOutput(), read(input_mask).GetOutput())
-    if label_smoothing_sigma_mm > 0:
-        ogo.message(
-            "smoothing input label mask "
-            f"(sigma={label_smoothing_sigma_mm} mm, threshold={label_smoothing_threshold})..."
-        )
-        mask_reader = _NiftiImageHandle(
-            smooth_label_mask_vtk(
-                mask_reader.GetOutput(),
-                sigma_mm=label_smoothing_sigma_mm,
-                threshold=label_smoothing_threshold,
-            )
-        )
     input_spacing = image_reader.GetOutput().GetSpacing()
 
     # Get and Check labels
@@ -1088,12 +1099,49 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
 
     # Crop everything to same BB
     ogo.message(f"Cropping to common bounding box...")
-    isolated_vertebra, isolated_process, isolated_image = crop_and_transform(fullvertebra, body.GetOutput(), process.GetOutput(), image_reader.GetOutput())
+    (
+        isolated_vertebra,
+        isolated_process,
+        isolated_image,
+        isolated_labels,
+    ) = crop_and_transform(
+        fullvertebra,
+        body.GetOutput(),
+        process.GetOutput(),
+        image_reader.GetOutput(),
+        mask_reader.GetOutput(),
+        margin_mm=SPINE_PREPROCESSING_CROP_MARGIN_MM,
+    )
+
+    ogo.message("Resampling cropped spine inputs to isotropic spacing before ICP...")
+    preprocessed_image = resample_vtk_image_to_spacing(
+        isolated_image.GetOutput(),
+        iso_resolution,
+        interpolation="bspline",
+    )
+    preprocessed_labels = resample_vtk_image_to_spacing(
+        isolated_labels.GetOutput(),
+        iso_resolution,
+        interpolation="nearest",
+    )
+    if label_smoothing_sigma_mm > 0:
+        ogo.message(
+            "smoothing isotropic label mask "
+            f"(sigma={label_smoothing_sigma_mm} mm, threshold={label_smoothing_threshold})..."
+        )
+        preprocessed_labels = smooth_label_mask_vtk(
+            preprocessed_labels,
+            sigma_mm=label_smoothing_sigma_mm,
+            threshold=label_smoothing_threshold,
+        )
+    registration_body = threshold(preprocessed_labels, body_label)
+    isolated_vertebra = registration_body
+    isolated_process = threshold(preprocessed_labels, process_label)
 
     # Marching Cubes and Registration
     ogo.message(f"Starting ICP registration to reference...: {reference_path} ")
     icp = get_icp_with_scaling(
-        body,
+        registration_body,
         reference_path,
         scale_factors=registration_scale,
         min_scale=registration_min_scale,
@@ -1143,7 +1191,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         interpolation="nearest",
     )
     transformed_image = resample_vtk_image_with_point_transform(
-        isolated_image.GetOutput(),
+        preprocessed_image,
         rotation=sample_to_reference_rotation,
         translation=sample_to_reference_translation,
         output_origin=output_origin,

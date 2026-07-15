@@ -50,6 +50,7 @@ def _locked_workflow_defaults():
                 "fe_displacement_mm": femur.DEFAULT_FEMUR_FE_DISPLACEMENT,
                 "target_displacement_percent": femur.DEFAULT_FEMUR_TARGET_DISPLACEMENT_PERCENT,
                 "mask_smoothing_spacing_threshold_mm": femur.DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+                "fixture_shape": femur.SIDEWAYS_FALL_FIXTURE_SHAPE,
                 "fixture_size_fraction": list(femur.SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION),
                 "femoral_head_center_fraction": list(
                     femur.FEMORAL_HEAD_FIXTURE_CENTER_FRACTION
@@ -63,6 +64,7 @@ def _locked_workflow_defaults():
                 "distal_shaft_size_fraction": list(
                     femur.DISTAL_SHAFT_FIXTURE_SIZE_FRACTION
                 ),
+                "distal_shaft_normal": list(femur.DISTAL_SHAFT_FIXTURE_NORMAL),
                 "bbox_ratio": list(femur.DEFAULT_FEMUR_BBOX_RATIO),
                 "bbox_crop_from": list(femur.DEFAULT_FEMUR_BBOX_CROP_FROM),
                 "reference_min_scale": list(femur.DEFAULT_FEMUR_REFERENCE_MIN_SCALE),

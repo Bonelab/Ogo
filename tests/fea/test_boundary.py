@@ -10,6 +10,7 @@ from ogo.fea.boundary import (  # noqa: E402
     foreground_voxel_center_bounds_from_mask,
     generate_bone_cap_mask,
     generate_projected_material_disk_mask,
+    fit_vtk_images_to_physical_bounds,
     pad_vtk_images_to_physical_bounds,
     projected_material_disk_required_bounds,
     smooth_label_mask_vtk,
@@ -45,6 +46,45 @@ def test_bbox_relative_contact_plane_uses_authored_axis_convention():
     assert high_y_plane["normal"] == pytest.approx((0, -1, 0))
     assert high_y_plane["u_axis"] == pytest.approx((0, 0, 1))
     assert high_y_plane["v_axis"] == pytest.approx((-1, 0, 0))
+
+
+def test_bbox_relative_y_planes_keep_editor_axis_roundoff():
+    bounds = (
+        -76.45140061071066,
+        -31.451400610710664,
+        -106.34001525211478,
+        -32.34001525211478,
+        -0.39488812795613626,
+        83.60511187204386,
+    )
+
+    low_y_plane = bbox_relative_contact_plane(
+        bounds,
+        center_fraction=(0.5, -0.1, 0.5),
+        size_fraction=(1.0, 1.0),
+        projection_axis="y",
+        shape="anatomy",
+    )
+    high_y_plane = bbox_relative_contact_plane(
+        bounds,
+        center_fraction=(0.5, 1.1, 0.5),
+        size_fraction=(1.0, 1.0),
+        projection_axis="y",
+        shape="anatomy",
+    )
+
+    assert low_y_plane["u_axis"] == pytest.approx(
+        (1.208164965010145e-16, 6.123233995736765e-17, -1.0)
+    )
+    assert low_y_plane["v_axis"] == pytest.approx(
+        (-1.0, 6.123233995736767e-17, -1.208164965010145e-16)
+    )
+    assert high_y_plane["u_axis"] == pytest.approx(
+        (9.331099404642518e-17, 6.123233995736766e-17, 1.0)
+    )
+    assert high_y_plane["v_axis"] == pytest.approx(
+        (-1.0, -6.123233995736766e-17, 9.331099404642518e-17)
+    )
 
 
 def test_bbox_relative_contact_bounds_can_enforce_square_footprint():
@@ -112,6 +152,36 @@ def test_pad_vtk_images_to_physical_bounds_preserves_world_coordinates():
     assert padding["upper"] == (0, 2, 0)
     assert data[2, 0, 0] == 7
     assert data[0, 4, 0] == 3
+
+
+def test_fit_vtk_images_to_physical_bounds_crops_and_pads_in_world_coordinates():
+    vtk = pytest.importorskip("vtk")
+    from vtk.util.numpy_support import numpy_to_vtk
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    values = np.zeros((6, 5, 4), dtype=np.uint8)
+    values[2, 1, 1] = 7
+    image = vtk.vtkImageData()
+    image.SetDimensions(values.shape)
+    image.SetOrigin(10.0, 20.0, 30.0)
+    image.SetSpacing(2.0, 1.0, 5.0)
+    image.GetPointData().SetScalars(numpy_to_vtk(values.ravel(order="F"), deep=True))
+
+    fitted, meta = fit_vtk_images_to_physical_bounds(
+        [image],
+        desired_bounds=(8.0, 18.0, 21.0, 23.0, 35.0, 45.0),
+        constants=[3],
+    )
+
+    out = fitted[0]
+    data = vtk_image_to_numpy(out)
+
+    assert out.GetDimensions() == (6, 3, 3)
+    assert out.GetOrigin() == pytest.approx((8.0, 21.0, 35.0))
+    assert meta["output_extent"] == (-1, 4, 1, 3, 1, 3)
+    assert data[3, 0, 0] == 7
+    assert data[0, 0, 0] == 3
 
 
 def test_projected_material_disk_required_bounds_includes_lateral_plane_extent():

@@ -247,6 +247,17 @@ def _node_set_centroid(coords, node_sets, set_name):
     return [total / len(node_numbers) for total in totals]
 
 
+def _coordinate_axis_span(coords, axis_index):
+    """Return the full model coordinate span along one physical axis."""
+    values = [float(coord[axis_index]) for coord in coords]
+    if not values:
+        raise ValueError("Cannot infer characteristic length from a model with no nodes.")
+    length = max(values) - min(values)
+    if length <= 0:
+        raise ValueError("Could not infer a positive model coordinate span.")
+    return length
+
+
 def infer_profile_characteristic_length_mm(model_file, report_profile, failure_axis):
     """Infer the physical length used to convert percent strain endpoints to mm."""
     profile = str(report_profile or "generic").strip().lower()
@@ -261,14 +272,7 @@ def infer_profile_characteristic_length_mm(model_file, report_profile, failure_a
             coords, node_sets, ["body_bottom", "bottom_fixed_z"]
         )
     elif profile == "femur":
-        from ogo.fea.femur import FEMORAL_HEAD_NODE_SET, GREATER_TROCHANTER_NODE_SET
-
-        first = _first_available_node_set_centroid(
-            coords, node_sets, [FEMORAL_HEAD_NODE_SET, "top_displacement", "convergence_set"]
-        )
-        second = _first_available_node_set_centroid(
-            coords, node_sets, [GREATER_TROCHANTER_NODE_SET, "bottom_fixed_y_PMMA"]
-        )
+        return _coordinate_axis_span(coords, axis_index)
     else:
         return ""
 

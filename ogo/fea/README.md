@@ -209,7 +209,7 @@ Maintained spine and femur models write the same columns:
 | `applied_displacement` | Prescribed displacement in the solved `.n88model`. |
 | `reaction_force_N` | Reaction force from the solved model at the prescribed displacement. |
 | `stiffness_N_per_mm` | Reaction force divided by applied displacement when computable. |
-| `characteristic_length_mm` | Spine: distance between `body_top` and `body_bottom` centroids along the loading axis. Femur: distance between femoral-head and greater-trochanter PMMA node-set centroids along the loading axis. |
+| `characteristic_length_mm` | Spine: distance between `body_top` and `body_bottom` centroids along the loading axis. Femur: full generated-model span along the loading axis. |
 
 ## Reaction Force and Displacement Endpoint
 
@@ -234,7 +234,7 @@ size are compared at a similar normalized deformation:
 | Model | Default endpoint | Length used for conversion | Reason |
 | --- | --- | --- | --- |
 | Spine compression | `0.68%` strain | Distance between `body_top` and `body_bottom` centroids along the loading axis | Matches the vertebral strength endpoint reported by Crawford et al. (2003), and keeps the solved displacement scaled to each vertebral body height. |
-| Hip sideways fall | `4%` displacement | Distance between femoral-head and greater-trochanter PMMA node-set centroids along the loading axis | Keeps the sideways-fall load endpoint scaled to each generated femur model instead of using one fixed millimeter displacement for all femora. |
+| Hip sideways fall | `4%` displacement | Full generated-model span along the loading axis | Keeps the sideways-fall load endpoint scaled to each generated femur model instead of using one fixed millimeter displacement for all femora. |
 
 FAIM/N88 stores prescribed displacement in millimeters, not percent strain.
 Before solving, `ogoFEA` converts the percent endpoint to millimeters from the

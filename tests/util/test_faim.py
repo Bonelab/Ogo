@@ -441,6 +441,32 @@ def test_set_prescribed_displacement_from_percent_updates_constraints(tmp_path):
     assert faim.read_prescribed_displacement(model_file, "spine") == -0.68
 
 
+def test_femur_characteristic_length_uses_loading_axis_model_span(tmp_path):
+    model_file = tmp_path / "model.n88model"
+    write_minimal_n88_model_with_constraints(
+        model_file,
+        coords=[
+            [0.0, 0.0, 0.0],
+            [0.0, 84.0, 0.0],
+            [0.0, 4.0, 0.0],
+            [0.0, 80.0, 0.0],
+        ],
+        constraints={
+            "top_displacement": [4],
+            "bottom_fixed_y_PMMA": [3],
+            "convergence_set": [4],
+        },
+    )
+
+    length = faim.infer_profile_characteristic_length_mm(
+        model_file,
+        report_profile="femur",
+        failure_axis="y",
+    )
+
+    assert length == 84.0
+
+
 def test_set_prescribed_displacement_from_percent_updates_femur_constraints(tmp_path):
     model_file = tmp_path / "model.n88model"
     write_minimal_n88_model_with_constraints(

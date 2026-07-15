@@ -136,6 +136,25 @@ def test_spine_registration_scaling_uses_voxel_surface_points():
     assert "perform_marching_cubes(body)" not in source
 
 
+def test_spine_registration_uses_preprocessed_isotropic_body():
+    pytest.importorskip("vtk")
+
+    from ogo.fea import spine
+
+    source = textwrap.dedent(inspect.getsource(spine.process_vertebra))
+
+    assert "SPINE_PREPROCESSING_CROP_MARGIN_MM" in source
+    assert "resample_vtk_image_to_spacing" in source
+    assert "registration_body = threshold(" in source
+    assert "get_icp_with_scaling(\n        registration_body," in source
+    assert source.index("resample_vtk_image_to_spacing") < source.index(
+        "registration_body = threshold("
+    )
+    assert source.index("registration_body = threshold(") < source.index(
+        "get_icp_with_scaling("
+    )
+
+
 def test_spine_workflow_resamples_to_explicit_reference_grid():
     pytest.importorskip("vtk")
 

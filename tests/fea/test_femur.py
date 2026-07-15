@@ -245,6 +245,45 @@ def test_scale_reference_to_sample_principal_lengths_clips_and_scales_origin():
     assert scaled.GetBounds() == pytest.approx((-0.8, 0.8, -2.4, 2.4, -3.9, 3.9))
 
 
+def test_scale_reference_point_cloud_to_sample_preserves_reference_center():
+    np = pytest.importorskip("numpy")
+
+    reference = _polydata_from_points(
+        [
+            (9.0, 20.0, 30.0),
+            (11.0, 20.0, 30.0),
+            (10.0, 18.0, 30.0),
+            (10.0, 22.0, 30.0),
+            (10.0, 20.0, 27.0),
+            (10.0, 20.0, 33.0),
+        ]
+    )
+    sample_points = np.asarray(
+        [
+            (-1.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.0, -4.0, 0.0),
+            (0.0, 4.0, 0.0),
+            (0.0, 0.0, -6.0),
+            (0.0, 0.0, 6.0),
+        ]
+    )
+
+    scaled, metadata = femur.scale_reference_point_cloud_to_sample(
+        reference,
+        sample_points,
+        min_scale=(0.8, 0.8, 0.75),
+        max_scale=(1.2, 1.2, 1.3),
+    )
+
+    points = np.asarray(
+        [scaled.GetPoint(point_id) for point_id in range(scaled.GetNumberOfPoints())]
+    )
+    assert points.mean(axis=0) == pytest.approx((10.0, 20.0, 30.0))
+    assert metadata["reference_center"] == pytest.approx([10.0, 20.0, 30.0])
+    assert metadata["scale_factors"] == pytest.approx([1.0, 1.2, 1.3])
+
+
 def test_surface_points_from_vtk_mask_uses_voxel_surface_and_stride_sampling():
     np = pytest.importorskip("numpy")
 
@@ -311,7 +350,7 @@ def test_bbox_ratio_crop_matches_recipe_order_and_tracks_cut_face():
     cropped, crop_face, meta = femur.crop_vtk_images_to_bbox_ratio(
         [_vtk_image_from_array(density)],
         _vtk_image_from_array(mask),
-        bbox_ratio=(1.0, 1.2, None),
+        bbox_ratio=femur.DEFAULT_FEMUR_BBOX_RATIO,
         bbox_crop_from=femur.DEFAULT_FEMUR_BBOX_CROP_FROM,
         labels={2},
     )
@@ -319,11 +358,11 @@ def test_bbox_ratio_crop_matches_recipe_order_and_tracks_cut_face():
     cropped_density = vtk_image_to_numpy(cropped[0])
     crop_face_data = vtk_image_to_numpy(crop_face)
 
-    assert cropped_density.shape == (20, 10, 12)
-    assert cropped[0].GetOrigin() == pytest.approx((2, 4, 6))
-    assert meta["ratio_xyz"] == (None, 1.0, 1.2)
+    assert cropped_density.shape == (20, 10, 13)
+    assert cropped[0].GetOrigin() == pytest.approx((2, 4, 5))
+    assert meta["ratio_xyz"] == (None, 1.0, 1.3)
     assert meta["crop_from_xyz"] == (None, None, "min")
-    assert meta["crop_slices_xyz"] == ((2, 22), (4, 14), (6, 18))
+    assert meta["crop_slices_xyz"] == ((2, 22), (4, 14), (5, 18))
     assert crop_face_data.sum() == 20 * 10
     assert np.all(crop_face_data[:, :, 0] == 1)
     assert not np.any(crop_face_data[:, :, 1:])

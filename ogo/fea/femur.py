@@ -17,11 +17,12 @@ Default femur workflow:
 3. Smooth the transformed femur mask with one binary close/open pass only when
    at least one input spacing dimension is coarser than 2 mm. If a compartment
    mask is supplied, the derived cortical binary mask follows the same rule.
-4. Standardize the distal shaft by cutting on a flat model-grid z plane. The
-   default cut mode detects the lesser-trochanter cross-section peak and keeps
-   the femur to 50 mm distal to that landmark. If the scan does not include the
-   required distal field of view, model generation fails instead of silently
-   using a shorter shaft. ``fixed_length`` mode is available for debugging.
+4. Standardize the distal shaft with a bbox-ratio crop in the input image
+   coordinate system before registration. The short femur dimension is kept as
+   the reference length, the shaft axis is cropped to 1.3 times that reference
+   length from the distal end, and the transformed crop face becomes the distal
+   support surface. ``lesser_trochanter`` and ``fixed_length`` modes are
+   available for debugging or historical comparisons.
 5. Generate two geometric PMMA fixtures from bbox-relative contact planes:
    a femoral-head loading fixture on the high-y side and a greater-trochanter
    contact fixture on the low-y side. Defaults are 10 mm PMMA thickness and
@@ -40,6 +41,7 @@ Default femur workflow:
 from pathlib import Path
 
 from ogo.fea.alignment import (
+    estimate_rigid_icp,
     point_cloud_axis_lengths,
     polydata_from_points,
     polydata_points,
@@ -66,13 +68,15 @@ DEFAULT_FEMUR_TARGET_DISPLACEMENT_PERCENT = 4.0
 DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM = 2.0
 FEMORAL_HEAD_FIXTURE_WIDTH_EXTENSION_MM = 10.0
 FEMORAL_HEAD_FIXTURE_LONG_AXIS_EXTENSION_MM = 80.0
-SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION = (1.1, 1.1)
-FEMORAL_HEAD_FIXTURE_CENTER_FRACTION = (0.5, 1.0278767152, 0.9650933279)
-GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION = (0.5, 0.0151983839, 0.6551527108)
-DISTAL_SHAFT_FIXTURE_CENTER_FRACTION = (0.1958514895, 0.5708725889, 0.0601674635)
-DISTAL_SHAFT_FIXTURE_SIZE_FRACTION = (0.3640088821, 0.6351022953)
-DEFAULT_FEMUR_BBOX_RATIO = (1.0, 1.2, None)
-DEFAULT_FEMUR_BBOX_CROP_FROM = (None, "min", None)
+SIDEWAYS_FALL_FIXTURE_SHAPE = "anatomy"
+SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION = (1.0, 1.0)
+FEMORAL_HEAD_FIXTURE_CENTER_FRACTION = (0.5, 1.1, 0.5)
+GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION = (0.5, -0.1, 0.5)
+DISTAL_SHAFT_FIXTURE_CENTER_FRACTION = (0.5, 0.5, -0.1)
+DISTAL_SHAFT_FIXTURE_SIZE_FRACTION = (1.0, 1.0)
+DISTAL_SHAFT_FIXTURE_NORMAL = (0.0, -0.2588190451025207, 0.9659258262890683)
+DEFAULT_FEMUR_BBOX_RATIO = (1.0, 1.3, None)
+DEFAULT_FEMUR_BBOX_CROP_FROM = (None, "max", None)
 DEFAULT_FEMUR_REFERENCE_MIN_SCALE = (0.8, 0.8, 0.75)
 DEFAULT_FEMUR_REFERENCE_MAX_SCALE = (1.2, 1.2, 1.3)
 DEFAULT_PMMA_THICKNESS_MM = 10.0
@@ -122,6 +126,27 @@ def matrix4x4_to_numpy(matrix):
     if values.shape != (4, 4):
         raise ValueError("transform matrix must have shape 4 x 4.")
     return values
+
+
+def point_transform_to_vtk_matrix(rotation, translation):
+    """Return a VTK matrix for ``p_out = p_in @ rotation.T + translation``."""
+    import numpy as np
+    import vtk
+
+    rotation_arr = np.asarray(rotation, dtype=np.float64)
+    translation_arr = np.asarray(translation, dtype=np.float64)
+    if rotation_arr.shape != (3, 3):
+        raise ValueError("rotation must have shape 3 x 3.")
+    if translation_arr.shape != (3,):
+        raise ValueError("translation must contain three values.")
+
+    matrix = vtk.vtkMatrix4x4()
+    matrix.Identity()
+    for row in range(3):
+        for col in range(3):
+            matrix.SetElement(row, col, float(rotation_arr[row, col]))
+        matrix.SetElement(row, 3, float(translation_arr[row]))
+    return matrix
 
 
 def reference_grid_from_output_to_input_matrix(
@@ -272,9 +297,11 @@ def scale_reference_point_cloud_to_sample(
     max_values = _scale_triplet(max_scale, "max_scale")
     scale = np.clip(scale, min_values, max_values)
 
-    scaled_points = reference_points * scale
+    reference_center = reference_points.mean(axis=0)
+    scaled_points = (reference_points - reference_center) * scale + reference_center
     return polydata_from_points(scaled_points), {
         "source": "voxel_surface_point_cloud",
+        "reference_center": reference_center.tolist(),
         "reference_axis_lengths": reference_lengths.tolist(),
         "sample_axis_lengths": sample_lengths.tolist(),
         "scale_factors": scale.tolist(),
@@ -359,19 +386,30 @@ def _crop_from_value(value):
     raise ValueError("bbox_crop_from values must be min, max, center, or null.")
 
 
+def _opposite_crop_end(value):
+    if value == "min":
+        return "max"
+    if value == "max":
+        return "min"
+    return value
+
+
 def _parse_bbox_crop_from_recipe(values):
     """Return bbox crop-end values in Ogo's x/y/z image order.
 
     The recipe uses the same reference/constrained/free convention as the
     Slicer-authored workflow. For the hip sideways-fall recipe the mapped order
-    is ``free, reference, constrained`` in Ogo's x/y/z image axes.
+    is ``free, reference, constrained`` in Ogo's x/y/z image axes. The workflow
+    crop ends are stored in patient-space axis directions, while VTK image
+    storage runs opposite on the free and constrained axes used by this recipe;
+    those two ends are therefore flipped during the axis-order conversion.
     """
     if values is None:
         return None, None, None
     if len(values) != 3:
         raise ValueError("bbox_crop_from must contain reference/constrained/free values.")
     reference, constrained, free = (_crop_from_value(item) for item in values)
-    return free, reference, constrained
+    return _opposite_crop_end(free), reference, _opposite_crop_end(constrained)
 
 
 def _vtk_image_from_array(array, template_vtk_image, *, origin, vtk_array_type=None):
@@ -448,8 +486,8 @@ def crop_vtk_images_to_bbox_ratio(
 
     Ratios are interpreted in Ogo's x/y/z VTK image order. The returned
     crop-face image has value 1 on the newly exposed one-sided crop surface.
-    For the hip recipe this is the z-min face created by
-    ``bbox_ratio=(1, 1.2, None)`` and ``bbox_crop_from=(None, "min", None)``.
+    For the hip recipe this is the exposed shaft face created by
+    ``bbox_ratio=(1, 1.3, None)`` and ``bbox_crop_from=(None, "max", None)``.
     """
     import numpy as np
     import vtk
@@ -635,6 +673,7 @@ def bbox_relative_oriented_contact_plane(
     center_fraction,
     size_fraction,
     normal,
+    size_bounds_axes=None,
     width_axis=(-1.0, 0.0, 0.0),
     shape="anatomy",
 ):
@@ -674,10 +713,20 @@ def bbox_relative_oriented_contact_plane(
         lo, hi = _axis_bounds(model_bounds, axis)
         center.append(lo + float(center_fraction[axis]) * (hi - lo))
 
-    size = (
-        _axis_extent_from_vector(model_bounds, u_axis) * float(size_fraction[0]),
-        _axis_extent_from_vector(model_bounds, v_axis) * float(size_fraction[1]),
-    )
+    if size_bounds_axes is None:
+        size = (
+            _axis_extent_from_vector(model_bounds, u_axis) * float(size_fraction[0]),
+            _axis_extent_from_vector(model_bounds, v_axis) * float(size_fraction[1]),
+        )
+    else:
+        size = _oriented_bbox_face_size(
+            model_bounds,
+            center=center,
+            u_axis=u_axis,
+            v_axis=v_axis,
+            varying_axes=size_bounds_axes,
+            size_fraction=size_fraction,
+        )
     if size[0] <= 0.0 or size[1] <= 0.0:
         raise ValueError("size_fraction values must produce positive plane dimensions.")
 
@@ -690,6 +739,53 @@ def bbox_relative_oriented_contact_plane(
         "size": tuple(float(value) for value in size),
         "shape": str(shape).strip().lower(),
     }
+
+
+def _oriented_bbox_face_size(
+    model_bounds,
+    *,
+    center,
+    u_axis,
+    v_axis,
+    varying_axes,
+    size_fraction,
+):
+    """Project a bbox face into an oblique plane's local coordinates."""
+    import itertools
+    import numpy as np
+
+    axis_tokens = {
+        "x": 0,
+        "y": 1,
+        "z": 2,
+        0: 0,
+        1: 1,
+        2: 2,
+    }
+    axes = []
+    for axis in varying_axes:
+        key = str(axis).strip().lower() if isinstance(axis, str) else axis
+        if key not in axis_tokens:
+            raise ValueError("size_bounds_axes values must be x, y, z, 0, 1, or 2.")
+        axes.append(axis_tokens[key])
+    if not axes:
+        raise ValueError("size_bounds_axes must contain at least one axis.")
+
+    center_arr = np.asarray(center, dtype=np.float64)
+    corners = []
+    for choices in itertools.product((0, 1), repeat=len(axes)):
+        point = center_arr.copy()
+        for axis, choice in zip(axes, choices):
+            lo, hi = _axis_bounds(model_bounds, axis)
+            point[axis] = hi if choice else lo
+        corners.append(point)
+    relative = np.vstack(corners) - center_arr
+    u_values = relative @ np.asarray(u_axis, dtype=np.float64)
+    v_values = relative @ np.asarray(v_axis, dtype=np.float64)
+    return (
+        float(np.ptp(u_values)) * float(size_fraction[0]),
+        float(np.ptp(v_values)) * float(size_fraction[1]),
+    )
 
 
 def _inside_plane_shape(shape, u_values, v_values, half_u, half_v, *, tolerance):
@@ -1406,11 +1502,14 @@ import argparse
 import time
 from datetime import date
 from collections import OrderedDict
+import numpy as np
 import vtk
 import vtkbone
 
 from ogo.fea.boundary import (
+    fit_vtk_images_to_physical_bounds,
     generate_projected_material_disk_vtk,
+    projected_material_disk_required_bounds,
     should_smooth_resampled_mask,
     smooth_binary_mask_vtk,
 )
@@ -1671,8 +1770,23 @@ def sidewaysFallFe(args):
     ogo.message("Sample femur axis lengths: %s" % str(reference_scale["sample_axis_lengths"]))
     ogo.message("Femur reference scale factors: %s" % str(reference_scale["scale_factors"]))
 
-    icp = ogo.iterativeClosestPoint(ref_poly, mask_surface)
-    # ogo.message("Transform:\n %s" % str(icp))
+    icp_transform = estimate_rigid_icp(
+        moving_points=polydata_points(ref_poly),
+        fixed_points=sample_surface_points,
+        iterations=50,
+        tolerance=1.0e-4,
+        start_by_matching_centroids_only=True,
+        convergence="delta",
+        distance_mode="mean",
+    )
+    icp = point_transform_to_vtk_matrix(
+        icp_transform["rotation"],
+        icp_transform["translation"],
+    )
+    ogo.message(
+        "ICP reference-to-sample iterations=%d mean_distance=%0.4f"
+        % (icp_transform["iterations"], icp_transform["mean_distance"])
+    )
 
     ogo.message("Applying the transformation and isotropic resampling to the image and mask...")
     output_origin, output_size = reference_grid_from_vtk_mask(
@@ -1933,7 +2047,7 @@ def sidewaysFallFe(args):
         center_fraction=FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
         size_fraction=SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
         projection_axis="y",
-        shape="rectangle",
+        shape=SIDEWAYS_FALL_FIXTURE_SHAPE,
     )
     femoral_head_cap_direction = bbox_relative_fixture_direction(
         FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
@@ -1950,21 +2064,6 @@ def sidewaysFallFe(args):
         )
     )
     ogo.message("Femoral Head PMMA cap direction: %s" % femoral_head_cap_direction)
-    femoralHeadPMMA = generate_projected_material_disk_vtk(
-        change,
-        surface_vtk_image=femur_mask_on_model_grid,
-        exclusion_vtk_image=femur_mask_on_model_grid,
-        center=femoral_head_plane["center"],
-        normal=femoral_head_plane["normal"],
-        u_axis=femoral_head_plane["u_axis"],
-        v_axis=femoral_head_plane["v_axis"],
-        size=femoral_head_plane["size"],
-        shape=femoral_head_plane["shape"],
-        thickness=pmma_thick,
-        intrusion=pmma_intrusion,
-        anatomy_constrained=True,
-        output_value=pmma_mat_id,
-    )
 
     ##
     # Creates the greater trochanter pmma cap
@@ -1973,7 +2072,7 @@ def sidewaysFallFe(args):
         center_fraction=GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
         size_fraction=SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
         projection_axis="y",
-        shape="rectangle",
+        shape=SIDEWAYS_FALL_FIXTURE_SHAPE,
     )
     greater_trochanter_cap_direction = bbox_relative_fixture_direction(
         GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
@@ -1990,6 +2089,65 @@ def sidewaysFallFe(args):
         )
     )
     ogo.message("Greater Trochanter PMMA cap direction: %s" % greater_trochanter_cap_direction)
+
+    required_bounds = [
+        projected_material_disk_required_bounds(
+            femur_mask_on_model_grid,
+            center=plane["center"],
+            normal=plane["normal"],
+            u_axis=plane["u_axis"],
+            v_axis=plane["v_axis"],
+            size=plane["size"],
+            shape=plane["shape"],
+            thickness=pmma_thick,
+            intrusion=pmma_intrusion,
+        )
+        for plane in (femoral_head_plane, greater_trochanter_plane)
+    ]
+    required_bounds = [bounds for bounds in required_bounds if bounds is not None]
+    if required_bounds:
+        bounds_array = np.asarray([model_bounds, *required_bounds], dtype=float)
+        desired_bounds = (
+            float(bounds_array[:, 0].min()),
+            float(bounds_array[:, 1].max()),
+            float(bounds_array[:, 2].min()),
+            float(bounds_array[:, 3].max()),
+            float(bounds_array[:, 4].min()),
+            float(bounds_array[:, 5].max()),
+        )
+        images_to_fit = [change, femur_mask_on_model_grid]
+        if distal_crop_face_change is not None:
+            images_to_fit.append(distal_crop_face_change)
+        fitted_images, contact_fit = fit_vtk_images_to_physical_bounds(
+            images_to_fit,
+            desired_bounds=desired_bounds,
+            constants=[0] * len(images_to_fit),
+        )
+        change = fitted_images[0]
+        femur_mask_on_model_grid = fitted_images[1]
+        if distal_crop_face_change is not None:
+            distal_crop_face_change = fitted_images[2]
+        model_bounds = foreground_voxel_center_bounds(femur_mask_on_model_grid)
+        ogo.message(
+            "Fit model canvas to projected PMMA contact bounds: output_extent=%s"
+            % (contact_fit["output_extent"],)
+        )
+
+    femoralHeadPMMA = generate_projected_material_disk_vtk(
+        change,
+        surface_vtk_image=femur_mask_on_model_grid,
+        exclusion_vtk_image=femur_mask_on_model_grid,
+        center=femoral_head_plane["center"],
+        normal=femoral_head_plane["normal"],
+        u_axis=femoral_head_plane["u_axis"],
+        v_axis=femoral_head_plane["v_axis"],
+        size=femoral_head_plane["size"],
+        shape=femoral_head_plane["shape"],
+        thickness=pmma_thick,
+        intrusion=pmma_intrusion,
+        anatomy_constrained=True,
+        output_value=pmma_mat_id,
+    )
     greaterTrochanterPMMA = generate_projected_material_disk_vtk(
         change,
         surface_vtk_image=femur_mask_on_model_grid,
@@ -2099,26 +2257,22 @@ def sidewaysFallFe(args):
     model2.AddNodeSet(gt_pmma_visible_node_IDS)
 
     ##
-    # Distal Femur (df) support nodes. In bbox-ratio mode the distal shaft cut
-    # was made before alignment, so its transformed crop-face label carries the
-    # correct oblique support angle in model coordinates.
+    # Distal Femur (df) support nodes. The bbox-ratio crop standardizes shaft
+    # length before registration; the support itself remains a bbox-relative
+    # recipe plane in the generated model frame.
     ogo.message("Determining distal femur nodes...")
     if femur_cut_mode == "bbox_ratio":
         if distal_crop_face_change is None:
             ogo.message("BBox-ratio cut mode requires a transformed distal crop-face mask.")
             sys.exit(1)
-        try:
-            distal_crop_face_plane = crop_face_contact_plane(distal_crop_face_change, change)
-            distal_plane = bbox_relative_oriented_contact_plane(
-                model_bounds,
-                center_fraction=DISTAL_SHAFT_FIXTURE_CENTER_FRACTION,
-                size_fraction=DISTAL_SHAFT_FIXTURE_SIZE_FRACTION,
-                normal=distal_crop_face_plane["normal"],
-                shape="anatomy",
-            )
-        except ValueError as exc:
-            ogo.message(str(exc))
-            sys.exit(1)
+        distal_plane = bbox_relative_oriented_contact_plane(
+            model_bounds,
+            center_fraction=DISTAL_SHAFT_FIXTURE_CENTER_FRACTION,
+            size_fraction=DISTAL_SHAFT_FIXTURE_SIZE_FRACTION,
+            normal=DISTAL_SHAFT_FIXTURE_NORMAL,
+            size_bounds_axes=("x", "y"),
+            shape="anatomy",
+        )
         ogo.message(
             "Distal Femur bbox-relative oblique support plane: center=%s normal=%s outward=%s size=%s"
             % (
