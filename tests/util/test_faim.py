@@ -206,6 +206,15 @@ def test_write_results_csv_femur_profile_reports_4_percent_and_stiffness(tmp_pat
         "reaction_force_N",
         "stiffness_N_per_mm",
         "characteristic_length_mm",
+        "pistoia_file",
+        "pistoia_failure_var",
+        "pistoia_stiffness_var",
+        "pistoia_failure_load_N",
+        "pistoia_failure_load_kN",
+        "pistoia_stiffness_N_per_mm",
+        "critical_volume_pct",
+        "critical_ees",
+        "ees_at_crit_vol",
     ]
     assert row["analysis_var"] == "fy_ns1"
     assert row["applied_displacement"] == "1.0"
@@ -264,6 +273,15 @@ def test_write_results_csv_spine_profile_reports_0p68_percent(tmp_path):
         "reaction_force_N",
         "stiffness_N_per_mm",
         "characteristic_length_mm",
+        "pistoia_file",
+        "pistoia_failure_var",
+        "pistoia_stiffness_var",
+        "pistoia_failure_load_N",
+        "pistoia_failure_load_kN",
+        "pistoia_stiffness_N_per_mm",
+        "critical_volume_pct",
+        "critical_ees",
+        "ees_at_crit_vol",
     ]
     assert row["analysis_var"] == "fz_ns1"
     assert row["applied_displacement"] == "-2.0"
@@ -319,7 +337,7 @@ def test_write_results_csv_spine_profile_converts_percent_from_geometry(tmp_path
     assert row["stiffness_N_per_mm"] == "100.0"
 
 
-def test_write_results_csv_spine_profile_excludes_pistoia_fields(tmp_path):
+def test_write_results_csv_spine_profile_includes_pistoia_fields(tmp_path):
     analysis_file = tmp_path / "model_analysis.txt"
     model_file = tmp_path / "model.n88model"
     pistoia_file = tmp_path / "model_pistoia.txt"
@@ -361,9 +379,10 @@ def test_write_results_csv_spine_profile_excludes_pistoia_fields(tmp_path):
     with results_csv.open(newline="") as handle:
         row = next(csv.DictReader(handle))
 
-    assert "pistoia_failure_load_N" not in row
-    assert "pistoia_failure_load_kN" not in row
-    assert "pistoia_stiffness_N_per_mm" not in row
+    assert row["pistoia_failure_load_N"] == "-300.0"
+    assert row["pistoia_failure_load_kN"] == "0.3"
+    assert row["pistoia_stiffness_N_per_mm"] == "120.0"
+    assert row["critical_volume_pct"] == "2.0"
 
 
 def test_write_results_csv_spine_profile_can_use_constraint_groups(tmp_path):

@@ -424,6 +424,19 @@ def write_results_csv(
         "reaction_force_N": reaction_force,
         "stiffness_N_per_mm": computed_stiffness if computed_stiffness != "" else stiffness,
     }
+    pistoia_common = {
+        "pistoia_file": str(pistoia_file),
+        "pistoia_failure_var": failure_var,
+        "pistoia_stiffness_var": stiffness_var,
+        "pistoia_failure_load_N": pistoia_failure_load,
+        "pistoia_failure_load_kN": pistoia_failure_load_magnitude / 1000.0
+        if pistoia_failure_load_magnitude != ""
+        else "",
+        "pistoia_stiffness_N_per_mm": stiffness,
+        "critical_volume_pct": pistoia_meta.get("critical_volume_pct", ""),
+        "critical_ees": pistoia_meta.get("critical_ees", ""),
+        "ees_at_crit_vol": pistoia_meta.get("ees_at_crit_vol", ""),
+    }
     if profile == "femur":
         row = {
             "model_file": common["model_file"],
@@ -433,6 +446,7 @@ def write_results_csv(
             "reaction_force_N": common["reaction_force_N"],
             "stiffness_N_per_mm": common["stiffness_N_per_mm"],
             "characteristic_length_mm": characteristic_length,
+            **pistoia_common,
         }
     elif profile == "spine":
         row = {
@@ -443,6 +457,7 @@ def write_results_csv(
             "reaction_force_N": common["reaction_force_N"],
             "stiffness_N_per_mm": common["stiffness_N_per_mm"],
             "characteristic_length_mm": characteristic_length,
+            **pistoia_common,
         }
     else:
         row = {
