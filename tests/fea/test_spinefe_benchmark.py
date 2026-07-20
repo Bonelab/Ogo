@@ -12,6 +12,53 @@ from ogo.fea.model import filter_node_set_to_dominant_coordinate_plane
 from ogo.fea.spine import build_benchmark_sample_model, find_spinefe_benchmark_dir
 
 
+def test_benchmark_sample_model_updates_prescribed_displacement(monkeypatch, tmp_path):
+    from ogo.fea import spine
+    import ogo.fea.model as model_module
+    import ogo.util.faim as faim_module
+
+    updates = []
+    monkeypatch.setattr(
+        spine,
+        "prepare_benchmark_images",
+        lambda input_image_path, input_mask_path: ("image", "mask", [1.0]),
+    )
+    monkeypatch.setattr(
+        model_module,
+        "create_microfe_model",
+        lambda image, mask, bin_centers, **params: {"params": params},
+    )
+    monkeypatch.setattr(
+        model_module,
+        "write_model",
+        lambda model, output_model_path: None,
+    )
+    monkeypatch.setattr(
+        faim_module,
+        "set_prescribed_displacement_from_percent",
+        lambda *args, **kwargs: updates.append((args, kwargs)),
+    )
+
+    build_benchmark_sample_model(
+        "image.nii.gz",
+        "mask.nii.gz",
+        tmp_path / "linear.n88model",
+    )
+    build_benchmark_sample_model(
+        "image.nii.gz",
+        "mask.nii.gz",
+        tmp_path / "nonlinear.n88model",
+        nonlinear=True,
+    )
+
+    assert [call[1]["target_displacement_percent"] for call in updates] == [
+        0.68,
+        4.0,
+    ]
+    assert [call[1]["displacement_sign"] for call in updates] == [-1.0, -1.0]
+    assert [call[1]["failure_axis"] for call in updates] == ["z", "z"]
+
+
 def test_filter_node_set_to_dominant_coordinate_plane_removes_small_rim():
     vtk = pytest.importorskip("vtk")
 

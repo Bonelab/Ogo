@@ -98,6 +98,23 @@ SIDEWAYS_FALL_NODE_SETS = [
 ]
 
 
+def target_displacement_percent():
+    """Return the maintained hip sideways-fall reporting endpoint."""
+    return DEFAULT_FEMUR_TARGET_DISPLACEMENT_PERCENT
+
+
+def solve_report_profile():
+    """Return femur-specific FAIM reporting settings for the shared solver path."""
+    return {
+        "report_profile": "femur",
+        "analysis_var": "fy_ns1",
+        "pistoia_vars": ["pis_fy_fail", "pis_stiffy"],
+        "failure_axis": "y",
+        "default_applied_displacement": DEFAULT_FEMUR_FE_DISPLACEMENT,
+        "target_displacement_percent": target_displacement_percent(),
+    }
+
+
 def side_suffix(femur_side):
     """Return the compact output stem for a femur side."""
     if femur_side == LEFT_FEMUR:

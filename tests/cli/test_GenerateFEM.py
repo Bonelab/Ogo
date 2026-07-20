@@ -332,6 +332,46 @@ def _solve_args(**overrides):
     return SimpleNamespace(**data)
 
 
+def test_spine_target_displacement_defaults_follow_benchmark_preset():
+    assert (
+        GenerateFEM.target_displacement_percent(
+            _solve_args(preset="benchmark-linear"), "spine"
+        )
+        == 0.68
+    )
+    assert (
+        GenerateFEM.target_displacement_percent(
+            _solve_args(preset="benchmark-nonlinear"), "spine"
+        )
+        == 4.0
+    )
+    assert (
+        GenerateFEM.target_displacement_percent(
+            _solve_args(preset="benchmark-nonlinear", target_displacement=2.5),
+            "spine",
+        )
+        == 2.5
+    )
+
+
+def test_solve_model_sets_spine_displacement_from_preset_percent(monkeypatch, tmp_path):
+    import ogo.util.faim as faim_module
+
+    calls = []
+    monkeypatch.setattr(faim_module, "run_faim_pipeline", lambda **kwargs: calls.append(kwargs))
+
+    GenerateFEM.solve_model(
+        tmp_path / "density_L1.n88model",
+        _solve_args(preset="benchmark-nonlinear"),
+        "spine",
+        ["density.nii.gz", "mask.nii.gz", "--fe_displacement", "-2.0"],
+    )
+
+    assert calls[0]["report_profile"] == "spine"
+    assert calls[0]["target_displacement"] == 4.0
+    assert calls[0]["solve_displacement_percent"] == 4.0
+
+
 def test_solve_model_sets_femur_displacement_from_percent(monkeypatch, tmp_path):
     import ogo.util.faim as faim_module
 

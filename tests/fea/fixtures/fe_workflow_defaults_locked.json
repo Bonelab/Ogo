@@ -80,17 +80,47 @@
         ],
         "bottom_node_set_id": 5,
         "cort_elastic_E_func": "kopperdahl_trab_E",
+        "cort_yield_comp_func": null,
+        "cort_yield_tens_func": null,
         "elastic_E_func": "kopperdahl_trab_E",
         "fe_displacement": -0.2,
         "pmma_E": 2500,
         "pmma_mat_id": 300,
         "pmma_v": 0.3,
+        "target_displacement_percent": 0.68,
         "top_direction": [
           0,
           0,
           1
         ],
-        "top_node_set_id": 6
+        "top_node_set_id": 6,
+        "yield_comp_func": null,
+        "yield_tens_func": null
+      },
+      "benchmark_nonlinear": {
+        "bottom_direction": [
+          0,
+          0,
+          -1
+        ],
+        "bottom_node_set_id": 5,
+        "cort_elastic_E_func": "kopperdahl_trab_E",
+        "cort_yield_comp_func": "kopperdahl_trab_yc",
+        "cort_yield_tens_func": "kopperdahl_trab_yc",
+        "elastic_E_func": "kopperdahl_trab_E",
+        "fe_displacement": -2.0,
+        "pmma_E": 2500,
+        "pmma_mat_id": 300,
+        "pmma_v": 0.3,
+        "target_displacement_percent": 4.0,
+        "top_direction": [
+          0,
+          0,
+          1
+        ],
+        "top_node_set_id": 6,
+        "yield_comp_func": "kopperdahl_trab_yc",
+        "yield_tens_func": "kopperdahl_trab_yc"
       },
       "bottom_node_set_id": 3,
       "contact_size_fraction": [

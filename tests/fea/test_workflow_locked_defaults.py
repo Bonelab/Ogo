@@ -42,6 +42,9 @@ def _locked_workflow_defaults():
                 "benchmark_linear": _selected_spine_benchmark(
                     spine.benchmark_linear_params()
                 ),
+                "benchmark_nonlinear": _selected_spine_benchmark(
+                    spine.benchmark_nonlinear_params()
+                ),
             },
             "hip-sideways-fall": {
                 "left_femur_code": femur.LEFT_FEMUR,
@@ -93,8 +96,13 @@ def _selected_spine_benchmark(params):
         "top_direction",
         "bottom_direction",
         "fe_displacement",
+        "target_displacement_percent",
         "elastic_E_func",
+        "yield_comp_func",
+        "yield_tens_func",
         "cort_elastic_E_func",
+        "cort_yield_comp_func",
+        "cort_yield_tens_func",
     )
     return {
         key: list(params[key]) if isinstance(params[key], tuple) else params[key]

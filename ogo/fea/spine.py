@@ -57,7 +57,30 @@ SPINE_ALIGNMENT_METHOD = "scaled ICP to reference vertebral body"
 
 BENCHMARK_LINEAR_FE_DISPLACEMENT_MM = -0.2
 BENCHMARK_NONLINEAR_FE_DISPLACEMENT_MM = -2.0
+BENCHMARK_LINEAR_TARGET_DISPLACEMENT_PERCENT = 0.68
+BENCHMARK_NONLINEAR_TARGET_DISPLACEMENT_PERCENT = 4.0
 BENCHMARK_PMMA_MATERIAL_ID = 300
+
+
+def target_displacement_percent(preset=None):
+    """Return the maintained spine reporting endpoint for a preset."""
+    if preset == "benchmark-nonlinear":
+        return BENCHMARK_NONLINEAR_TARGET_DISPLACEMENT_PERCENT
+    if preset == "benchmark-linear":
+        return BENCHMARK_LINEAR_TARGET_DISPLACEMENT_PERCENT
+    return DEFAULT_SPINE_TARGET_DISPLACEMENT_PERCENT
+
+
+def solve_report_profile(preset=None):
+    """Return spine-specific FAIM reporting settings for the shared solver path."""
+    return {
+        "report_profile": "spine",
+        "analysis_var": "fz_ns1",
+        "pistoia_vars": [],
+        "failure_axis": "z",
+        "default_applied_displacement": DEFAULT_SPINE_FE_DISPLACEMENT_MM,
+        "target_displacement_percent": target_displacement_percent(preset),
+    }
 
 
 def default_spine_reference_path():
@@ -77,6 +100,7 @@ def benchmark_linear_params():
         "top_direction": (0, 0, 1),
         "bottom_direction": (0, 0, -1),
         "fe_displacement": BENCHMARK_LINEAR_FE_DISPLACEMENT_MM,
+        "target_displacement_percent": BENCHMARK_LINEAR_TARGET_DISPLACEMENT_PERCENT,
         "pmma_yield_compression": None,
         "pmma_yield_tension": None,
         "cort_poissons_ratio": None,
@@ -95,6 +119,7 @@ def benchmark_nonlinear_params():
     params.update(
         {
             "fe_displacement": BENCHMARK_NONLINEAR_FE_DISPLACEMENT_MM,
+            "target_displacement_percent": BENCHMARK_NONLINEAR_TARGET_DISPLACEMENT_PERCENT,
             "pmma_yield_compression": 70.0,
             "pmma_yield_tension": 70.0,
             "yield_comp_func": "kopperdahl_trab_yc",
@@ -152,13 +177,22 @@ def prepare_benchmark_images(input_image_path, input_mask_path, n_bins=128):
 def build_benchmark_sample_model(input_image_path, input_mask_path, output_model_path, nonlinear=False):
     """Build the public spineFE-benchmark sample model and write it to disk."""
     from ogo.fea.model import create_microfe_model, write_model
+    from ogo.util.faim import set_prescribed_displacement_from_percent
 
     image_with_disk, mask_with_disk, bin_centers = prepare_benchmark_images(
         input_image_path, input_mask_path
     )
     params = benchmark_nonlinear_params() if nonlinear else benchmark_linear_params()
+    target_displacement_percent = params.pop("target_displacement_percent")
     model = create_microfe_model(image_with_disk, mask_with_disk, bin_centers, **params)
     write_model(model, output_model_path)
+    set_prescribed_displacement_from_percent(
+        output_model_path,
+        report_profile="spine",
+        failure_axis="z",
+        target_displacement_percent=target_displacement_percent,
+        displacement_sign=-1.0 if params["fe_displacement"] < 0 else 1.0,
+    )
     return model
 
 

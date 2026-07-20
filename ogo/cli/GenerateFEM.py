@@ -16,7 +16,6 @@ from typing import Callable, List, Optional, Sequence
 from ogo.fea.spine import (
     BENCHMARK_LINEAR_FE_DISPLACEMENT_MM,
     BENCHMARK_NONLINEAR_FE_DISPLACEMENT_MM,
-    DEFAULT_SPINE_FE_DISPLACEMENT_MM,
     DEFAULT_SPINE_ISO_RESOLUTION_MM,
     DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
     DEFAULT_SPINE_PMMA_INTRUSION_MM,
@@ -24,18 +23,16 @@ from ogo.fea.spine import (
     DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
     DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
     DEFAULT_SPINE_REGISTRATION_BACKEND,
-    DEFAULT_SPINE_TARGET_DISPLACEMENT_PERCENT,
     SPINE_ALIGNMENT_METHOD,
     default_spine_reference_path,
+    solve_report_profile as spine_solve_report_profile,
 )
 from ogo.fea.femur import (
     DEFAULT_FEMUR_BBOX_CROP_FROM,
     DEFAULT_FEMUR_BBOX_RATIO,
     DEFAULT_FEMUR_CUT_MODE,
-    DEFAULT_FEMUR_FE_DISPLACEMENT,
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
     DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
-    DEFAULT_FEMUR_TARGET_DISPLACEMENT_PERCENT,
     DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
     DEFAULT_PMMA_INTRUSION_MM,
     DEFAULT_PMMA_THICKNESS_MM,
@@ -44,6 +41,7 @@ from ogo.fea.femur import (
     FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
     GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
     SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
+    solve_report_profile as femur_solve_report_profile,
 )
 
 
@@ -239,9 +237,19 @@ def target_displacement_percent(args: argparse.Namespace, model_type: str) -> fl
     """Return the maintained endpoint displacement percentage for this model."""
     if args.target_displacement is not None:
         return args.target_displacement
+    return solve_report_profile(args, model_type)["target_displacement_percent"]
+
+
+def solve_report_profile(args: argparse.Namespace, model_type: str) -> dict:
+    """Return site-specific solve/report settings with CLI overrides applied."""
     if model_type == "spine":
-        return DEFAULT_SPINE_TARGET_DISPLACEMENT_PERCENT
-    return DEFAULT_FEMUR_TARGET_DISPLACEMENT_PERCENT
+        profile = spine_solve_report_profile(preset=getattr(args, "preset", None))
+    else:
+        profile = femur_solve_report_profile()
+    profile = profile.copy()
+    if args.target_displacement is not None:
+        profile["target_displacement_percent"] = args.target_displacement
+    return profile
 
 
 def percent_displacement_metadata(
@@ -296,35 +304,20 @@ def solve_model(
         spec.loader.exec_module(module)
         run_faim_pipeline = module.run_faim_pipeline
 
-    # Spine compression uses z reaction force; sideways-fall hip uses y.
-    if model_type == "spine":
-        analysis_var = "fz_ns1"
-        pistoia_vars = []
-        failure_axis = "z"
-    else:
-        analysis_var = "fy_ns1"
-        pistoia_vars = ["pis_fy_fail", "pis_stiffy"]
-        failure_axis = "y"
-
-    default_applied_displacement = (
-        str(DEFAULT_SPINE_FE_DISPLACEMENT_MM)
-        if model_type == "spine"
-        else str(DEFAULT_FEMUR_FE_DISPLACEMENT)
-    )
+    profile = solve_report_profile(args, model_type)
+    default_applied_displacement = str(profile["default_applied_displacement"])
     applied_displacement = option_value(
         generator_argv,
         "--fe_displacement",
         default_applied_displacement,
     )
-    target_displacement = target_displacement_percent(args, model_type)
-    report_profile = "spine" if model_type == "spine" else "femur"
 
     run_faim_pipeline(
         model_file=model_path,
         output_prefix=model_path.with_suffix(""),
-        analysis_var=analysis_var,
-        pistoia_vars=pistoia_vars,
-        failure_axis=failure_axis,
+        analysis_var=profile["analysis_var"],
+        pistoia_vars=profile["pistoia_vars"],
+        failure_axis=profile["failure_axis"],
         threads=args.threads,
         conda_env=args.faim_env,
         conda_executable=args.conda_executable,
@@ -343,9 +336,9 @@ def solve_model(
         exclude=args.exclude,
         run_pistoia=False,
         applied_displacement=applied_displacement,
-        target_displacement=target_displacement,
-        report_profile=report_profile,
-        solve_displacement_percent=target_displacement,
+        target_displacement=profile["target_displacement_percent"],
+        report_profile=profile["report_profile"],
+        solve_displacement_percent=profile["target_displacement_percent"],
         compress=not args.no_compress,
         require_pistoia=args.require_pistoia,
         dry_run=args.dry_run,
@@ -904,8 +897,9 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         help=(
-            "Profile reporting endpoint as percent strain. Defaults to 2.0 for spine "
-            "and 4.0 for femur; converted to mm from the generated model geometry."
+            "Profile reporting endpoint as percent strain. Spine presets default to "
+            "0.68 for benchmark-linear and 4.0 for benchmark-nonlinear; hip defaults "
+            "to 4.0. Values are converted to mm from generated model geometry."
         ),
     )
     parser.add_argument(
