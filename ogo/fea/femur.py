@@ -156,6 +156,53 @@ def matrix4x4_to_numpy(matrix):
     return values
 
 
+def vtk_matrix_from_rows(rows):
+    """Return a VTK 4 x 4 matrix from JSON-serializable row values."""
+    import vtk
+
+    values = matrix4x4_to_numpy(rows)
+    matrix = vtk.vtkMatrix4x4()
+    matrix.Identity()
+    for row in range(4):
+        for col in range(4):
+            matrix.SetElement(row, col, float(values[row, col]))
+    return matrix
+
+
+def load_icp_transform(path):
+    """Read an ICP transform sidecar JSON file."""
+    import json
+
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if data.get("type") != "ogo.femur.icp_transform":
+        raise ValueError("ICP transform file has an unexpected type: %s" % data.get("type"))
+    return data, vtk_matrix_from_rows(data["matrix"])
+
+
+def write_icp_transform(path, *, matrix, icp_transform, reference_scale, femur_side, rough_crop):
+    """Write an ICP transform sidecar JSON file for repeatable length sweeps."""
+    import json
+
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    matrix_rows = matrix4x4_to_numpy(matrix).tolist()
+    data = {
+        "type": "ogo.femur.icp_transform",
+        "version": 1,
+        "femur_side": int(femur_side),
+        "matrix": matrix_rows,
+        "icp": {
+            "iterations": int(icp_transform["iterations"]),
+            "mean_distance": float(icp_transform["mean_distance"]),
+        },
+        "reference_scale": reference_scale,
+        "rough_pre_icp_crop": rough_crop,
+    }
+    output.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return data
+
+
 def point_transform_to_vtk_matrix(rotation, translation):
     """Return a VTK matrix for ``p_out = p_in @ rotation.T + translation``."""
     import numpy as np
@@ -2234,6 +2281,8 @@ def sidewaysFallFe(args):
     femur_lesser_trochanter_distal_offset = args.femur_lesser_trochanter_distal_offset
     femur_lesser_trochanter_distal_offset_percent = args.femur_lesser_trochanter_distal_offset_percent
     femur_input_margin = args.femur_input_margin
+    femur_icp_transform_in = args.femur_icp_transform_in
+    femur_icp_transform_out = args.femur_icp_transform_out
     cortical_label = args.cortical_label
     trabecular_label = args.trabecular_label
     mask_smoothing_spacing_threshold = args.mask_smoothing_spacing_threshold
@@ -2280,6 +2329,10 @@ def sidewaysFallFe(args):
     ogo.message("PMMA Material ID: %d" % pmma_mat_id)
     ogo.message("Applied Displacement [mm]: %8.4f" % fe_displacement)
     ogo.message("Femur Cut Mode: %s" % femur_cut_mode)
+    if femur_icp_transform_in:
+        ogo.message("Femur ICP Transform In: %s" % femur_icp_transform_in)
+    if femur_icp_transform_out:
+        ogo.message("Femur ICP Transform Out: %s" % femur_icp_transform_out)
     if femur_cut_mode == "bbox_ratio":
         ogo.message("Femur BBox Ratio [reference, constrained, free]: %s" % str(femur_bbox_ratio))
         ogo.message("Femur BBox Crop From [reference, constrained, free]: %s" % str(femur_bbox_crop_from))
@@ -2462,59 +2515,90 @@ def sidewaysFallFe(args):
     compartment_rot = compartmentData
 
     ##
-    # Align the input femur with the reference model
-    ogo.message("Aligning input with reference model...")
-    sample_surface_points = surface_points_from_vtk_mask(
-        registration_mask,
-        max_points=8000,
-        sample_mode="stride",
-        sample_offset=0,
-    )
-    mask_surface = polydata_from_points(sample_surface_points)
-    if femur_side == 1:
-        ref_poly = ogo.readPolyData(left_femur_reference)
-    elif femur_side == 2:
-        if os.path.exists(right_femur_reference):
-            ref_poly = ogo.readPolyData(right_femur_reference)
-        else:
-            ogo.message(
-                "Right femur reference not found; mirroring left reference in x:",
-                right_femur_reference,
-            )
-            ref_poly = mirror_polydata_x(ogo.readPolyData(left_femur_reference))
+    # Align the input femur with the reference model, or reuse a saved transform.
+    if femur_icp_transform_in:
+        ogo.message("Loading fixed femur ICP transform...")
+        try:
+            icp_sidecar, icp = load_icp_transform(femur_icp_transform_in)
+        except Exception as exc:
+            ogo.message("Unable to load femur ICP transform: %s" % exc)
+            sys.exit(1)
+        if int(icp_sidecar.get("femur_side", femur_side)) != int(femur_side):
+            ogo.message("Femur ICP transform side does not match requested femur side.")
+            sys.exit(1)
+        icp_transform = icp_sidecar.get("icp", {"iterations": 0, "mean_distance": 0.0})
+        reference_scale = icp_sidecar.get("reference_scale", {})
+        ogo.message(
+            "Using fixed ICP reference-to-sample transform iterations=%d mean_distance=%0.4f"
+            % (int(icp_transform.get("iterations", 0)), float(icp_transform.get("mean_distance", 0.0)))
+        )
     else:
-        print("Error: Femur Side not defined. Terminating...")
-        sys.exit()
+        ogo.message("Aligning input with reference model...")
+        sample_surface_points = surface_points_from_vtk_mask(
+            registration_mask,
+            max_points=8000,
+            sample_mode="stride",
+            sample_offset=0,
+        )
+        mask_surface = polydata_from_points(sample_surface_points)
+        if femur_side == 1:
+            ref_poly = ogo.readPolyData(left_femur_reference)
+        elif femur_side == 2:
+            if os.path.exists(right_femur_reference):
+                ref_poly = ogo.readPolyData(right_femur_reference)
+            else:
+                ogo.message(
+                    "Right femur reference not found; mirroring left reference in x:",
+                    right_femur_reference,
+                )
+                ref_poly = mirror_polydata_x(ogo.readPolyData(left_femur_reference))
+        else:
+            print("Error: Femur Side not defined. Terminating...")
+            sys.exit()
 
-    ref_poly, reference_scale = scale_reference_point_cloud_to_sample(
-        ref_poly,
-        sample_surface_points,
-        max_points=8000,
-        reference_sample_mode="linspace",
-        min_scale=DEFAULT_FEMUR_REFERENCE_MIN_SCALE,
-        max_scale=DEFAULT_FEMUR_REFERENCE_MAX_SCALE,
-    )
-    ogo.message("Femur reference axis lengths: %s" % str(reference_scale["reference_axis_lengths"]))
-    ogo.message("Sample femur axis lengths: %s" % str(reference_scale["sample_axis_lengths"]))
-    ogo.message("Femur reference scale factors: %s" % str(reference_scale["scale_factors"]))
+        ref_poly, reference_scale = scale_reference_point_cloud_to_sample(
+            ref_poly,
+            sample_surface_points,
+            max_points=8000,
+            reference_sample_mode="linspace",
+            min_scale=DEFAULT_FEMUR_REFERENCE_MIN_SCALE,
+            max_scale=DEFAULT_FEMUR_REFERENCE_MAX_SCALE,
+        )
+        ogo.message("Femur reference axis lengths: %s" % str(reference_scale["reference_axis_lengths"]))
+        ogo.message("Sample femur axis lengths: %s" % str(reference_scale["sample_axis_lengths"]))
+        ogo.message("Femur reference scale factors: %s" % str(reference_scale["scale_factors"]))
 
-    icp_transform = estimate_rigid_icp(
-        moving_points=polydata_points(ref_poly),
-        fixed_points=sample_surface_points,
-        iterations=50,
-        tolerance=1.0e-4,
-        start_by_matching_centroids_only=True,
-        convergence="delta",
-        distance_mode="mean",
-    )
-    icp = point_transform_to_vtk_matrix(
-        icp_transform["rotation"],
-        icp_transform["translation"],
-    )
-    ogo.message(
-        "ICP reference-to-sample iterations=%d mean_distance=%0.4f"
-        % (icp_transform["iterations"], icp_transform["mean_distance"])
-    )
+        icp_transform = estimate_rigid_icp(
+            moving_points=polydata_points(ref_poly),
+            fixed_points=sample_surface_points,
+            iterations=50,
+            tolerance=1.0e-4,
+            start_by_matching_centroids_only=True,
+            convergence="delta",
+            distance_mode="mean",
+        )
+        icp = point_transform_to_vtk_matrix(
+            icp_transform["rotation"],
+            icp_transform["translation"],
+        )
+        ogo.message(
+            "ICP reference-to-sample iterations=%d mean_distance=%0.4f"
+            % (icp_transform["iterations"], icp_transform["mean_distance"])
+        )
+        if femur_icp_transform_out:
+            try:
+                write_icp_transform(
+                    femur_icp_transform_out,
+                    matrix=icp,
+                    icp_transform=icp_transform,
+                    reference_scale=reference_scale,
+                    femur_side=femur_side,
+                    rough_crop=bbox_crop_meta,
+                )
+            except Exception as exc:
+                ogo.message("Unable to write femur ICP transform: %s" % exc)
+                sys.exit(1)
+            ogo.message("Wrote femur ICP transform: %s" % femur_icp_transform_out)
 
     ogo.message("Applying the transformation and isotropic resampling to the image and mask...")
     output_origin, output_size = reference_grid_from_vtk_mask(
@@ -3315,6 +3399,10 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Optional percentage of the detected greater-to-lesser trochanter z distance to cut distal to the lesser trochanter. Overrides --femur_lesser_trochanter_distal_offset when set. (default: %(default)s)")
     parser.add_argument("--femur_input_margin", type=float, default=DEFAULT_FEMUR_INPUT_MARGIN_MM,
                         help="Pad the input image/mask as needed so femur foreground has this margin before ICP. (default: %(default)s [mm])")
+    parser.add_argument("--femur_icp_transform_in", type=str, default=None,
+                        help="Optional femur ICP transform JSON to reuse instead of estimating ICP. Intended for fixed-transform length sweeps. (default: %(default)s)")
+    parser.add_argument("--femur_icp_transform_out", type=str, default=None,
+                        help="Optional path to write the estimated femur ICP transform JSON. (default: %(default)s)")
     parser.add_argument("--compartment_mask", type=str, default=None,
                         help="Optional trabecular/cortical compartment mask aligned with the bone mask. Defaults: cortical=1, trabecular=2.")
     parser.add_argument("--cortical_label", type=int, default=DEFAULT_CORTICAL_LABEL,

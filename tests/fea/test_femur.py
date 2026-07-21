@@ -41,6 +41,30 @@ def test_sideways_fall_output_name_uses_compact_side_suffix():
     assert femur.sideways_fall_output_name("density.n88model", 2) == "density_RF.n88model"
 
 
+def test_icp_transform_sidecar_round_trips_matrix(tmp_path):
+    np = pytest.importorskip("numpy")
+
+    matrix = np.eye(4)
+    matrix[:3, 3] = [1.5, -2.0, 3.25]
+    path = tmp_path / "sub-RETRO2_00000_left_icp.json"
+
+    femur.write_icp_transform(
+        path,
+        matrix=matrix,
+        icp_transform={"iterations": 12, "mean_distance": 0.25},
+        reference_scale={"source": "test"},
+        femur_side=1,
+        rough_crop={"retained_length_mm": 120.0},
+    )
+
+    data, loaded = femur.load_icp_transform(path)
+
+    assert data["type"] == "ogo.femur.icp_transform"
+    assert data["femur_side"] == 1
+    assert data["icp"] == {"iterations": 12, "mean_distance": 0.25}
+    assert femur.matrix4x4_to_numpy(loaded) == pytest.approx(matrix)
+
+
 def test_invalid_femur_side_is_rejected():
     with pytest.raises(ValueError):
         femur.side_suffix(3)
