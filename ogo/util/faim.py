@@ -1,5 +1,6 @@
 """Small FAIM/N88 command adapter used by Ogo FE CLIs."""
 
+from contextlib import contextmanager
 import csv
 import os
 from pathlib import Path
@@ -183,6 +184,153 @@ def parse_pistoia_text(path):
         out["stiffness_z_N_per_mm"] = _safe_float(match.group(3))
 
     return out
+
+
+def _read_masked_element_selection(model_file, mask_file, exclude_material_id):
+    """Return hexahedral elements whose centroids fall inside an image mask."""
+    try:
+        import numpy as np
+        from netCDF4 import Dataset
+        import SimpleITK as sitk
+    except ImportError as exc:
+        raise RuntimeError(
+            "netCDF4, numpy, and SimpleITK are required to mask n88model elements."
+        ) from exc
+
+    mask_image = sitk.ReadImage(str(mask_file))
+    mask = sitk.GetArrayFromImage(mask_image) > 0
+    spacing = np.asarray(mask_image.GetSpacing(), dtype=float)
+    origin = np.asarray(mask_image.GetOrigin(), dtype=float)
+    direction = np.asarray(mask_image.GetDirection(), dtype=float).reshape((3, 3))
+    inverse_direction = np.linalg.inv(direction)
+    size = np.asarray(mask_image.GetSize(), dtype=np.int64)
+
+    with Dataset(str(model_file), "r") as root:
+        part = root.groups["Parts"].groups["Part1"]
+        coordinates = np.asarray(part.variables["NodeCoordinates"][:], dtype=float)
+        hexahedrons = part.groups["Elements"].groups["Hexahedrons"]
+        node_numbers = np.asarray(hexahedrons.variables["NodeNumbers"][:], dtype=np.int64) - 1
+        material_ids = np.asarray(hexahedrons.variables["MaterialID"][:])
+
+    centroids = coordinates[node_numbers].mean(axis=1)
+    continuous_index = ((centroids - origin) @ inverse_direction.T) / spacing
+    mask_index = np.floor(continuous_index + 0.5).astype(np.int64)
+    in_bounds = np.all((mask_index >= 0) & (mask_index < size), axis=1)
+
+    in_mask = np.zeros(len(material_ids), dtype=bool)
+    valid_index = mask_index[in_bounds]
+    if len(valid_index):
+        in_mask[in_bounds] = mask[valid_index[:, 2], valid_index[:, 1], valid_index[:, 0]]
+
+    bone_elements = material_ids != exclude_material_id
+    selected_elements = bone_elements & in_mask
+    return selected_elements, bone_elements, material_ids
+
+
+@contextmanager
+def temporary_pistoia_material_mask(model_file, mask_file, *, exclude_material_id=5000):
+    """Temporarily exclude bone elements outside an image mask from Pistoia.
+
+    This is a narrow adapter around the current ``n88pistoia --exclude`` behavior.
+    If vtkbone gains native image-mask Pistoia support, callers should be able to
+    keep using this function while the implementation changes underneath.
+    """
+    try:
+        from netCDF4 import Dataset
+    except ImportError as exc:
+        raise RuntimeError("netCDF4 is required to update n88model material IDs.") from exc
+
+    selected_elements, bone_elements, original_material_ids = _read_masked_element_selection(
+        model_file, mask_file, exclude_material_id
+    )
+    if not selected_elements.any():
+        raise ValueError(
+            f"Mask '{mask_file}' does not select any non-excluded elements in '{model_file}'."
+        )
+
+    masked_material_ids = original_material_ids.copy()
+    masked_material_ids[bone_elements & ~selected_elements] = exclude_material_id
+
+    stats = {
+        "mask_file": str(mask_file),
+        "exclude_material_id": int(exclude_material_id),
+        "total_elements": int(len(original_material_ids)),
+        "original_included_elements": int(bone_elements.sum()),
+        "selected_elements": int(selected_elements.sum()),
+        "temporarily_excluded_elements": int((bone_elements & ~selected_elements).sum()),
+    }
+
+    with Dataset(str(model_file), "r+") as root:
+        material_ids = (
+            root.groups["Parts"]
+            .groups["Part1"]
+            .groups["Elements"]
+            .groups["Hexahedrons"]
+            .variables["MaterialID"]
+        )
+        material_ids[:] = masked_material_ids
+
+    try:
+        yield stats
+    finally:
+        with Dataset(str(model_file), "r+") as root:
+            material_ids = (
+                root.groups["Parts"]
+                .groups["Part1"]
+                .groups["Elements"]
+                .groups["Hexahedrons"]
+                .variables["MaterialID"]
+            )
+            material_ids[:] = original_material_ids
+
+
+def run_pistoia_with_image_mask(
+    *,
+    model_file,
+    mask_file,
+    output_file,
+    n88pistoia_command="n88pistoia",
+    critical_volume=2.0,
+    critical_strain=0.007,
+    exclude_material_id=5000,
+    conda_env=None,
+    conda_executable="conda",
+    env=None,
+    dry_run=False,
+):
+    """Run Pistoia on model elements selected by an image mask."""
+    command = [
+        n88pistoia_command,
+        str(model_file),
+        "--critical_volume",
+        str(critical_volume),
+        "--critical_strain",
+        str(critical_strain),
+        "--exclude",
+        str(exclude_material_id),
+        "--output_file",
+        str(output_file),
+    ]
+    if dry_run:
+        run_command(
+            command,
+            conda_env=conda_env,
+            conda_executable=conda_executable,
+            env=env,
+            dry_run=True,
+        )
+        return {"mask_file": str(mask_file), "dry_run": True}
+
+    with temporary_pistoia_material_mask(
+        model_file, mask_file, exclude_material_id=exclude_material_id
+    ) as stats:
+        run_command(
+            command,
+            conda_env=conda_env,
+            conda_executable=conda_executable,
+            env=env,
+        )
+        return stats
 
 
 def _read_n88_node_coordinates_and_sets(model_file):

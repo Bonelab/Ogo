@@ -390,6 +390,66 @@ def test_bbox_ratio_crop_uses_shortest_unit_axis_as_reference():
     assert meta["reference_length_mm"] == pytest.approx(10.0)
 
 
+def test_bbox_ratio_crop_recomputes_reference_after_distal_shaft_crop():
+    np = pytest.importorskip("numpy")
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    density = np.zeros((12, 60, 90), dtype=np.float32)
+    mask = np.zeros_like(density, dtype=np.uint8)
+    density[2:10, 5:55, 0:10] = 700.0
+    mask[2:10, 5:55, 0:10] = 2
+    density[2:10, 20:40, 10:80] = 700.0
+    mask[2:10, 20:40, 10:80] = 2
+
+    cropped, _crop_face, meta = femur.crop_vtk_images_to_bbox_ratio(
+        [_vtk_image_from_array(density)],
+        _vtk_image_from_array(mask),
+        bbox_ratio=femur.DEFAULT_FEMUR_BBOX_RATIO,
+        bbox_crop_from=femur.DEFAULT_FEMUR_BBOX_CROP_FROM,
+        labels={2},
+    )
+
+    cropped_mask = vtk_image_to_numpy(cropped[0]) != 0
+    coords = np.argwhere(cropped_mask)
+    final_size = coords.max(axis=0) - coords.min(axis=0) + 1
+
+    assert final_size[1] == 20
+    assert final_size[2] <= 26
+    assert meta["crop_iterations"] > 1
+    assert meta["reference_length_mm"] == pytest.approx(20.0)
+    assert meta["final_bbox_ratio_xyz"][2] <= 1.3
+
+
+def test_proximal_box_ratio_crop_uses_proximal_transverse_width():
+    np = pytest.importorskip("numpy")
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    density = np.zeros((110, 120, 120), dtype=np.float32)
+    mask = np.zeros_like(density, dtype=np.uint8)
+    density[30:82, 45:73, 70:110] = 700.0
+    mask[30:82, 45:73, 70:110] = 2
+    density[46:66, 45:105, 10:70] = 700.0
+    mask[46:66, 45:105, 10:70] = 2
+
+    cropped, crop_face, meta = femur.crop_vtk_images_to_proximal_box_ratio(
+        [_vtk_image_from_array(density)],
+        _vtk_image_from_array(mask),
+        ratio=1.2,
+        labels={2},
+    )
+
+    cropped_mask = vtk_image_to_numpy(cropped[0]) != 0
+    coords = np.argwhere(cropped_mask)
+    final_size = coords.max(axis=0) - coords.min(axis=0) + 1
+
+    assert meta["reference_width_mm"] == pytest.approx(52.0)
+    assert meta["reference_axis"] == "x"
+    assert meta["target_length_mm"] == pytest.approx(62.4)
+    assert final_size[2] == 62
+    assert final_size[1] == 60
+    assert vtk_image_to_numpy(crop_face).sum() > 0
+
+
 def test_crop_face_support_vector_points_away_from_retained_bone():
     np = pytest.importorskip("numpy")
 

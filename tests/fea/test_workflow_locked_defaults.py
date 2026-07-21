@@ -70,6 +70,7 @@ def _locked_workflow_defaults():
                 "distal_shaft_normal": list(femur.DISTAL_SHAFT_FIXTURE_NORMAL),
                 "bbox_ratio": list(femur.DEFAULT_FEMUR_BBOX_RATIO),
                 "bbox_crop_from": list(femur.DEFAULT_FEMUR_BBOX_CROP_FROM),
+                "proximal_reference_distance_mm": femur.DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
                 "reference_min_scale": list(femur.DEFAULT_FEMUR_REFERENCE_MIN_SCALE),
                 "reference_max_scale": list(femur.DEFAULT_FEMUR_REFERENCE_MAX_SCALE),
                 "pmma_thickness_mm": femur.DEFAULT_PMMA_THICKNESS_MM,

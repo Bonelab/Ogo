@@ -17,12 +17,12 @@ Default femur workflow:
 3. Smooth the transformed femur mask with one binary close/open pass only when
    at least one input spacing dimension is coarser than 2 mm. If a compartment
    mask is supplied, the derived cortical binary mask follows the same rule.
-4. Standardize the distal shaft with a bbox-ratio crop in the input image
-   coordinate system before registration. The short femur dimension is kept as
-   the reference length, the shaft axis is cropped to 1.3 times that reference
-   length from the distal end, and the transformed crop face becomes the distal
-   support surface. ``lesser_trochanter`` and ``fixed_length`` modes are
-   available for debugging or historical comparisons.
+4. Standardize the distal shaft after isotropic resampling and before
+   registration. The default uses a proximal max(x, y) transverse width
+   reference and retains 1.2 times that width along the proximal-distal axis.
+   The transformed crop face becomes the distal support surface. ``bbox_ratio``,
+   ``lesser_trochanter``, and ``fixed_length`` modes are available for
+   debugging or historical comparisons.
 5. Generate two geometric PMMA fixtures from bbox-relative contact planes:
    a femoral-head loading fixture on the high-y side and a greater-trochanter
    contact fixture on the low-y side. Defaults are 10 mm PMMA thickness and
@@ -77,13 +77,17 @@ DISTAL_SHAFT_FIXTURE_SIZE_FRACTION = (1.0, 1.0)
 DISTAL_SHAFT_FIXTURE_NORMAL = (0.0, -0.2588190451025207, 0.9659258262890683)
 DEFAULT_FEMUR_BBOX_RATIO = (1.0, 1.3, None)
 DEFAULT_FEMUR_BBOX_CROP_FROM = (None, "max", None)
+DEFAULT_FEMUR_EXPERIMENTAL_RATIO = 1.2
+DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM = 40.0
+DEFAULT_FEMUR_PROXIMAL_REFERENCE_WIDTH = "max_xy"
 DEFAULT_FEMUR_REFERENCE_MIN_SCALE = (0.8, 0.8, 0.75)
 DEFAULT_FEMUR_REFERENCE_MAX_SCALE = (1.2, 1.2, 1.3)
 DEFAULT_PMMA_THICKNESS_MM = 10.0
 DEFAULT_PMMA_INTRUSION_MM = 6.0
 DEFAULT_FEMUR_INPUT_MARGIN_MM = DEFAULT_PMMA_THICKNESS_MM + DEFAULT_PMMA_INTRUSION_MM
 DEFAULT_FEMUR_SHAFT_LENGTH_MM = 100.0
-DEFAULT_FEMUR_CUT_MODE = "bbox_ratio"
+DEFAULT_FEMUR_CUT_MODE = "proximal_box_ratio"
+PRE_ICP_CROP_MODES = {"bbox_ratio", "proximal_box_ratio"}
 DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM = 50.0
 DEFAULT_CORTICAL_LABEL = 1
 DEFAULT_TRABECULAR_LABEL = 2
@@ -519,6 +523,7 @@ def crop_vtk_images_to_bbox_ratio(
         active = mask_data != 0
     if not np.any(active):
         raise ValueError("Cannot apply bbox-ratio crop to an empty femur mask.")
+    active_for_crop = _largest_connected_component_mask(active)
 
     ratio_xyz = _parse_bbox_ratio_recipe(bbox_ratio)
     crop_from_xyz = _parse_bbox_crop_from_recipe(bbox_crop_from)
@@ -536,42 +541,14 @@ def crop_vtk_images_to_bbox_ratio(
     if not reference_axes:
         raise ValueError("bbox_ratio must contain one preserved axis with value 1.")
 
-    coords = np.argwhere(active)
-    lo = coords.min(axis=0).astype(np.int64)
-    hi = (coords.max(axis=0) + 1).astype(np.int64)
-    size = hi - lo
     spacing = np.asarray(vtk_mask.GetSpacing(), dtype=np.float64)
-    physical_size = size.astype(np.float64) * spacing
-    reference_axis = min(reference_axes, key=lambda axis: float(physical_size[axis]))
-    reference_length_mm = float(size[reference_axis]) * float(spacing[reference_axis])
-
-    out_lo = lo.copy()
-    out_hi = hi.copy()
-    crop_surface = None
-    for axis, axis_ratio in enumerate(ratio_xyz):
-        if axis_ratio is None:
-            continue
-        target_mm = reference_length_mm * float(axis_ratio)
-        target_voxels = max(1, int(round(target_mm / float(spacing[axis]))))
-        target_voxels = min(int(size[axis]), target_voxels)
-        mode = crop_from_xyz[axis]
-        if mode == "min":
-            start = int(hi[axis]) - target_voxels
-            crop_surface = {"axis": axis, "side": "min", "local_index": 0, "normal_sign": -1.0}
-        elif mode == "max":
-            start = int(lo[axis])
-            crop_surface = {
-                "axis": axis,
-                "side": "max",
-                "local_index": target_voxels - 1,
-                "normal_sign": 1.0,
-            }
-        else:
-            center = 0.5 * (float(lo[axis]) + float(hi[axis]))
-            start = int(round(center - 0.5 * float(target_voxels)))
-        start = max(int(lo[axis]), min(start, int(hi[axis]) - target_voxels))
-        out_lo[axis] = start
-        out_hi[axis] = start + target_voxels
+    out_lo, out_hi, crop_surface, crop_meta = _stable_bbox_ratio_crop_bounds(
+        active=active_for_crop,
+        spacing=spacing,
+        ratio_xyz=ratio_xyz,
+        crop_from_xyz=crop_from_xyz,
+        reference_axes=reference_axes,
+    )
 
     slices = tuple(slice(int(out_lo[axis]), int(out_hi[axis])) for axis in range(3))
     origin = tuple(
@@ -583,7 +560,7 @@ def crop_vtk_images_to_bbox_ratio(
         for image in images
     ]
 
-    cropped_active = active[slices]
+    cropped_active = active_for_crop[slices]
     crop_face = np.zeros(cropped_active.shape, dtype=np.uint8)
     if crop_surface is not None:
         axis = int(crop_surface["axis"])
@@ -604,12 +581,14 @@ def crop_vtk_images_to_bbox_ratio(
         "crop_from_recipe": tuple(bbox_crop_from) if bbox_crop_from is not None else None,
         "ratio_xyz": ratio_xyz,
         "crop_from_xyz": crop_from_xyz,
-        "reference_axis": "xyz"[reference_axis],
-        "reference_length_mm": reference_length_mm,
-        "input_bbox_xyz": tuple((int(lo[axis]), int(hi[axis])) for axis in range(3)),
+        "reference_axis": crop_meta["reference_axis"],
+        "reference_length_mm": crop_meta["reference_length_mm"],
+        "input_bbox_xyz": crop_meta["input_bbox_xyz"],
         "crop_slices_xyz": tuple((int(out_lo[axis]), int(out_hi[axis])) for axis in range(3)),
         "output_shape_xyz": tuple(int(value) for value in cropped_active.shape),
         "output_origin": origin,
+        "crop_iterations": crop_meta["crop_iterations"],
+        "final_bbox_ratio_xyz": crop_meta["final_bbox_ratio_xyz"],
         "crop_surface": None
         if crop_surface is None
         else {
@@ -620,6 +599,269 @@ def crop_vtk_images_to_bbox_ratio(
         "crop_face_voxels": int(crop_face.sum()),
     }
     return cropped_images, crop_face_image, meta
+
+
+def _largest_connected_component_mask(active):
+    import numpy as np
+
+    try:
+        from scipy import ndimage
+    except ImportError:
+        return active
+
+    labeled, count = ndimage.label(active)
+    if count <= 1:
+        return active
+    sizes = np.bincount(labeled.ravel())
+    sizes[0] = 0
+    return labeled == int(np.argmax(sizes))
+
+
+def crop_vtk_images_to_proximal_box_ratio(
+    vtk_images,
+    vtk_mask,
+    *,
+    ratio=DEFAULT_FEMUR_EXPERIMENTAL_RATIO,
+    proximal_reference_distance_mm=DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
+    reference_width=DEFAULT_FEMUR_PROXIMAL_REFERENCE_WIDTH,
+    labels=None,
+):
+    """Crop from the distal side using proximal transverse width as reference."""
+    import numpy as np
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    mask_data = vtk_image_to_numpy(vtk_mask)
+    active = _active_crop_mask(mask_data, labels)
+    spacing = np.asarray(vtk_mask.GetSpacing(), dtype=np.float64)
+    coords = np.argwhere(active)
+    lo = coords.min(axis=0).astype(np.int64)
+    hi = (coords.max(axis=0) + 1).astype(np.int64)
+    size = hi - lo
+    proximal_voxels = min(
+        int(size[2]),
+        max(1, int(round(float(proximal_reference_distance_mm) / float(spacing[2])))),
+    )
+    proximal_start = int(hi[2]) - proximal_voxels
+    proximal = active[:, :, proximal_start : int(hi[2])]
+    proximal_coords = np.argwhere(proximal)
+    if not len(proximal_coords):
+        proximal_coords = coords - np.asarray([0, 0, proximal_start], dtype=np.int64)
+    x_width_mm = _percentile_index_width_mm(
+        proximal_coords[:, 0] + 0,
+        float(spacing[0]),
+    )
+    y_width_mm = _percentile_index_width_mm(
+        proximal_coords[:, 1] + 0,
+        float(spacing[1]),
+    )
+    reference_width = str(reference_width).strip().lower()
+    if reference_width == "max_xy":
+        reference_axis = 0 if x_width_mm >= y_width_mm else 1
+        reference_width_mm = x_width_mm if reference_axis == 0 else y_width_mm
+    elif reference_width == "rms_xy":
+        reference_axis = None
+        reference_width_mm = float(np.sqrt((x_width_mm**2 + y_width_mm**2) / 2.0))
+    else:
+        raise ValueError("reference_width must be max_xy or rms_xy.")
+    target_length_mm = float(ratio) * float(reference_width_mm)
+    target_voxels = min(int(size[2]), max(1, int(round(target_length_mm / float(spacing[2])))))
+    status = "short" if int(size[2]) <= target_voxels else "cropped"
+    keep = np.zeros(active.shape, dtype=bool)
+    out_lo = lo.copy()
+    out_hi = hi.copy()
+    if status == "short":
+        keep[tuple(slice(int(lo[axis]), int(hi[axis])) for axis in range(3))] = True
+    else:
+        out_lo[2] = int(hi[2]) - target_voxels
+        keep[
+            int(out_lo[0]) : int(out_hi[0]),
+            int(out_lo[1]) : int(out_hi[1]),
+            int(out_lo[2]) : int(out_hi[2]),
+        ] = True
+    return _crop_vtk_images_with_keep_mask(
+        vtk_images,
+        vtk_mask,
+        active=active,
+        keep=keep,
+        meta={
+            "enabled": True,
+            "method": "proximal_box_ratio",
+            "ratio": float(ratio),
+            "proximal_reference_distance_mm": float(proximal_reference_distance_mm),
+            "status": status,
+            "reference_width": reference_width,
+            "reference_axis": "rms_xy" if reference_axis is None else "xyz"[reference_axis],
+            "reference_width_mm": float(reference_width_mm),
+            "proximal_x_width_mm": float(x_width_mm),
+            "proximal_y_width_mm": float(y_width_mm),
+            "target_length_mm": float(target_length_mm),
+            "input_bbox_xyz": tuple((int(lo[axis]), int(hi[axis])) for axis in range(3)),
+            "crop_slices_xyz": tuple((int(out_lo[axis]), int(out_hi[axis])) for axis in range(3)),
+        },
+    )
+
+
+def _active_crop_mask(mask_data, labels):
+    import numpy as np
+
+    if labels:
+        active = np.isin(mask_data, sorted(int(label) for label in labels))
+    else:
+        active = mask_data != 0
+    if not np.any(active):
+        raise ValueError("Cannot crop an empty femur mask.")
+    return _largest_connected_component_mask(active)
+
+
+def _percentile_index_width_mm(indices, spacing, *, low=1.0, high=99.0):
+    import numpy as np
+
+    lo, hi = np.percentile(indices.astype(np.float64), [float(low), float(high)])
+    return float(hi - lo + 1.0) * float(spacing)
+
+
+def _crop_vtk_images_with_keep_mask(vtk_images, vtk_mask, *, active, keep, meta):
+    import numpy as np
+    import vtk
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    kept_active = active & keep
+    if not np.any(kept_active):
+        raise ValueError("Femur crop removed all foreground voxels.")
+    coords = np.argwhere(kept_active)
+    out_lo = coords.min(axis=0).astype(np.int64)
+    out_hi = (coords.max(axis=0) + 1).astype(np.int64)
+    slices = tuple(slice(int(out_lo[axis]), int(out_hi[axis])) for axis in range(3))
+    spacing = np.asarray(vtk_mask.GetSpacing(), dtype=np.float64)
+    origin = tuple(
+        float(vtk_mask.GetOrigin()[axis]) + float(out_lo[axis]) * float(spacing[axis])
+        for axis in range(3)
+    )
+    cropped_images = []
+    for image in vtk_images:
+        data = vtk_image_to_numpy(image).copy()
+        data[~keep] = 0
+        cropped_images.append(_vtk_image_from_array(data[slices], image, origin=origin))
+    crop_face = kept_active & _touches_removed_or_background(kept_active, active & ~keep)
+    crop_face_image = _vtk_image_from_array(
+        crop_face[slices].astype(np.uint8),
+        vtk_mask,
+        origin=origin,
+        vtk_array_type=vtk.VTK_UNSIGNED_CHAR,
+    )
+    meta = dict(meta)
+    meta.update(
+        {
+            "crop_slices_xyz": tuple((int(out_lo[axis]), int(out_hi[axis])) for axis in range(3)),
+            "output_shape_xyz": tuple(int(value) for value in kept_active[slices].shape),
+            "output_origin": origin,
+            "crop_face_voxels": int(crop_face.sum()),
+        }
+    )
+    return cropped_images, crop_face_image, meta
+
+
+def _touches_removed_or_background(kept_active, removed_active):
+    import numpy as np
+
+    face = np.zeros(kept_active.shape, dtype=bool)
+    for axis in range(3):
+        before = [slice(None), slice(None), slice(None)]
+        after = [slice(None), slice(None), slice(None)]
+        before[axis] = slice(1, None)
+        after[axis] = slice(None, -1)
+        face[tuple(before)] |= kept_active[tuple(before)] & removed_active[tuple(after)]
+        face[tuple(after)] |= kept_active[tuple(after)] & removed_active[tuple(before)]
+    return face
+
+
+def _stable_bbox_ratio_crop_bounds(
+    *,
+    active,
+    spacing,
+    ratio_xyz,
+    crop_from_xyz,
+    reference_axes,
+    max_iterations=8,
+):
+    import numpy as np
+
+    coords = np.argwhere(active)
+    lo = coords.min(axis=0).astype(np.int64)
+    hi = (coords.max(axis=0) + 1).astype(np.int64)
+    input_lo = lo.copy()
+    input_hi = hi.copy()
+    out_lo = lo.copy()
+    out_hi = hi.copy()
+    crop_surface = None
+    input_size = input_hi - input_lo
+    input_physical_size = input_size.astype(np.float64) * spacing
+    reference_axis = min(reference_axes, key=lambda axis: float(input_physical_size[axis]))
+    reference_length_mm = 0.0
+
+    for iteration in range(1, int(max_iterations) + 1):
+        retained = active[tuple(slice(int(out_lo[axis]), int(out_hi[axis])) for axis in range(3))]
+        retained_coords = np.argwhere(retained)
+        if not len(retained_coords):
+            raise ValueError("bbox-ratio crop removed all foreground voxels.")
+        lo = out_lo + retained_coords.min(axis=0).astype(np.int64)
+        hi = out_lo + (retained_coords.max(axis=0) + 1).astype(np.int64)
+        size = hi - lo
+        physical_size = size.astype(np.float64) * spacing
+        reference_axis = min(
+            reference_axes,
+            key=lambda axis: (float(physical_size[axis]), axis != reference_axis),
+        )
+        reference_length_mm = float(size[reference_axis]) * float(spacing[reference_axis])
+
+        next_lo = lo.copy()
+        next_hi = hi.copy()
+        crop_surface = None
+        for axis, axis_ratio in enumerate(ratio_xyz):
+            if axis_ratio is None:
+                continue
+            target_mm = reference_length_mm * float(axis_ratio)
+            target_voxels = max(1, int(round(target_mm / float(spacing[axis]))))
+            target_voxels = min(int(size[axis]), target_voxels)
+            mode = crop_from_xyz[axis]
+            if mode == "min":
+                start = int(hi[axis]) - target_voxels
+                crop_surface = {"axis": axis, "side": "min", "normal_sign": -1.0}
+            elif mode == "max":
+                start = int(lo[axis])
+                crop_surface = {"axis": axis, "side": "max", "normal_sign": 1.0}
+            else:
+                center = 0.5 * (float(lo[axis]) + float(hi[axis]))
+                start = int(round(center - 0.5 * float(target_voxels)))
+            start = max(int(lo[axis]), min(start, int(hi[axis]) - target_voxels))
+            next_lo[axis] = start
+            next_hi[axis] = start + target_voxels
+
+        if np.array_equal(next_lo, out_lo) and np.array_equal(next_hi, out_hi):
+            break
+        out_lo, out_hi = next_lo, next_hi
+
+    if crop_surface is not None:
+        axis = int(crop_surface["axis"])
+        crop_surface["local_index"] = (
+            0 if crop_surface["side"] == "min" else int(out_hi[axis] - out_lo[axis] - 1)
+        )
+
+    final_size = out_hi - out_lo
+    final_physical = final_size.astype(np.float64) * spacing
+    final_ratio = tuple(
+        float(final_physical[axis] / reference_length_mm) if reference_length_mm > 0 else 0.0
+        for axis in range(3)
+    )
+    return out_lo, out_hi, crop_surface, {
+        "reference_axis": "xyz"[reference_axis],
+        "reference_length_mm": reference_length_mm,
+        "input_bbox_xyz": tuple((int(input_lo[axis]), int(input_hi[axis])) for axis in range(3)),
+        "crop_iterations": iteration,
+        "final_bbox_ratio_xyz": final_ratio,
+    }
 
 
 def crop_face_support_vector(crop_face_vtk, mask_vtk):
@@ -1579,6 +1821,9 @@ def sidewaysFallFe(args):
     femur_cut_mode = args.femur_cut_mode
     femur_bbox_ratio = args.femur_bbox_ratio
     femur_bbox_crop_from = args.femur_bbox_crop_from
+    femur_experimental_crop_ratio = args.femur_experimental_crop_ratio
+    femur_proximal_reference_distance = args.femur_proximal_reference_distance
+    femur_proximal_reference_width = args.femur_proximal_reference_width
     femur_lesser_trochanter_distal_offset = args.femur_lesser_trochanter_distal_offset
     femur_lesser_trochanter_distal_offset_percent = args.femur_lesser_trochanter_distal_offset_percent
     femur_input_margin = args.femur_input_margin
@@ -1631,6 +1876,10 @@ def sidewaysFallFe(args):
     if femur_cut_mode == "bbox_ratio":
         ogo.message("Femur BBox Ratio [reference, constrained, free]: %s" % str(femur_bbox_ratio))
         ogo.message("Femur BBox Crop From [reference, constrained, free]: %s" % str(femur_bbox_crop_from))
+    if femur_cut_mode == "proximal_box_ratio":
+        ogo.message("Femur Proximal Box Crop Ratio: %8.4f" % femur_experimental_crop_ratio)
+        ogo.message("Femur Proximal Reference Distance [mm]: %8.4f" % femur_proximal_reference_distance)
+        ogo.message("Femur Proximal Reference Width: %s" % femur_proximal_reference_width)
     if compartment_mask is not None:
         ogo.message("Compartment Mask: %s" % compartment_mask)
         ogo.message("Cortical Label: %d" % cortical_label)
@@ -1667,30 +1916,8 @@ def sidewaysFallFe(args):
 
     distal_crop_face = None
     bbox_crop_meta = None
-    if femur_cut_mode == "bbox_ratio":
-        ogo.message("Applying bbox-ratio femur crop in input image coordinates...")
-        images_to_crop = [imageData, maskThres] + ([compartmentData] if compartmentData is not None else [])
-        cropped_images, distal_crop_face, bbox_crop_meta = crop_vtk_images_to_bbox_ratio(
-            images_to_crop,
-            maskThres,
-            bbox_ratio=femur_bbox_ratio,
-            bbox_crop_from=femur_bbox_crop_from,
-            labels={1},
-        )
-        imageData = cropped_images[0]
-        maskThres = cropped_images[1]
-        if compartmentData is not None:
-            compartmentData = cropped_images[2]
-        ogo.message(
-            "BBox-ratio crop slices xyz=%s; output shape xyz=%s; crop face voxels=%d."
-            % (
-                bbox_crop_meta["crop_slices_xyz"],
-                bbox_crop_meta["output_shape_xyz"],
-                bbox_crop_meta["crop_face_voxels"],
-            )
-        )
 
-    ogo.message("Resampling cropped femur inputs to isotropic spacing before ICP...")
+    ogo.message("Resampling femur inputs to isotropic spacing before custom crop and ICP...")
     imageData = resample_vtk_image_like_workflow(
         imageData,
         iso_resolution,
@@ -1712,6 +1939,40 @@ def sidewaysFallFe(args):
             compartmentData,
             iso_resolution,
             interpolation="nearest",
+        )
+
+    if femur_cut_mode in PRE_ICP_CROP_MODES:
+        ogo.message("Applying %s femur crop after isotropic resampling and before ICP..." % femur_cut_mode)
+        images_to_crop = [imageData, maskThres] + ([compartmentData] if compartmentData is not None else [])
+        if femur_cut_mode == "bbox_ratio":
+            cropped_images, distal_crop_face, bbox_crop_meta = crop_vtk_images_to_bbox_ratio(
+                images_to_crop,
+                maskThres,
+                bbox_ratio=femur_bbox_ratio,
+                bbox_crop_from=femur_bbox_crop_from,
+                labels={1},
+            )
+        else:
+            cropped_images, distal_crop_face, bbox_crop_meta = crop_vtk_images_to_proximal_box_ratio(
+                images_to_crop,
+                maskThres,
+                ratio=femur_experimental_crop_ratio,
+                proximal_reference_distance_mm=femur_proximal_reference_distance,
+                reference_width=femur_proximal_reference_width,
+                labels={1},
+            )
+        imageData = cropped_images[0]
+        maskThres = cropped_images[1]
+        if compartmentData is not None:
+            compartmentData = cropped_images[2]
+        ogo.message(
+            "%s crop slices xyz=%s; output shape xyz=%s; crop face voxels=%d."
+            % (
+                femur_cut_mode,
+                bbox_crop_meta["crop_slices_xyz"],
+                bbox_crop_meta["output_shape_xyz"],
+                bbox_crop_meta["crop_face_voxels"],
+            )
         )
     registration_mask = maskThres
 
@@ -1872,8 +2133,8 @@ def sidewaysFallFe(args):
             f"{input_spacing} is <= {mask_smoothing_spacing_threshold} mm in all dimensions..."
         )
 
-    if femur_cut_mode == "bbox_ratio":
-        ogo.message("Using transformed bbox-ratio crop face for distal shaft standardization.")
+    if femur_cut_mode in PRE_ICP_CROP_MODES:
+        ogo.message("Using transformed %s crop face for distal shaft standardization." % femur_cut_mode)
         try:
             mask_z_min, mask_z_max = femur_z_coverage(mask_trans)
         except ValueError as exc:
@@ -1881,17 +2142,17 @@ def sidewaysFallFe(args):
             sys.exit(1)
         retained_length_mm = mask_z_max - mask_z_min
         shaft_crop = {
-            "cut_mode": "bbox_ratio",
+            "cut_mode": femur_cut_mode,
             "cut_plane": "transformed input crop face",
-            "bbox_ratio": bbox_crop_meta,
+            "pre_icp_crop": bbox_crop_meta,
             "mask_z_min": mask_z_min,
             "mask_z_max": mask_z_max,
             "retained_length_mm": retained_length_mm,
             "warnings": [],
         }
         ogo.message(
-            "Transformed bbox-ratio mask z coverage [%8.4f, %8.4f]; retained z-span=%8.4f"
-            % (mask_z_min, mask_z_max, retained_length_mm)
+            "Transformed %s mask z coverage [%8.4f, %8.4f]; retained z-span=%8.4f"
+            % (femur_cut_mode, mask_z_min, mask_z_max, retained_length_mm)
         )
     else:
         ogo.message("Applying flat distal femur crop in reference coordinates...")
@@ -1991,8 +2252,8 @@ def sidewaysFallFe(args):
     )
     if distal_crop_face_change is not None:
         distal_crop_face_change = ogo.applyMask(distal_crop_face_change, ogo.cast2unsignchar(change))
-    if femur_cut_mode == "bbox_ratio":
-        ogo.message("Skipping model-grid distal shaft cut; bbox-ratio crop face is already transformed.")
+    if femur_cut_mode in PRE_ICP_CROP_MODES:
+        ogo.message("Skipping model-grid distal shaft cut; pre-ICP crop face is already transformed.")
     else:
         model_z_min, model_z_max = femur_z_coverage(change)
         model_cut_z = model_z_max - retained_length_mm
@@ -2278,9 +2539,9 @@ def sidewaysFallFe(args):
     # length before registration; the support itself remains a bbox-relative
     # recipe plane in the generated model frame.
     ogo.message("Determining distal femur nodes...")
-    if femur_cut_mode == "bbox_ratio":
+    if femur_cut_mode in PRE_ICP_CROP_MODES:
         if distal_crop_face_change is None:
-            ogo.message("BBox-ratio cut mode requires a transformed distal crop-face mask.")
+            ogo.message("%s cut mode requires a transformed distal crop-face mask." % femur_cut_mode)
             sys.exit(1)
         distal_plane = bbox_relative_oriented_contact_plane(
             model_bounds,
@@ -2453,13 +2714,19 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Sets the applied displacement endpoint for the sideways-fall model. The default reports the force at 4%% displacement. (default: %(default)s)")
     parser.add_argument("--femur_shaft_length", type=float, default=DEFAULT_FEMUR_SHAFT_LENGTH_MM,
                         help="Retained proximal femur length [mm] for --femur_cut_mode fixed_length. (default: %(default)s [mm])")
-    parser.add_argument("--femur_cut_mode", choices=["bbox_ratio", "lesser_trochanter", "fixed_length"],
+    parser.add_argument("--femur_cut_mode", choices=["bbox_ratio", "proximal_box_ratio", "lesser_trochanter", "fixed_length"],
                         default=DEFAULT_FEMUR_CUT_MODE,
-                        help="Set the distal femur crop. bbox_ratio crops in input image coordinates and uses the transformed crop face for distal support. (default: %(default)s)")
+                        help="Set the distal femur crop. Pre-ICP crop modes run after isotropic resampling and before ICP; the transformed crop face is used for distal support. (default: %(default)s)")
     parser.add_argument("--femur_bbox_ratio", nargs=3, default=DEFAULT_FEMUR_BBOX_RATIO,
                         help="BBox-ratio crop in recipe order: reference constrained free. Use 'none' for a free axis. (default: %(default)s)")
     parser.add_argument("--femur_bbox_crop_from", nargs=3, default=DEFAULT_FEMUR_BBOX_CROP_FROM,
                         help="BBox crop side in recipe order: reference constrained free. Values are min, max, center/null. (default: %(default)s)")
+    parser.add_argument("--femur_experimental_crop_ratio", type=float, default=DEFAULT_FEMUR_EXPERIMENTAL_RATIO,
+                        help="Retained proximal femur length as a multiple of the proximal transverse max(x, y) width in proximal_box_ratio mode. (default: %(default)s)")
+    parser.add_argument("--femur_proximal_reference_distance", type=float, default=DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
+                        help="Proximal-most distance [mm] used to estimate transverse reference width in proximal_box_ratio mode. (default: %(default)s)")
+    parser.add_argument("--femur_proximal_reference_width", choices=["max_xy", "rms_xy"], default=DEFAULT_FEMUR_PROXIMAL_REFERENCE_WIDTH,
+                        help="Transverse width summary for proximal_box_ratio. max_xy uses max(x width, y width); rms_xy uses sqrt((x^2 + y^2) / 2). (default: %(default)s)")
     parser.add_argument("--femur_lesser_trochanter_distal_offset", type=float, default=DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
                         help="Cut this many mm distal to the detected lesser trochanter in lesser_trochanter mode. (default: %(default)s [mm])")
     parser.add_argument("--femur_lesser_trochanter_distal_offset_percent", type=float, default=None,

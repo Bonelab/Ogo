@@ -62,6 +62,95 @@ def write_minimal_n88_model_with_constraints(path, coords, constraints):
             value[:] = [0.0] * len(node_numbers)
 
 
+def write_minimal_hexahedron_n88_model(path):
+    netCDF4 = pytest.importorskip("netCDF4")
+
+    coords = [
+        [-0.25, -0.25, -0.25],
+        [0.25, -0.25, -0.25],
+        [0.25, 0.25, -0.25],
+        [-0.25, 0.25, -0.25],
+        [-0.25, -0.25, 0.25],
+        [0.25, -0.25, 0.25],
+        [0.25, 0.25, 0.25],
+        [-0.25, 0.25, 0.25],
+        [2.75, -0.25, -0.25],
+        [3.25, -0.25, -0.25],
+        [3.25, 0.25, -0.25],
+        [2.75, 0.25, -0.25],
+        [2.75, -0.25, 0.25],
+        [3.25, -0.25, 0.25],
+        [3.25, 0.25, 0.25],
+        [2.75, 0.25, 0.25],
+    ]
+
+    with netCDF4.Dataset(str(path), "w") as root:
+        parts = root.createGroup("Parts")
+        part = parts.createGroup("Part1")
+        part.createDimension("NumberOfNodes", len(coords))
+        part.createDimension("NumberOfCoordinates", 3)
+        coordinates = part.createVariable(
+            "NodeCoordinates",
+            "f8",
+            ("NumberOfNodes", "NumberOfCoordinates"),
+        )
+        coordinates[:] = coords
+
+        elements = part.createGroup("Elements")
+        hexahedrons = elements.createGroup("Hexahedrons")
+        hexahedrons.createDimension("NumberOfElements", 2)
+        hexahedrons.createDimension("NumberOfNodesPerElement", 8)
+        node_numbers = hexahedrons.createVariable(
+            "NodeNumbers",
+            "i4",
+            ("NumberOfElements", "NumberOfNodesPerElement"),
+        )
+        node_numbers[:] = [[1, 2, 3, 4, 5, 6, 7, 8], [9, 10, 11, 12, 13, 14, 15, 16]]
+        material_id = hexahedrons.createVariable("MaterialID", "i4", ("NumberOfElements",))
+        material_id[:] = [1, 2]
+
+
+def read_hexahedron_material_ids(path):
+    netCDF4 = pytest.importorskip("netCDF4")
+
+    with netCDF4.Dataset(str(path), "r") as root:
+        return list(
+            root.groups["Parts"]
+            .groups["Part1"]
+            .groups["Elements"]
+            .groups["Hexahedrons"]
+            .variables["MaterialID"][:]
+        )
+
+
+def write_mask_image(path):
+    np = pytest.importorskip("numpy")
+    sitk = pytest.importorskip("SimpleITK")
+
+    mask = np.zeros((1, 1, 4), dtype=np.uint8)
+    mask[0, 0, 0] = 1
+    image = sitk.GetImageFromArray(mask)
+    image.SetOrigin((0.0, 0.0, 0.0))
+    image.SetSpacing((1.0, 1.0, 1.0))
+    sitk.WriteImage(image, str(path))
+
+
+def test_temporary_pistoia_material_mask_restores_model_materials(tmp_path):
+    model_file = tmp_path / "model.n88model"
+    mask_file = tmp_path / "femoral_neck.nii.gz"
+    write_minimal_hexahedron_n88_model(model_file)
+    write_mask_image(mask_file)
+
+    with faim.temporary_pistoia_material_mask(
+        model_file, mask_file, exclude_material_id=5000
+    ) as stats:
+        assert stats["selected_elements"] == 1
+        assert stats["temporarily_excluded_elements"] == 1
+        assert read_hexahedron_material_ids(model_file) == [1, 5000]
+
+    assert read_hexahedron_material_ids(model_file) == [1, 2]
+
+
 def test_resolve_faim_command_uses_bin_64bit(tmp_path):
     install_root = tmp_path / "Faim 9.0"
     bin_dir = install_root / "bin" / "64bit"

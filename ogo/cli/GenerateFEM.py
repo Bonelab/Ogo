@@ -33,6 +33,7 @@ from ogo.fea.femur import (
     DEFAULT_FEMUR_CUT_MODE,
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
     DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+    DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
     DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
     DEFAULT_PMMA_INTRUSION_MM,
     DEFAULT_PMMA_THICKNESS_MM,
@@ -646,6 +647,11 @@ def write_modeling_metadata(
             },
             "shaft_standardization": {
                 "cut_mode": femur_cut_mode,
+                "crop_stage": (
+                    "after isotropic resampling and before ICP"
+                    if femur_cut_mode in {"bbox_ratio", "proximal_box_ratio"}
+                    else "after ICP on the generated model grid"
+                ),
                 "fixed_length_mm": option_float(generator_argv, "--femur_shaft_length", 100.0),
                 "lesser_trochanter_distal_offset_mm": option_float(
                     generator_argv,
@@ -654,9 +660,22 @@ def write_modeling_metadata(
                 ),
                 "bbox_ratio": femur_bbox_ratio,
                 "bbox_crop_from": femur_bbox_crop_from,
+                "proximal_box_ratio": {
+                    "ratio": option_float(generator_argv, "--femur_experimental_crop_ratio", 1.2),
+                    "proximal_reference_distance_mm": option_float(
+                        generator_argv,
+                        "--femur_proximal_reference_distance",
+                        DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
+                    ),
+                    "reference_width": option_value(
+                        generator_argv,
+                        "--femur_proximal_reference_width",
+                        "max_xy",
+                    ),
+                },
                 "cut_plane": (
-                    "input bbox-ratio crop face transformed with the femur"
-                    if femur_cut_mode == "bbox_ratio"
+                    "post-resample pre-ICP crop face transformed with the femur"
+                    if femur_cut_mode in {"bbox_ratio", "proximal_box_ratio"}
                     else "flat model-grid z plane"
                 ),
                 "incomplete_fov_behavior": "fail model generation",
