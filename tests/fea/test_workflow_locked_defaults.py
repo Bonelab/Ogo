@@ -78,6 +78,7 @@ def _locked_workflow_defaults():
                 "input_margin_mm": femur.DEFAULT_FEMUR_INPUT_MARGIN_MM,
                 "cut_mode": femur.DEFAULT_FEMUR_CUT_MODE,
                 "shaft_length_mm": femur.DEFAULT_FEMUR_SHAFT_LENGTH_MM,
+                "rough_pre_icp_length_mm": femur.DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM,
                 "lesser_trochanter_distal_offset_mm": femur.DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
                 "cortical_label": femur.DEFAULT_CORTICAL_LABEL,
                 "trabecular_label": femur.DEFAULT_TRABECULAR_LABEL,

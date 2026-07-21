@@ -17,12 +17,12 @@ Default femur workflow:
 3. Smooth the transformed femur mask with one binary close/open pass only when
    at least one input spacing dimension is coarser than 2 mm. If a compartment
    mask is supplied, the derived cortical binary mask follows the same rule.
-4. Standardize the distal shaft after isotropic resampling and before
-   registration. The default uses a proximal max(x, y) transverse width
-   reference and retains 1.2 times that width along the proximal-distal axis.
-   The transformed crop face becomes the distal support surface. ``bbox_ratio``,
-   ``lesser_trochanter``, and ``fixed_length`` modes are available for
-   debugging or historical comparisons.
+4. Stabilize registration with a fixed 100 mm proximal rough crop after
+   isotropic resampling, then standardize the distal shaft after ICP with a flat
+   aligned-frame crop that keeps z length at 1.2 times the aligned y width.
+   The post-ICP crop face becomes the distal support surface. ``bbox_ratio``,
+   ``proximal_box_ratio``, ``lesser_trochanter``, and ``fixed_length`` modes are
+   available for debugging or historical comparisons.
 5. Generate two geometric PMMA fixtures from bbox-relative contact planes:
    a femoral-head loading fixture on the high-y side and a greater-trochanter
    contact fixture on the low-y side. Defaults are 10 mm PMMA thickness and
@@ -86,8 +86,10 @@ DEFAULT_PMMA_THICKNESS_MM = 10.0
 DEFAULT_PMMA_INTRUSION_MM = 6.0
 DEFAULT_FEMUR_INPUT_MARGIN_MM = DEFAULT_PMMA_THICKNESS_MM + DEFAULT_PMMA_INTRUSION_MM
 DEFAULT_FEMUR_SHAFT_LENGTH_MM = 100.0
-DEFAULT_FEMUR_CUT_MODE = "proximal_box_ratio"
+DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM = 100.0
+DEFAULT_FEMUR_CUT_MODE = "post_icp_flat_ratio"
 PRE_ICP_CROP_MODES = {"bbox_ratio", "proximal_box_ratio"}
+ROUGH_PRE_ICP_CROP_MODES = {"post_icp_flat_ratio"}
 DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM = 50.0
 DEFAULT_CORTICAL_LABEL = 1
 DEFAULT_TRABECULAR_LABEL = 2
@@ -700,6 +702,126 @@ def crop_vtk_images_to_proximal_box_ratio(
             "crop_slices_xyz": tuple((int(out_lo[axis]), int(out_hi[axis])) for axis in range(3)),
         },
     )
+
+
+def crop_vtk_images_to_fixed_proximal_length(
+    vtk_images,
+    vtk_mask,
+    *,
+    retained_length_mm=DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM,
+    labels=None,
+):
+    """Crop from the distal side to a fixed proximal-distal retained length."""
+    import numpy as np
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    mask_data = vtk_image_to_numpy(vtk_mask)
+    active = _active_crop_mask(mask_data, labels)
+    spacing = np.asarray(vtk_mask.GetSpacing(), dtype=np.float64)
+    coords = np.argwhere(active)
+    lo = coords.min(axis=0).astype(np.int64)
+    hi = (coords.max(axis=0) + 1).astype(np.int64)
+    size = hi - lo
+    retained_length_mm = float(retained_length_mm)
+    if retained_length_mm <= 0.0:
+        raise ValueError("retained_length_mm must be positive.")
+    target_voxels = min(
+        int(size[2]),
+        max(1, int(round(retained_length_mm / float(spacing[2])))),
+    )
+    status = "short" if int(size[2]) <= target_voxels else "cropped"
+    keep = np.zeros(active.shape, dtype=bool)
+    out_lo = lo.copy()
+    out_hi = hi.copy()
+    if status == "short":
+        keep[tuple(slice(int(lo[axis]), int(hi[axis])) for axis in range(3))] = True
+    else:
+        out_lo[2] = int(hi[2]) - target_voxels
+        keep[
+            int(out_lo[0]) : int(out_hi[0]),
+            int(out_lo[1]) : int(out_hi[1]),
+            int(out_lo[2]) : int(out_hi[2]),
+        ] = True
+    cropped_images, crop_face_image, meta = _crop_vtk_images_with_keep_mask(
+        vtk_images,
+        vtk_mask,
+        active=active,
+        keep=keep,
+        meta={
+            "enabled": True,
+            "method": "fixed_proximal_length",
+            "retained_length_mm": float(target_voxels) * float(spacing[2]),
+            "requested_retained_length_mm": retained_length_mm,
+            "status": status,
+            "input_bbox_xyz": tuple((int(lo[axis]), int(hi[axis])) for axis in range(3)),
+            "rough_pre_icp": True,
+        },
+    )
+    return cropped_images, crop_face_image, meta
+
+
+def crop_vtk_images_to_flat_post_icp_ratio(
+    vtk_images,
+    vtk_mask,
+    *,
+    ratio=DEFAULT_FEMUR_EXPERIMENTAL_RATIO,
+    labels=None,
+):
+    """Apply a flat aligned-frame distal crop using z length over y width."""
+    import numpy as np
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    mask_data = vtk_image_to_numpy(vtk_mask)
+    active = _active_crop_mask(mask_data, labels)
+    spacing = np.asarray(vtk_mask.GetSpacing(), dtype=np.float64)
+    coords = np.argwhere(active)
+    lo = coords.min(axis=0).astype(np.int64)
+    hi = (coords.max(axis=0) + 1).astype(np.int64)
+    size = hi - lo
+    y_width_mm = float(size[1]) * float(spacing[1])
+    z_length_mm = float(size[2]) * float(spacing[2])
+    ratio = float(ratio)
+    if ratio <= 0.0:
+        raise ValueError("ratio must be positive.")
+    target_length_mm = min(z_length_mm, ratio * y_width_mm)
+    target_voxels = min(
+        int(size[2]),
+        max(1, int(round(target_length_mm / float(spacing[2])))),
+    )
+    status = "short" if int(size[2]) <= target_voxels else "cropped"
+    keep = np.zeros(active.shape, dtype=bool)
+    out_lo = lo.copy()
+    out_hi = hi.copy()
+    if status == "short":
+        keep[tuple(slice(int(lo[axis]), int(hi[axis])) for axis in range(3))] = True
+    else:
+        out_lo[2] = int(hi[2]) - target_voxels
+        keep[
+            int(out_lo[0]) : int(out_hi[0]),
+            int(out_lo[1]) : int(out_hi[1]),
+            int(out_lo[2]) : int(out_hi[2]),
+        ] = True
+    cropped_images, crop_face_image, meta = _crop_vtk_images_with_keep_mask(
+        vtk_images,
+        vtk_mask,
+        active=active,
+        keep=keep,
+        meta={
+            "enabled": True,
+            "method": "post_icp_flat_ratio",
+            "ratio": ratio,
+            "reference_axis": "y",
+            "reference_width_mm": y_width_mm,
+            "input_z_length_mm": z_length_mm,
+            "target_length_mm": float(target_voxels) * float(spacing[2]),
+            "status": status,
+            "input_bbox_xyz": tuple((int(lo[axis]), int(hi[axis])) for axis in range(3)),
+            "crop_stage": "after ICP on aligned reference grid",
+        },
+    )
+    return cropped_images, crop_face_image, meta
 
 
 def _active_crop_mask(mask_data, labels):
@@ -1876,10 +1998,12 @@ def sidewaysFallFe(args):
     if femur_cut_mode == "bbox_ratio":
         ogo.message("Femur BBox Ratio [reference, constrained, free]: %s" % str(femur_bbox_ratio))
         ogo.message("Femur BBox Crop From [reference, constrained, free]: %s" % str(femur_bbox_crop_from))
-    if femur_cut_mode == "proximal_box_ratio":
+    if femur_cut_mode in {"proximal_box_ratio", "post_icp_flat_ratio"}:
         ogo.message("Femur Proximal Box Crop Ratio: %8.4f" % femur_experimental_crop_ratio)
         ogo.message("Femur Proximal Reference Distance [mm]: %8.4f" % femur_proximal_reference_distance)
         ogo.message("Femur Proximal Reference Width: %s" % femur_proximal_reference_width)
+    if femur_cut_mode == "post_icp_flat_ratio":
+        ogo.message("Femur Rough Pre-ICP Retained Length [mm]: %8.4f" % femur_shaft_length)
     if compartment_mask is not None:
         ogo.message("Compartment Mask: %s" % compartment_mask)
         ogo.message("Cortical Label: %d" % cortical_label)
@@ -1972,6 +2096,30 @@ def sidewaysFallFe(args):
                 bbox_crop_meta["crop_slices_xyz"],
                 bbox_crop_meta["output_shape_xyz"],
                 bbox_crop_meta["crop_face_voxels"],
+            )
+        )
+    elif femur_cut_mode in ROUGH_PRE_ICP_CROP_MODES:
+        ogo.message(
+            "Applying fixed-length rough femur crop after isotropic resampling and before ICP..."
+        )
+        images_to_crop = [imageData, maskThres] + ([compartmentData] if compartmentData is not None else [])
+        cropped_images, _rough_crop_face, bbox_crop_meta = crop_vtk_images_to_fixed_proximal_length(
+            images_to_crop,
+            maskThres,
+            retained_length_mm=femur_shaft_length,
+            labels={1},
+        )
+        imageData = cropped_images[0]
+        maskThres = cropped_images[1]
+        if compartmentData is not None:
+            compartmentData = cropped_images[2]
+        ogo.message(
+            "rough pre-ICP crop slices xyz=%s; output shape xyz=%s; retained length=%8.4f; status=%s."
+            % (
+                bbox_crop_meta["crop_slices_xyz"],
+                bbox_crop_meta["output_shape_xyz"],
+                bbox_crop_meta["retained_length_mm"],
+                bbox_crop_meta["status"],
             )
         )
     registration_mask = maskThres
@@ -2154,6 +2302,34 @@ def sidewaysFallFe(args):
             "Transformed %s mask z coverage [%8.4f, %8.4f]; retained z-span=%8.4f"
             % (femur_cut_mode, mask_z_min, mask_z_max, retained_length_mm)
         )
+    elif femur_cut_mode == "post_icp_flat_ratio":
+        ogo.message("Applying flat post-ICP femur crop in aligned reference coordinates...")
+        images_to_crop = [image_trans, mask_trans] + ([compartment_trans] if compartment_trans is not None else [])
+        try:
+            cropped_images, distal_crop_face_trans, shaft_crop = crop_vtk_images_to_flat_post_icp_ratio(
+                images_to_crop,
+                mask_trans,
+                ratio=femur_experimental_crop_ratio,
+                labels={1},
+            )
+        except ValueError as exc:
+            ogo.message(str(exc))
+            sys.exit(1)
+        image_trans = cropped_images[0]
+        mask_trans = cropped_images[1]
+        if compartment_trans is not None:
+            compartment_trans = cropped_images[2]
+        retained_length_mm = shaft_crop["target_length_mm"]
+        shaft_crop["pre_icp_crop"] = bbox_crop_meta
+        ogo.message(
+            "Post-ICP flat crop retained z=%8.4f from y width=%8.4f; slices xyz=%s; status=%s."
+            % (
+                retained_length_mm,
+                shaft_crop["reference_width_mm"],
+                shaft_crop["crop_slices_xyz"],
+                shaft_crop["status"],
+            )
+        )
     else:
         ogo.message("Applying flat distal femur crop in reference coordinates...")
         try:
@@ -2254,6 +2430,8 @@ def sidewaysFallFe(args):
         distal_crop_face_change = ogo.applyMask(distal_crop_face_change, ogo.cast2unsignchar(change))
     if femur_cut_mode in PRE_ICP_CROP_MODES:
         ogo.message("Skipping model-grid distal shaft cut; pre-ICP crop face is already transformed.")
+    elif femur_cut_mode == "post_icp_flat_ratio":
+        ogo.message("Skipping model-grid distal shaft cut; post-ICP crop face is already on the model grid.")
     else:
         model_z_min, model_z_max = femur_z_coverage(change)
         model_cut_z = model_z_max - retained_length_mm
@@ -2576,6 +2754,36 @@ def sidewaysFallFe(args):
         if df_visible_node_IDS.GetNumberOfTuples() == 0:
             ogo.message("No distal femur nodes found on the bbox-relative oblique shaft support surface.")
             sys.exit(1)
+    elif femur_cut_mode == "post_icp_flat_ratio":
+        if distal_crop_face_change is None:
+            ogo.message("post_icp_flat_ratio cut mode requires a distal crop-face mask.")
+            sys.exit(1)
+        distal_plane = crop_face_contact_plane(distal_crop_face_change, change)
+        ogo.message(
+            "Distal Femur post-ICP flat support plane: center=%s normal=%s outward=%s size=%s"
+            % (
+                distal_plane["center"],
+                distal_plane["normal"],
+                distal_plane["outward_normal"],
+                distal_plane["size"],
+            )
+        )
+        distal_surface = projected_crop_face_surface_vtk(
+            change,
+            distal_plane,
+            intrusion=pmma_intrusion,
+            output_value=1,
+        )
+        df_visible_node_IDS = interface_node_ids_from_voxel_mask(
+            model2,
+            distal_surface,
+            change,
+            name=DISTAL_FEMUR_NODE_SET,
+            direction=distal_plane["normal"],
+        )
+        if df_visible_node_IDS.GetNumberOfTuples() == 0:
+            ogo.message("No distal femur nodes found on the post-ICP flat shaft support surface.")
+            sys.exit(1)
     else:
         distal_cut_z = model2_bounds[4]
         ogo.message("Distal Femur Cut Plane z: %8.4f" % distal_cut_z)
@@ -2714,9 +2922,9 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Sets the applied displacement endpoint for the sideways-fall model. The default reports the force at 4%% displacement. (default: %(default)s)")
     parser.add_argument("--femur_shaft_length", type=float, default=DEFAULT_FEMUR_SHAFT_LENGTH_MM,
                         help="Retained proximal femur length [mm] for --femur_cut_mode fixed_length. (default: %(default)s [mm])")
-    parser.add_argument("--femur_cut_mode", choices=["bbox_ratio", "proximal_box_ratio", "lesser_trochanter", "fixed_length"],
+    parser.add_argument("--femur_cut_mode", choices=["bbox_ratio", "proximal_box_ratio", "post_icp_flat_ratio", "lesser_trochanter", "fixed_length"],
                         default=DEFAULT_FEMUR_CUT_MODE,
-                        help="Set the distal femur crop. Pre-ICP crop modes run after isotropic resampling and before ICP; the transformed crop face is used for distal support. (default: %(default)s)")
+                        help="Set the distal femur crop. post_icp_flat_ratio uses a fixed rough pre-ICP crop, then a flat aligned-frame final ratio crop after ICP. (default: %(default)s)")
     parser.add_argument("--femur_bbox_ratio", nargs=3, default=DEFAULT_FEMUR_BBOX_RATIO,
                         help="BBox-ratio crop in recipe order: reference constrained free. Use 'none' for a free axis. (default: %(default)s)")
     parser.add_argument("--femur_bbox_crop_from", nargs=3, default=DEFAULT_FEMUR_BBOX_CROP_FROM,

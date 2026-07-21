@@ -13,20 +13,20 @@
         null
       ],
       "cortical_label": 1,
-      "cut_mode": "proximal_box_ratio",
+      "cut_mode": "post_icp_flat_ratio",
       "distal_shaft_center_fraction": [
         0.5,
         0.5,
         -0.1
       ],
-      "distal_shaft_size_fraction": [
-        1.0,
-        1.0
-      ],
       "distal_shaft_normal": [
         0.0,
         -0.2588190451025207,
         0.9659258262890683
+      ],
+      "distal_shaft_size_fraction": [
+        1.0,
+        1.0
       ],
       "fe_displacement_mm": -4.0,
       "femoral_head_center_fraction": [
@@ -68,6 +68,7 @@
         0.75
       ],
       "right_femur_code": 2,
+      "rough_pre_icp_length_mm": 100.0,
       "shaft_length_mm": 100.0,
       "target_displacement_percent": 4.0,
       "trabecular_label": 2
