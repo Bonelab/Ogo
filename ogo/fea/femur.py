@@ -89,7 +89,7 @@ DEFAULT_PMMA_INTRUSION_MM = 6.0
 DEFAULT_FEMUR_INPUT_MARGIN_MM = DEFAULT_PMMA_THICKNESS_MM + DEFAULT_PMMA_INTRUSION_MM
 DEFAULT_FEMUR_SHAFT_LENGTH_MM = 120.0
 DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM = 120.0
-DEFAULT_FEMUR_CUT_MODE = "post_icp_oblique_ratio"
+DEFAULT_FEMUR_CUT_MODE = "post_icp_flat_ratio"
 PRE_ICP_CROP_MODES = {"bbox_ratio", "proximal_box_ratio"}
 ROUGH_PRE_ICP_CROP_MODES = {"post_icp_flat_ratio", "post_icp_oblique_ratio"}
 DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM = 50.0
@@ -787,12 +787,15 @@ def crop_vtk_images_to_flat_post_icp_ratio(
     ratio = float(ratio)
     if ratio <= 0.0:
         raise ValueError("ratio must be positive.")
-    target_length_mm = min(z_length_mm, ratio * y_width_mm)
-    target_voxels = min(
-        int(size[2]),
-        max(1, int(round(target_length_mm / float(spacing[2])))),
-    )
-    status = "short" if int(size[2]) <= target_voxels else "cropped"
+    target_length_mm = ratio * y_width_mm
+    target_voxels = max(1, int(round(target_length_mm / float(spacing[2]))))
+    if int(size[2]) <= target_voxels:
+        raise ValueError(
+            "Post-ICP flat femur crop is too short for the requested aspect ratio: "
+            "input z length %.4f mm, required %.4f mm for ratio %.4f."
+            % (z_length_mm, target_length_mm, ratio)
+        )
+    status = "cropped"
     keep = np.zeros(active.shape, dtype=bool)
     out_lo = lo.copy()
     out_hi = hi.copy()

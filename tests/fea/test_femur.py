@@ -507,6 +507,23 @@ def test_post_icp_flat_ratio_crop_uses_y_width_for_z_length():
     assert vtk_image_to_numpy(crop_face).sum() > 0
 
 
+def test_post_icp_flat_ratio_crop_rejects_short_femur():
+    np = pytest.importorskip("numpy")
+
+    density = np.zeros((32, 80, 90), dtype=np.float32)
+    mask = np.zeros_like(density, dtype=np.uint8)
+    density[5:25, 10:70, 20:80] = 700.0
+    mask[5:25, 10:70, 20:80] = 2
+
+    with pytest.raises(ValueError, match="too short for the requested aspect ratio"):
+        femur.crop_vtk_images_to_flat_post_icp_ratio(
+            [_vtk_image_from_array(density)],
+            _vtk_image_from_array(mask),
+            ratio=1.2,
+            labels={2},
+        )
+
+
 def test_post_icp_oblique_ratio_crop_uses_transformed_crop_face_angle():
     np = pytest.importorskip("numpy")
     from ogo.util.vtk_image import vtk_image_to_numpy
