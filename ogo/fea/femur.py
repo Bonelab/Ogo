@@ -862,7 +862,7 @@ def crop_vtk_images_to_oblique_post_icp_ratio(
     cut_z_mm = float(origin[2]) + float(int(hi[2]) - target_voxels) * float(spacing[2])
 
     transformed_face_data = vtk_image_to_numpy(transformed_crop_face) != 0
-    if not np.any(transformed_face_data & active):
+    if not np.any(transformed_face_data):
         raise ValueError("Cannot apply oblique post-ICP crop from an empty transformed rough crop face.")
 
     if status == "short":

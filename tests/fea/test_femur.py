@@ -572,6 +572,31 @@ def test_post_icp_oblique_ratio_short_case_keeps_transformed_crop_face():
     assert np.unique(np.argwhere(crop_face_mask)[:, 2]).tolist() == [0]
 
 
+def test_post_icp_oblique_ratio_allows_resampled_face_offset_from_mask():
+    np = pytest.importorskip("numpy")
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    density = np.zeros((32, 80, 160), dtype=np.float32)
+    mask = np.zeros_like(density, dtype=np.uint8)
+    rough_face = np.zeros_like(mask)
+    density[5:25, 10:70, 20:150] = 700.0
+    mask[5:25, 10:70, 20:150] = 2
+    rough_face[5:25, 10:70, 19] = 1
+
+    cropped, crop_face, meta = femur.crop_vtk_images_to_oblique_post_icp_ratio(
+        [_vtk_image_from_array(density)],
+        _vtk_image_from_array(mask),
+        _vtk_image_from_array(rough_face),
+        ratio=1.2,
+        labels={2},
+    )
+
+    assert meta["method"] == "post_icp_oblique_ratio"
+    assert meta["status"] == "cropped"
+    assert vtk_image_to_numpy(cropped[0]).sum() > 0
+    assert vtk_image_to_numpy(crop_face).sum() > 0
+
+
 def test_crop_face_support_vector_points_away_from_retained_bone():
     np = pytest.importorskip("numpy")
 
