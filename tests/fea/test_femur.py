@@ -619,6 +619,27 @@ def test_thicken_z_crop_face_into_mask_returns_mask_constrained_slab():
     assert not np.any(slab_data[:, :, 4:])
 
 
+def test_thicken_z_crop_face_falls_back_to_distal_mask_slice():
+    np = pytest.importorskip("numpy")
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    mask = np.zeros((8, 8, 8), dtype=np.uint8)
+    mask[2:6, 2:6, 2:7] = 1
+    empty_face = np.zeros_like(mask)
+
+    slab = femur.thicken_z_crop_face_into_mask(
+        _vtk_image_from_array(empty_face),
+        _vtk_image_from_array(mask),
+        thickness_voxels=2,
+    )
+    slab_data = vtk_image_to_numpy(slab) != 0
+
+    assert slab_data.sum() == 4 * 4 * 2
+    assert np.all(slab_data[2:6, 2:6, 2:4])
+    assert not np.any(slab_data[:, :, :2])
+    assert not np.any(slab_data[:, :, 4:])
+
+
 def test_crop_face_support_vector_points_away_from_retained_bone():
     np = pytest.importorskip("numpy")
 

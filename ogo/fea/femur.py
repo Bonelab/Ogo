@@ -961,12 +961,14 @@ def thicken_z_crop_face_into_mask(crop_face_vtk, mask_vtk, *, thickness_voxels=3
     out = np.zeros(face.shape, dtype=np.uint8)
     coords = np.argwhere(face)
     if coords.size == 0:
-        return _vtk_image_from_array(
-            out,
-            crop_face_vtk,
-            origin=crop_face_vtk.GetOrigin(),
-            vtk_array_type=vtk.VTK_UNSIGNED_CHAR,
-        )
+        coords = np.argwhere(active)
+        if coords.size == 0:
+            return _vtk_image_from_array(
+                out,
+                crop_face_vtk,
+                origin=crop_face_vtk.GetOrigin(),
+                vtk_array_type=vtk.VTK_UNSIGNED_CHAR,
+            )
     z0 = int(coords[:, 2].min())
     z1 = min(active.shape[2], z0 + max(1, int(thickness_voxels)))
     out[:, :, z0:z1] = active[:, :, z0:z1].astype(np.uint8)
