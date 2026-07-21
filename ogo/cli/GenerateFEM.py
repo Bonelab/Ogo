@@ -654,10 +654,10 @@ def write_modeling_metadata(
                     if femur_cut_mode == "post_icp_flat_ratio"
                     else "after ICP on the generated model grid"
                 ),
-                "fixed_length_mm": option_float(generator_argv, "--femur_shaft_length", 100.0),
+                "fixed_length_mm": option_float(generator_argv, "--femur_shaft_length", 120.0),
                 "rough_pre_icp_crop": {
                     "enabled": femur_cut_mode == "post_icp_flat_ratio",
-                    "retained_length_mm": option_float(generator_argv, "--femur_shaft_length", 100.0),
+                    "retained_length_mm": option_float(generator_argv, "--femur_shaft_length", 120.0),
                 },
                 "lesser_trochanter_distal_offset_mm": option_float(
                     generator_argv,

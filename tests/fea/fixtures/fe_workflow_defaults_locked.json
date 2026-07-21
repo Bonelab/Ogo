@@ -68,8 +68,8 @@
         0.75
       ],
       "right_femur_code": 2,
-      "rough_pre_icp_length_mm": 100.0,
-      "shaft_length_mm": 100.0,
+      "rough_pre_icp_length_mm": 120.0,
+      "shaft_length_mm": 120.0,
       "target_displacement_percent": 4.0,
       "trabecular_label": 2
     },
