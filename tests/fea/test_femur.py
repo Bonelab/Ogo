@@ -507,6 +507,71 @@ def test_post_icp_flat_ratio_crop_uses_y_width_for_z_length():
     assert vtk_image_to_numpy(crop_face).sum() > 0
 
 
+def test_post_icp_oblique_ratio_crop_uses_transformed_crop_face_angle():
+    np = pytest.importorskip("numpy")
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    density = np.zeros((32, 80, 160), dtype=np.float32)
+    mask = np.zeros_like(density, dtype=np.uint8)
+    rough_face = np.zeros_like(mask)
+    for x in range(5, 25):
+        for y in range(10, 70):
+            z = 20 + (x - 5) // 5
+            density[x, y, z:150] = 700.0
+            mask[x, y, z:150] = 2
+            rough_face[x, y, z] = 1
+
+    cropped, crop_face, meta = femur.crop_vtk_images_to_oblique_post_icp_ratio(
+        [_vtk_image_from_array(density)],
+        _vtk_image_from_array(mask),
+        _vtk_image_from_array(rough_face),
+        ratio=1.2,
+        labels={2},
+    )
+
+    cropped_mask = vtk_image_to_numpy(cropped[0]) != 0
+    crop_face_mask = vtk_image_to_numpy(crop_face) != 0
+    crop_face_coords = np.argwhere(crop_face_mask)
+
+    assert meta["method"] == "post_icp_oblique_ratio"
+    assert meta["reference_width_mm"] == pytest.approx(60.0)
+    assert meta["target_length_mm"] == pytest.approx(72.0)
+    assert meta["status"] == "cropped"
+    assert meta["plane_normal"][2] > 0.8
+    assert crop_face_coords[:, 2].max() > crop_face_coords[:, 2].min()
+    assert cropped_mask.sum() > 0
+    assert crop_face_mask.sum() > 0
+
+
+def test_post_icp_oblique_ratio_short_case_keeps_transformed_crop_face():
+    np = pytest.importorskip("numpy")
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    density = np.zeros((20, 40, 50), dtype=np.float32)
+    mask = np.zeros_like(density, dtype=np.uint8)
+    rough_face = np.zeros_like(mask)
+    density[4:16, 5:35, 12:42] = 700.0
+    mask[4:16, 5:35, 12:42] = 2
+    rough_face[4:16, 5:35, 12] = 1
+
+    cropped, crop_face, meta = femur.crop_vtk_images_to_oblique_post_icp_ratio(
+        [_vtk_image_from_array(density)],
+        _vtk_image_from_array(mask),
+        _vtk_image_from_array(rough_face),
+        ratio=1.2,
+        labels={2},
+    )
+
+    cropped_mask = vtk_image_to_numpy(cropped[0]) != 0
+    crop_face_mask = vtk_image_to_numpy(crop_face) != 0
+
+    assert meta["method"] == "post_icp_oblique_ratio"
+    assert meta["status"] == "short"
+    assert cropped_mask.sum() == np.count_nonzero(mask)
+    assert crop_face_mask.sum() == np.count_nonzero(rough_face)
+    assert np.unique(np.argwhere(crop_face_mask)[:, 2]).tolist() == [0]
+
+
 def test_crop_face_support_vector_points_away_from_retained_bone():
     np = pytest.importorskip("numpy")
 

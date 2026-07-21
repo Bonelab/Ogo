@@ -651,13 +651,15 @@ def write_modeling_metadata(
                 "crop_stage": (
                     "after isotropic resampling and before ICP"
                     if femur_cut_mode in {"bbox_ratio", "proximal_box_ratio"}
+                    else "fixed rough crop before ICP, final oblique ratio crop after ICP"
+                    if femur_cut_mode == "post_icp_oblique_ratio"
                     else "fixed rough crop before ICP, final flat ratio crop after ICP"
                     if femur_cut_mode == "post_icp_flat_ratio"
                     else "after ICP on the generated model grid"
                 ),
                 "fixed_length_mm": option_float(generator_argv, "--femur_shaft_length", 120.0),
                 "rough_pre_icp_crop": {
-                    "enabled": femur_cut_mode == "post_icp_flat_ratio",
+                    "enabled": femur_cut_mode in {"post_icp_flat_ratio", "post_icp_oblique_ratio"},
                     "retained_length_mm": option_float(generator_argv, "--femur_shaft_length", 120.0),
                 },
                 "lesser_trochanter_distal_offset_mm": option_float(
@@ -683,6 +685,8 @@ def write_modeling_metadata(
                 "cut_plane": (
                     "post-resample pre-ICP crop face transformed with the femur"
                     if femur_cut_mode in {"bbox_ratio", "proximal_box_ratio"}
+                    else "post-ICP oblique crop face following transformed rough pre-ICP crop face angle"
+                    if femur_cut_mode == "post_icp_oblique_ratio"
                     else "flat post-ICP aligned-frame crop face"
                     if femur_cut_mode == "post_icp_flat_ratio"
                     else "flat model-grid z plane"
@@ -762,11 +766,21 @@ def write_modeling_metadata(
                         "support_surface": (
                             "finite bbox-relative patch projected onto the transformed oblique shaft surface"
                             if femur_cut_mode == "bbox_ratio"
+                            else "projected patch on the post-ICP oblique distal shaft crop face"
+                            if femur_cut_mode == "post_icp_oblique_ratio"
                             else "central 90% straight patch on the post-ICP flat distal shaft crop face"
                             if femur_cut_mode == "post_icp_flat_ratio"
                             else "flat distal shaft cut face"
                         ),
-                        "relative_to": "model_grid" if femur_cut_mode == "post_icp_flat_ratio" else "model_bbox" if femur_cut_mode == "bbox_ratio" else None,
+                        "relative_to": (
+                            "transformed_rough_crop_face"
+                            if femur_cut_mode == "post_icp_oblique_ratio"
+                            else "model_grid"
+                            if femur_cut_mode == "post_icp_flat_ratio"
+                            else "model_bbox"
+                            if femur_cut_mode == "bbox_ratio"
+                            else None
+                        ),
                         "center_fraction": (
                             list(DISTAL_SHAFT_FIXTURE_CENTER_FRACTION)
                             if femur_cut_mode == "bbox_ratio"
@@ -785,6 +799,8 @@ def write_modeling_metadata(
                         "normal_source": (
                             "transformed input bbox-ratio crop face"
                             if femur_cut_mode == "bbox_ratio"
+                            else "transformed rough pre-ICP crop face shifted to final ratio target"
+                            if femur_cut_mode == "post_icp_oblique_ratio"
                             else "model-grid distal z direction"
                             if femur_cut_mode == "post_icp_flat_ratio"
                             else "model-grid distal z face"
