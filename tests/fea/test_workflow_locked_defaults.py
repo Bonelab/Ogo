@@ -68,6 +68,7 @@ def _locked_workflow_defaults():
                     femur.DISTAL_SHAFT_FIXTURE_SIZE_FRACTION
                 ),
                 "distal_shaft_normal": list(femur.DISTAL_SHAFT_FIXTURE_NORMAL),
+                "post_icp_distal_shaft_support_fraction": femur.POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION,
                 "bbox_ratio": list(femur.DEFAULT_FEMUR_BBOX_RATIO),
                 "bbox_crop_from": list(femur.DEFAULT_FEMUR_BBOX_CROP_FROM),
                 "proximal_reference_distance_mm": femur.DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,

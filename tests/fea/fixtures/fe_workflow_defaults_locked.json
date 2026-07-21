@@ -28,6 +28,7 @@
         1.0,
         1.0
       ],
+      "post_icp_distal_shaft_support_fraction": 0.9,
       "fe_displacement_mm": -4.0,
       "femoral_head_center_fraction": [
         0.5,

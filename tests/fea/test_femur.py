@@ -578,6 +578,28 @@ def test_projected_crop_face_surface_mask_keeps_first_contact_layer():
     assert not np.any(surface_data[:, :, 5:])
 
 
+def test_straight_crop_face_support_uses_central_fraction_on_flat_face():
+    np = pytest.importorskip("numpy")
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    active = np.zeros((12, 12, 8), dtype=np.uint8)
+    active[1:11, 1:11, 3:7] = 1
+    crop_face = np.zeros_like(active)
+    crop_face[1:11, 1:11, 3] = 1
+
+    surface = femur.straight_crop_face_support_surface_vtk(
+        _vtk_image_from_array(crop_face),
+        _vtk_image_from_array(active),
+        support_fraction=0.9,
+    )
+    surface_data = vtk_image_to_numpy(surface) != 0
+
+    assert surface_data.sum() == 9 * 9
+    assert np.all(surface_data[1:10, 1:10, 3])
+    assert not np.any(surface_data[:, :, :3])
+    assert not np.any(surface_data[:, :, 4:])
+
+
 def test_flat_femur_shaft_crop_rejects_short_distal_coverage():
     np = pytest.importorskip("numpy")
     vtk = pytest.importorskip("vtk")

@@ -38,6 +38,7 @@ from ogo.fea.femur import (
     DEFAULT_PMMA_INTRUSION_MM,
     DEFAULT_PMMA_THICKNESS_MM,
     DISTAL_SHAFT_FIXTURE_CENTER_FRACTION,
+    POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION,
     DISTAL_SHAFT_FIXTURE_SIZE_FRACTION,
     FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
     GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
@@ -761,7 +762,7 @@ def write_modeling_metadata(
                         "support_surface": (
                             "finite bbox-relative patch projected onto the transformed oblique shaft surface"
                             if femur_cut_mode == "bbox_ratio"
-                            else "post-ICP flat distal shaft crop face"
+                            else "central 90% straight patch on the post-ICP flat distal shaft crop face"
                             if femur_cut_mode == "post_icp_flat_ratio"
                             else "flat distal shaft cut face"
                         ),
@@ -776,10 +777,15 @@ def write_modeling_metadata(
                             if femur_cut_mode == "bbox_ratio"
                             else None
                         ),
+                        "support_fraction": (
+                            POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION
+                            if femur_cut_mode == "post_icp_flat_ratio"
+                            else None
+                        ),
                         "normal_source": (
                             "transformed input bbox-ratio crop face"
                             if femur_cut_mode == "bbox_ratio"
-                            else "post-ICP flat crop face"
+                            else "model-grid distal z direction"
                             if femur_cut_mode == "post_icp_flat_ratio"
                             else "model-grid distal z face"
                         ),

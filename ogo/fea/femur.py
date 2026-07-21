@@ -75,6 +75,7 @@ GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION = (0.5, -0.1, 0.5)
 DISTAL_SHAFT_FIXTURE_CENTER_FRACTION = (0.5, 0.5, -0.1)
 DISTAL_SHAFT_FIXTURE_SIZE_FRACTION = (1.0, 1.0)
 DISTAL_SHAFT_FIXTURE_NORMAL = (0.0, -0.2588190451025207, 0.9659258262890683)
+POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION = 0.9
 DEFAULT_FEMUR_BBOX_RATIO = (1.0, 1.3, None)
 DEFAULT_FEMUR_BBOX_CROP_FROM = (None, "max", None)
 DEFAULT_FEMUR_EXPERIMENTAL_RATIO = 1.2
@@ -1326,6 +1327,54 @@ def projected_crop_face_surface_vtk(material_vtk, plane, *, intrusion=0.0, outpu
     if kept:
         kept_indices = np.stack(kept, axis=0)
         out[tuple(kept_indices.T)] = np.uint8(output_value)
+    return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
+
+
+def straight_crop_face_support_surface_vtk(
+    crop_face_vtk,
+    material_vtk,
+    *,
+    support_fraction=POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION,
+    output_value=1,
+):
+    """Return a central straight support patch on a flat distal crop face."""
+    import numpy as np
+    import vtk
+
+    from ogo.util.vtk_image import numpy_to_vtk_image, vtk_image_to_numpy
+
+    face = vtk_image_to_numpy(crop_face_vtk) != 0
+    active = vtk_image_to_numpy(material_vtk) != 0
+    out = np.zeros(face.shape, dtype=np.uint8)
+    if not np.any(face) or not np.any(active):
+        return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
+    fraction = float(support_fraction)
+    if not (0.0 < fraction <= 1.0):
+        raise ValueError("support_fraction must be in (0, 1].")
+
+    face = face & active
+    if not np.any(face):
+        return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
+
+    coords = np.argwhere(face)
+    lo = coords.min(axis=0)
+    hi = coords.max(axis=0) + 1
+    keep_lo = lo.copy()
+    keep_hi = hi.copy()
+    for axis in (0, 1):
+        width = int(hi[axis] - lo[axis])
+        target = max(1, min(width, int(np.floor(width * fraction))))
+        margin = max(0, (width - target) // 2)
+        keep_lo[axis] = int(lo[axis]) + margin
+        keep_hi[axis] = int(keep_lo[axis]) + target
+
+    keep = np.zeros(face.shape, dtype=bool)
+    keep[
+        int(keep_lo[0]) : int(keep_hi[0]),
+        int(keep_lo[1]) : int(keep_hi[1]),
+        int(lo[2]) : int(hi[2]),
+    ] = True
+    out[face & keep] = int(output_value)
     return numpy_to_vtk_image(out, material_vtk, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
 
 
@@ -2758,20 +2807,15 @@ def sidewaysFallFe(args):
         if distal_crop_face_change is None:
             ogo.message("post_icp_flat_ratio cut mode requires a distal crop-face mask.")
             sys.exit(1)
-        distal_plane = crop_face_contact_plane(distal_crop_face_change, change)
+        distal_support_direction = (0.0, 0.0, 1.0)
         ogo.message(
-            "Distal Femur post-ICP flat support plane: center=%s normal=%s outward=%s size=%s"
-            % (
-                distal_plane["center"],
-                distal_plane["normal"],
-                distal_plane["outward_normal"],
-                distal_plane["size"],
-            )
+            "Distal Femur post-ICP straight support patch: fraction=%8.4f direction=%s"
+            % (POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION, distal_support_direction)
         )
-        distal_surface = projected_crop_face_surface_vtk(
+        distal_surface = straight_crop_face_support_surface_vtk(
+            distal_crop_face_change,
             change,
-            distal_plane,
-            intrusion=pmma_intrusion,
+            support_fraction=POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION,
             output_value=1,
         )
         df_visible_node_IDS = interface_node_ids_from_voxel_mask(
@@ -2779,10 +2823,10 @@ def sidewaysFallFe(args):
             distal_surface,
             change,
             name=DISTAL_FEMUR_NODE_SET,
-            direction=distal_plane["normal"],
+            direction=distal_support_direction,
         )
         if df_visible_node_IDS.GetNumberOfTuples() == 0:
-            ogo.message("No distal femur nodes found on the post-ICP flat shaft support surface.")
+            ogo.message("No distal femur nodes found on the post-ICP straight shaft support patch.")
             sys.exit(1)
     else:
         distal_cut_z = model2_bounds[4]
