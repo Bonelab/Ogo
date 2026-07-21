@@ -942,6 +942,10 @@ def crop_vtk_images_to_oblique_post_icp_ratio(
             "crop_stage": "after ICP using transformed rough-crop face angle",
             "plane_center": tuple(float(value) for value in shifted_center),
             "plane_normal": tuple(float(value) for value in normal),
+            "plane_u_axis": tuple(float(value) for value in plane["u_axis"]),
+            "plane_v_axis": tuple(float(value) for value in plane["v_axis"]),
+            "plane_size": tuple(float(value) for value in plane["size"]),
+            "plane_shape": plane.get("shape", "anatomy"),
             "source_plane_center": tuple(float(value) for value in plane["center"]),
             "source_plane_normal": tuple(float(value) for value in plane["normal"]),
         },
@@ -2982,10 +2986,18 @@ def sidewaysFallFe(args):
             ogo.message("No distal femur nodes found on the bbox-relative oblique shaft support surface.")
             sys.exit(1)
     elif femur_cut_mode == "post_icp_oblique_ratio":
-        if distal_crop_face_change is None:
-            ogo.message("post_icp_oblique_ratio cut mode requires a distal crop-face mask.")
+        if not shaft_crop or not shaft_crop.get("plane_center"):
+            ogo.message("post_icp_oblique_ratio cut mode requires stored oblique crop-plane metadata.")
             sys.exit(1)
-        distal_plane = crop_face_contact_plane(distal_crop_face_change, change)
+        distal_plane = {
+            "center": shaft_crop["plane_center"],
+            "normal": shaft_crop["plane_normal"],
+            "outward_normal": tuple(float(-value) for value in shaft_crop["plane_normal"]),
+            "u_axis": shaft_crop["plane_u_axis"],
+            "v_axis": shaft_crop["plane_v_axis"],
+            "size": shaft_crop["plane_size"],
+            "shape": shaft_crop.get("plane_shape", "anatomy"),
+        }
         ogo.message(
             "Distal Femur post-ICP oblique support plane: center=%s normal=%s outward=%s size=%s"
             % (

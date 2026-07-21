@@ -538,6 +538,10 @@ def test_post_icp_oblique_ratio_crop_uses_transformed_crop_face_angle():
     assert meta["target_length_mm"] == pytest.approx(72.0)
     assert meta["status"] == "cropped"
     assert meta["plane_normal"][2] > 0.8
+    assert meta["plane_u_axis"] is not None
+    assert meta["plane_v_axis"] is not None
+    assert meta["plane_size"][0] > 0
+    assert meta["plane_size"][1] > 0
     assert crop_face_coords[:, 2].max() > crop_face_coords[:, 2].min()
     assert cropped_mask.sum() > 0
     assert crop_face_mask.sum() > 0
