@@ -949,6 +949,35 @@ def crop_vtk_images_to_oblique_post_icp_ratio(
     return cropped_images, crop_face_image, meta
 
 
+def thicken_z_crop_face_into_mask(crop_face_vtk, mask_vtk, *, thickness_voxels=3):
+    """Return a thin mask-constrained z slab so a crop face survives resampling."""
+    import numpy as np
+    import vtk
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    face = vtk_image_to_numpy(crop_face_vtk) != 0
+    active = vtk_image_to_numpy(mask_vtk) != 0
+    out = np.zeros(face.shape, dtype=np.uint8)
+    coords = np.argwhere(face)
+    if coords.size == 0:
+        return _vtk_image_from_array(
+            out,
+            crop_face_vtk,
+            origin=crop_face_vtk.GetOrigin(),
+            vtk_array_type=vtk.VTK_UNSIGNED_CHAR,
+        )
+    z0 = int(coords[:, 2].min())
+    z1 = min(active.shape[2], z0 + max(1, int(thickness_voxels)))
+    out[:, :, z0:z1] = active[:, :, z0:z1].astype(np.uint8)
+    return _vtk_image_from_array(
+        out,
+        crop_face_vtk,
+        origin=crop_face_vtk.GetOrigin(),
+        vtk_array_type=vtk.VTK_UNSIGNED_CHAR,
+    )
+
+
 def _active_crop_mask(mask_data, labels):
     import numpy as np
 
@@ -2284,7 +2313,11 @@ def sidewaysFallFe(args):
             labels={1},
         )
         if femur_cut_mode == "post_icp_oblique_ratio":
-            distal_crop_face = rough_crop_face
+            distal_crop_face = thicken_z_crop_face_into_mask(
+                rough_crop_face,
+                cropped_images[1],
+                thickness_voxels=3,
+            )
         imageData = cropped_images[0]
         maskThres = cropped_images[1]
         if compartmentData is not None:

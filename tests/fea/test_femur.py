@@ -597,6 +597,28 @@ def test_post_icp_oblique_ratio_allows_resampled_face_offset_from_mask():
     assert vtk_image_to_numpy(crop_face).sum() > 0
 
 
+def test_thicken_z_crop_face_into_mask_returns_mask_constrained_slab():
+    np = pytest.importorskip("numpy")
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    mask = np.zeros((8, 8, 8), dtype=np.uint8)
+    mask[2:6, 2:6, 1:7] = 1
+    face = np.zeros_like(mask)
+    face[2:6, 2:6, 1] = 1
+
+    slab = femur.thicken_z_crop_face_into_mask(
+        _vtk_image_from_array(face),
+        _vtk_image_from_array(mask),
+        thickness_voxels=3,
+    )
+    slab_data = vtk_image_to_numpy(slab) != 0
+
+    assert slab_data.sum() == 4 * 4 * 3
+    assert np.all(slab_data[2:6, 2:6, 1:4])
+    assert not np.any(slab_data[:, :, 0])
+    assert not np.any(slab_data[:, :, 4:])
+
+
 def test_crop_face_support_vector_points_away_from_retained_bone():
     np = pytest.importorskip("numpy")
 
