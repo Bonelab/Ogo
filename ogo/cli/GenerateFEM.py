@@ -31,6 +31,7 @@ from ogo.fea.femur import (
     DEFAULT_FEMUR_BBOX_CROP_FROM,
     DEFAULT_FEMUR_BBOX_RATIO,
     DEFAULT_FEMUR_CUT_MODE,
+    DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM,
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
     DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
     DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
@@ -190,6 +191,9 @@ def option_value(argv: Sequence[str], option: str, default: Optional[str] = None
     """Return the final value for an option from an argv-style list."""
     value = default
     for index, token in enumerate(argv):
+        prefix = option + "="
+        if token.startswith(prefix):
+            value = token[len(prefix) :]
         if token == option and index + 1 < len(argv):
             value = argv[index + 1]
     return value
@@ -336,7 +340,7 @@ def solve_model(
         critical_volume=args.critical_volume,
         critical_strain=args.critical_strain,
         exclude=args.exclude,
-        run_pistoia=False,
+        run_pistoia=args.run_pistoia or args.require_pistoia,
         applied_displacement=applied_displacement,
         target_displacement=profile["target_displacement_percent"],
         report_profile=profile["report_profile"],
@@ -395,7 +399,7 @@ def write_modeling_metadata(
             "solve_requested": not args.no_solve,
             "target_displacement_percent": target_displacement_percent(args, model_type),
             "target_displacement_definition": "percent strain converted from model geometry for spine; percent of femur length for femur",
-            "run_pistoia": False,
+            "run_pistoia": args.run_pistoia or args.require_pistoia,
             "compress_solved_model": not args.no_compress,
         },
     }
@@ -655,12 +659,22 @@ def write_modeling_metadata(
                     if femur_cut_mode == "post_icp_oblique_ratio"
                     else "fixed rough crop before ICP, final flat ratio crop after ICP"
                     if femur_cut_mode == "post_icp_flat_ratio"
+                    else "fixed rough crop before ICP for registration, final GT-relative flat crop after ICP on the full scan"
+                    if femur_cut_mode == "greater_trochanter_length"
                     else "after ICP on the generated model grid"
                 ),
                 "fixed_length_mm": option_float(generator_argv, "--femur_shaft_length", 120.0),
                 "rough_pre_icp_crop": {
-                    "enabled": femur_cut_mode in {"post_icp_flat_ratio", "post_icp_oblique_ratio"},
+                    "enabled": femur_cut_mode in {"post_icp_flat_ratio", "post_icp_oblique_ratio", "greater_trochanter_length"},
                     "retained_length_mm": option_float(generator_argv, "--femur_shaft_length", 120.0),
+                    "registration_only": femur_cut_mode == "greater_trochanter_length",
+                },
+                "greater_trochanter_length": {
+                    "retained_length_mm": option_float(
+                        generator_argv,
+                        "--femur_greater_trochanter_distal_length",
+                        DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM,
+                    ),
                 },
                 "lesser_trochanter_distal_offset_mm": option_float(
                     generator_argv,
@@ -689,6 +703,8 @@ def write_modeling_metadata(
                     if femur_cut_mode == "post_icp_oblique_ratio"
                     else "flat post-ICP aligned-frame crop face"
                     if femur_cut_mode == "post_icp_flat_ratio"
+                    else "flat post-ICP aligned-frame crop face at fixed distance below detected greater trochanter"
+                    if femur_cut_mode == "greater_trochanter_length"
                     else "flat model-grid z plane"
                 ),
                 "incomplete_fov_behavior": "fail model generation",
@@ -769,14 +785,14 @@ def write_modeling_metadata(
                             else "projected patch on the post-ICP oblique distal shaft crop face"
                             if femur_cut_mode == "post_icp_oblique_ratio"
                             else "central 90% straight patch on the post-ICP flat distal shaft crop face"
-                            if femur_cut_mode == "post_icp_flat_ratio"
+                            if femur_cut_mode in {"post_icp_flat_ratio", "greater_trochanter_length"}
                             else "flat distal shaft cut face"
                         ),
                         "relative_to": (
                             "transformed_rough_crop_face"
                             if femur_cut_mode == "post_icp_oblique_ratio"
                             else "model_grid"
-                            if femur_cut_mode == "post_icp_flat_ratio"
+                            if femur_cut_mode in {"post_icp_flat_ratio", "greater_trochanter_length"}
                             else "model_bbox"
                             if femur_cut_mode == "bbox_ratio"
                             else None
@@ -793,7 +809,7 @@ def write_modeling_metadata(
                         ),
                         "support_fraction": (
                             POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION
-                            if femur_cut_mode == "post_icp_flat_ratio"
+                            if femur_cut_mode in {"post_icp_flat_ratio", "greater_trochanter_length"}
                             else None
                         ),
                         "normal_source": (
@@ -802,7 +818,7 @@ def write_modeling_metadata(
                             else "transformed rough pre-ICP crop face shifted to final ratio target"
                             if femur_cut_mode == "post_icp_oblique_ratio"
                             else "model-grid distal z direction"
-                            if femur_cut_mode == "post_icp_flat_ratio"
+                            if femur_cut_mode in {"post_icp_flat_ratio", "greater_trochanter_length"}
                             else "model-grid distal z face"
                         ),
                     },
@@ -959,6 +975,11 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
         "--require_pistoia",
         action="store_true",
         help="Fail if Pistoia postprocessing fails.",
+    )
+    parser.add_argument(
+        "--run_pistoia",
+        action="store_true",
+        help="Run Pistoia postprocessing and include Pistoia metrics when available.",
     )
     parser.add_argument(
         "--no_compress",

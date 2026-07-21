@@ -301,6 +301,8 @@ def _metadata_args(tmp_path, no_solve=True):
             "critical_volume": 2.0,
             "critical_strain": 0.007,
             "no_compress": False,
+            "run_pistoia": False,
+            "require_pistoia": False,
         },
     )()
 
@@ -324,6 +326,7 @@ def _solve_args(**overrides):
         "critical_strain": 0.007,
         "exclude": 5000,
         "no_compress": False,
+        "run_pistoia": False,
         "require_pistoia": False,
         "dry_run": False,
         "target_displacement": None,
@@ -388,6 +391,58 @@ def test_solve_model_sets_femur_displacement_from_percent(monkeypatch, tmp_path)
     assert calls[0]["report_profile"] == "femur"
     assert calls[0]["target_displacement"] == 4.0
     assert calls[0]["solve_displacement_percent"] == 4.0
+
+
+def test_solve_model_can_enable_pistoia(monkeypatch, tmp_path):
+    import ogo.util.faim as faim_module
+
+    calls = []
+    monkeypatch.setattr(faim_module, "run_faim_pipeline", lambda **kwargs: calls.append(kwargs))
+
+    GenerateFEM.solve_model(
+        tmp_path / "density_LT_FEMUR_SF.n88model",
+        _solve_args(run_pistoia=True),
+        "hip",
+        ["density.nii.gz", "mask.nii.gz", "--fe_displacement", "-4.0"],
+    )
+
+    assert calls[0]["run_pistoia"] is True
+    assert calls[0]["require_pistoia"] is False
+
+
+def test_require_pistoia_implies_pistoia_run(monkeypatch, tmp_path):
+    import ogo.util.faim as faim_module
+
+    calls = []
+    monkeypatch.setattr(faim_module, "run_faim_pipeline", lambda **kwargs: calls.append(kwargs))
+
+    GenerateFEM.solve_model(
+        tmp_path / "density_LT_FEMUR_SF.n88model",
+        _solve_args(require_pistoia=True),
+        "hip",
+        ["density.nii.gz", "mask.nii.gz", "--fe_displacement", "-4.0"],
+    )
+
+    assert calls[0]["run_pistoia"] is True
+    assert calls[0]["require_pistoia"] is True
+
+
+def test_option_value_accepts_equals_form():
+    assert (
+        GenerateFEM.option_value(
+            ["--femur_cut_mode=greater_trochanter_length"],
+            "--femur_cut_mode",
+        )
+        == "greater_trochanter_length"
+    )
+    assert (
+        GenerateFEM.option_float(
+            ["--femur_greater_trochanter_distal_length=175"],
+            "--femur_greater_trochanter_distal_length",
+            120.0,
+        )
+        == 175.0
+    )
 
 
 def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
@@ -471,3 +526,41 @@ def test_femur_modeling_metadata_records_materials_shaft_and_bcs(tmp_path):
     assert data["boundary_conditions"]["constraints"][0]["target_displacement_percent"] == 4.0
     assert data["boundary_conditions"]["constraints"][0]["value_source"].startswith("target_displacement_percent")
     assert data["solve_and_reporting"]["target_displacement_percent"] == 4.0
+
+
+def test_femur_modeling_metadata_records_gt_length_study_mode(tmp_path):
+    model = tmp_path / "density_LT_FEMUR_SF.n88model"
+    model.write_text("dummy")
+    argv = [
+        "density.nii.gz",
+        "mask.nii.gz",
+        "--femur_side",
+        "1",
+        "--femur_cut_mode=greater_trochanter_length",
+        "--femur_greater_trochanter_distal_length=175",
+        "--femur_shaft_length=120",
+    ]
+
+    path = GenerateFEM.write_modeling_metadata(
+        model,
+        "hip",
+        argv,
+        _metadata_args(tmp_path, no_solve=False),
+    )
+    data = json.loads(path.read_text())
+
+    shaft = data["shaft_standardization"]
+    assert shaft["cut_mode"] == "greater_trochanter_length"
+    assert shaft["crop_stage"] == (
+        "fixed rough crop before ICP for registration, final GT-relative flat crop after ICP on the full scan"
+    )
+    assert shaft["rough_pre_icp_crop"] == {
+        "enabled": True,
+        "retained_length_mm": 120.0,
+        "registration_only": True,
+    }
+    assert shaft["greater_trochanter_length"]["retained_length_mm"] == 175.0
+    assert shaft["cut_plane"] == (
+        "flat post-ICP aligned-frame crop face at fixed distance below detected greater trochanter"
+    )
+    assert data["boundary_conditions"]["fixture_geometry"]["distal_shaft"]["support_fraction"] == 0.9
