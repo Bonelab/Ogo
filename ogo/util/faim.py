@@ -509,6 +509,10 @@ def write_results_csv(
     analysis_var,
     pistoia_vars,
     failure_axis,
+    masked_pistoia_file=None,
+    masked_pistoia_csv=None,
+    pistoia_mask_file=None,
+    masked_pistoia_stats=None,
     applied_displacement=None,
     target_displacement=0.2,
     report_profile="generic",
@@ -516,8 +520,11 @@ def write_results_csv(
 ):
     """Write a compact, user-facing CSV with loads and stiffness."""
     pistoia_meta = parse_pistoia_text(pistoia_file)
+    masked_pistoia_meta = parse_pistoia_text(masked_pistoia_file)
     loads = _read_single_row_csv(loads_csv)
     pistoia = _read_single_row_csv(pistoia_csv)
+    masked_pistoia = _read_single_row_csv(masked_pistoia_csv)
+    masked_pistoia_stats = masked_pistoia_stats or {}
 
     pistoia_vars = list(pistoia_vars or [])
     failure_var = pistoia_vars[0] if pistoia_vars else ""
@@ -534,6 +541,12 @@ def write_results_csv(
     )
     pistoia_failure_load_magnitude = (
         abs(float(pistoia_failure_load)) if pistoia_failure_load != "" else ""
+    )
+    masked_pistoia_failure_load = _safe_float(
+        masked_pistoia.get(failure_var) or masked_pistoia_meta.get(failure_key)
+    )
+    masked_pistoia_stiffness = _safe_float(
+        masked_pistoia.get(stiffness_var) or masked_pistoia_meta.get(stiffness_key)
     )
 
     # If the linear model was solved at a different prescribed displacement,
@@ -585,6 +598,21 @@ def write_results_csv(
         "critical_ees": pistoia_meta.get("critical_ees", ""),
         "ees_at_crit_vol": pistoia_meta.get("ees_at_crit_vol", ""),
     }
+    masked_pistoia_common = {}
+    if pistoia_mask_file is not None:
+        masked_pistoia_common = {
+            "masked_pistoia_file": str(masked_pistoia_file),
+            "masked_pistoia_mask_file": str(pistoia_mask_file),
+            "masked_pistoia_failure_load_N": masked_pistoia_failure_load,
+            "masked_pistoia_stiffness_N_per_mm": masked_pistoia_stiffness,
+            "masked_pistoia_critical_volume_pct": masked_pistoia_meta.get("critical_volume_pct", ""),
+            "masked_pistoia_critical_ees": masked_pistoia_meta.get("critical_ees", ""),
+            "masked_pistoia_ees_at_crit_vol": masked_pistoia_meta.get("ees_at_crit_vol", ""),
+            "masked_pistoia_selected_elements": masked_pistoia_stats.get("selected_elements", ""),
+            "masked_pistoia_original_included_elements": masked_pistoia_stats.get(
+                "original_included_elements", ""
+            ),
+        }
     if profile == "femur":
         row = {
             "model_file": common["model_file"],
@@ -595,6 +623,7 @@ def write_results_csv(
             "stiffness_N_per_mm": common["stiffness_N_per_mm"],
             "characteristic_length_mm": characteristic_length,
             **pistoia_common,
+            **masked_pistoia_common,
         }
     elif profile == "spine":
         row = {
@@ -606,6 +635,7 @@ def write_results_csv(
             "stiffness_N_per_mm": common["stiffness_N_per_mm"],
             "characteristic_length_mm": characteristic_length,
             **pistoia_common,
+            **masked_pistoia_common,
         }
     else:
         row = {
@@ -623,6 +653,7 @@ def write_results_csv(
             "critical_volume_pct": pistoia_meta.get("critical_volume_pct", ""),
             "critical_ees": pistoia_meta.get("critical_ees", ""),
             "ees_at_crit_vol": pistoia_meta.get("ees_at_crit_vol", ""),
+            **masked_pistoia_common,
             "warnings": " | ".join(warnings or []),
         }
 
@@ -659,6 +690,7 @@ def run_faim_pipeline(
     critical_strain=0.007,
     exclude=5000,
     run_pistoia=True,
+    pistoia_mask_file=None,
     applied_displacement=None,
     target_displacement=0.2,
     report_profile="generic",
@@ -671,6 +703,8 @@ def run_faim_pipeline(
     model_file = Path(model_file)
     output_prefix = Path(output_prefix) if output_prefix is not None else model_file.with_suffix("")
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
+    pistoia_mask_file = Path(pistoia_mask_file) if pistoia_mask_file is not None else None
+    run_pistoia = run_pistoia or pistoia_mask_file is not None
 
     resolved_bin_dir = resolve_faim_bin_dir(install_root=install_root, bin_dir=bin_dir)
     env = build_faim_env(bin_dir=resolved_bin_dir, license_dir=license_dir)
@@ -719,12 +753,15 @@ def run_faim_pipeline(
 
     analysis_file = output_prefix.with_name(output_prefix.name + "_analysis.txt")
     pistoia_file = output_prefix.with_name(output_prefix.name + "_pistoia.txt")
+    masked_pistoia_file = output_prefix.with_name(output_prefix.name + "_masked_pistoia.txt")
     loads_csv = output_prefix.with_name(output_prefix.name + "_loads.csv")
     pistoia_csv = output_prefix.with_name(output_prefix.name + "_pistoia.csv")
+    masked_pistoia_csv = output_prefix.with_name(output_prefix.name + "_masked_pistoia.csv")
     results_csv = output_prefix.with_name(output_prefix.name + "_results.csv")
     log_file = output_prefix.with_name(output_prefix.name + ".log")
 
     warnings = []
+    masked_pistoia_stats = None
     # Check whether the model already contains a solution so re-runs are cheap.
     modelinfo_text = run_command(
         [modelinfo, "--solutions", str(model_file)],
@@ -817,6 +854,25 @@ def run_faim_pipeline(
             if require_pistoia:
                 raise
             warnings.append("Pistoia postprocessing failed.")
+        if pistoia_mask_file is not None:
+            try:
+                masked_pistoia_stats = run_pistoia_with_image_mask(
+                    model_file=model_file,
+                    mask_file=pistoia_mask_file,
+                    output_file=masked_pistoia_file,
+                    n88pistoia_command=pistoia,
+                    critical_volume=critical_volume,
+                    critical_strain=critical_strain,
+                    exclude_material_id=exclude,
+                    conda_env=conda_env,
+                    conda_executable=conda_executable,
+                    env=env,
+                    dry_run=dry_run,
+                )
+            except subprocess.CalledProcessError:
+                if require_pistoia:
+                    raise
+                warnings.append("Masked Pistoia postprocessing failed.")
 
     # Tabulate the reaction force and Pistoia values into small CSV files.
     run_command(
@@ -845,6 +901,24 @@ def run_faim_pipeline(
             env=env,
             dry_run=dry_run,
         )
+        if pistoia_mask_file is not None:
+            run_command(
+                [
+                    tabulate,
+                    "-H",
+                    "-d",
+                    ",",
+                    "-V",
+                    ",".join(str(v) for v in pistoia_vars),
+                    str(masked_pistoia_file),
+                    "-o",
+                    str(masked_pistoia_csv),
+                ],
+                conda_env=conda_env,
+                conda_executable=conda_executable,
+                env=env,
+                dry_run=dry_run,
+            )
 
     if compress:
         run_command(
@@ -876,6 +950,10 @@ def run_faim_pipeline(
             analysis_var=analysis_var,
             pistoia_vars=pistoia_vars,
             failure_axis=failure_axis,
+            masked_pistoia_file=masked_pistoia_file if pistoia_mask_file is not None else None,
+            masked_pistoia_csv=masked_pistoia_csv if pistoia_mask_file is not None else None,
+            pistoia_mask_file=pistoia_mask_file,
+            masked_pistoia_stats=masked_pistoia_stats,
             applied_displacement=applied_displacement,
             target_displacement=target_displacement,
             report_profile=report_profile,

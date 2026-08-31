@@ -211,6 +211,60 @@ def test_write_results_csv_collects_pistoia_and_loads(tmp_path):
     assert row["rescale_factor_to_target"] == "0.2"
 
 
+def test_write_results_csv_includes_masked_pistoia_fields(tmp_path):
+    analysis_file = tmp_path / "model_analysis.txt"
+    pistoia_file = tmp_path / "model_pistoia.txt"
+    masked_pistoia_file = tmp_path / "model_masked_pistoia.txt"
+    loads_csv = tmp_path / "model_loads.csv"
+    pistoia_csv = tmp_path / "model_pistoia.csv"
+    masked_pistoia_csv = tmp_path / "model_masked_pistoia.csv"
+    results_csv = tmp_path / "model_results.csv"
+
+    analysis_file.write_text("analysis", encoding="utf-8")
+    pistoia_file.write_text("Critical volume (%): 7.000\n", encoding="utf-8")
+    masked_pistoia_file.write_text(
+        "\n".join(
+            [
+                "Critical volume (%): 7.000",
+                "Critical EES: 9.0000E-03",
+                "EES at vol_crit: 4.0000E-03",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    loads_csv.write_text("fy_ns1\n100.0\n", encoding="utf-8")
+    pistoia_csv.write_text("pis_fy_fail,pis_stiffy\n5000.0,2000.0\n", encoding="utf-8")
+    masked_pistoia_csv.write_text("pis_fy_fail,pis_stiffy\n2500.0,1800.0\n", encoding="utf-8")
+
+    faim.write_results_csv(
+        output_file=results_csv,
+        model_file=tmp_path / "model.n88model",
+        analysis_file=analysis_file,
+        pistoia_file=pistoia_file,
+        loads_csv=loads_csv,
+        pistoia_csv=pistoia_csv,
+        analysis_var="fy_ns1",
+        pistoia_vars=["pis_fy_fail", "pis_stiffy"],
+        failure_axis="y",
+        masked_pistoia_file=masked_pistoia_file,
+        masked_pistoia_csv=masked_pistoia_csv,
+        pistoia_mask_file=tmp_path / "model_pistoia_mask.nii.gz",
+        masked_pistoia_stats={"selected_elements": 12, "original_included_elements": 40},
+    )
+
+    with results_csv.open(newline="") as handle:
+        row = next(csv.DictReader(handle))
+
+    assert row["pistoia_failure_load_N"] == "5000.0"
+    assert row["masked_pistoia_failure_load_N"] == "2500.0"
+    assert row["masked_pistoia_stiffness_N_per_mm"] == "1800.0"
+    assert row["masked_pistoia_critical_volume_pct"] == "7.0"
+    assert row["masked_pistoia_critical_ees"] == "0.009"
+    assert row["masked_pistoia_ees_at_crit_vol"] == "0.004"
+    assert row["masked_pistoia_selected_elements"] == "12"
+    assert row["masked_pistoia_original_included_elements"] == "40"
+
+
 def test_write_results_csv_reports_generic_target_without_0p68_alias(tmp_path):
     analysis_file = tmp_path / "model_analysis.txt"
     pistoia_file = tmp_path / "model_pistoia.txt"
@@ -646,3 +700,25 @@ def test_run_faim_pipeline_can_skip_pistoia(tmp_path, capsys):
     assert "n88pistoia" not in out
     assert "pis_fy_fail,pis_stiffy" not in out
     assert "n88tabulate -H -d , -V fy_ns1" in out
+
+
+def test_run_faim_pipeline_runs_masked_pistoia_when_mask_supplied(tmp_path, capsys):
+    model = tmp_path / "model.n88model"
+    mask = tmp_path / "model_pistoia_mask.nii.gz"
+    model.write_text("", encoding="utf-8")
+    mask.write_text("", encoding="utf-8")
+
+    faim.run_faim_pipeline(
+        model_file=model,
+        analysis_var="fy_ns1",
+        pistoia_vars=["pis_fy_fail", "pis_stiffy"],
+        failure_axis="y",
+        pistoia_mask_file=mask,
+        dry_run=True,
+        compress=False,
+    )
+
+    out = capsys.readouterr().out
+    assert "model_pistoia.txt" in out
+    assert "model_masked_pistoia.txt" in out
+    assert "model_masked_pistoia.csv" in out

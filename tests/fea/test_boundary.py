@@ -13,6 +13,7 @@ from ogo.fea.boundary import (  # noqa: E402
     fit_vtk_images_to_physical_bounds,
     pad_vtk_images_to_physical_bounds,
     projected_material_disk_required_bounds,
+    projected_stable_surface_contact,
     smooth_label_mask_vtk,
 )
 
@@ -481,6 +482,61 @@ def test_projected_material_disk_uses_fixed_thickness_and_anatomy_intrusion():
     assert np.flatnonzero(disk[7, :, 7]).tolist() == [3, 4, 5, 6, 7]
     assert not np.any(disk[8, :, 7])
     assert not np.any(disk & active)
+
+
+def test_projected_material_disk_closes_short_3d_gaps_after_extrusion():
+    active = np.zeros((14, 14, 14), dtype=bool)
+    active[4:10, 5:9, 4:10] = True
+    active[7, :, 7] = False
+
+    disk = generate_projected_material_disk_mask(
+        active,
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        center=(7, 0, 7),
+        normal=(0, 1, 0),
+        u_axis=(1, 0, 0),
+        v_axis=(0, 0, 1),
+        size=(10, 10),
+        shape="square",
+        thickness=6,
+        intrusion=2,
+        anatomy_constrained=True,
+        stable_surface=True,
+        stable_surface_max_depth=8,
+        close_gaps_3d=True,
+        close_gaps_3d_max_gap=2,
+    )
+
+    assert np.flatnonzero(disk[7, :, 7]).tolist() == [1, 2, 3, 4]
+    assert not np.any(disk & active)
+
+
+def test_projected_stable_surface_contact_ignores_small_osteophyte():
+    active = np.zeros((14, 14, 14), dtype=bool)
+    active[4:10, 5:9, 4:10] = True
+    active[7, 2:5, 7] = True
+
+    contact = projected_stable_surface_contact(
+        active,
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        center=(7, 0, 7),
+        normal=(0, 1, 0),
+        u_axis=(1, 0, 0),
+        v_axis=(0, 0, 1),
+        size=(10, 10),
+        shape="square",
+        stable_surface_fraction=0.55,
+        stable_surface_min_area_fraction=0.12,
+        stable_surface_max_depth=8,
+    )
+
+    assert contact["first_distance"] == pytest.approx(2.0)
+    assert contact["stable_distance"] == pytest.approx(5.0)
+    assert contact["stable_depth"] == pytest.approx(3.0)
+    assert contact["first_area"] == 1
+    assert contact["stable_area"] >= 30
 
 
 def test_projected_material_disk_vtk_preserves_geometry_and_output_value():

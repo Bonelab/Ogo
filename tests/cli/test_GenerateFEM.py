@@ -283,27 +283,79 @@ def test_spine_explicit_options_follow_preset_for_overrides(monkeypatch, solve_c
     assert calls[0].count("--fe_displacement") == 2
 
 
-def _metadata_args(tmp_path, no_solve=True):
+def test_spine_forwards_pistoia_mask_to_builder(monkeypatch, tmp_path, solve_calls):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(GenerateFEM, "run_spine_command", lambda argv: calls.append(list(argv)))
+
+    GenerateFEM.main(
+        [
+            "spine",
+            "density.nii.gz",
+            "spine_mask.nii.gz",
+            "--output_path",
+            "models",
+            "--vertebra",
+            "L1:2:1",
+            "--pistoia_mask",
+            "vertebral_body_roi.nii.gz",
+            "--no-solve",
+        ]
+    )
+
+    assert "--pistoia_mask" in calls[0]
+    assert calls[0][calls[0].index("--pistoia_mask") + 1] == "vertebral_body_roi.nii.gz"
+
+
+def test_hip_forwards_pistoia_mask_to_builder(monkeypatch, tmp_path, solve_calls):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(GenerateFEM, "run_femur_command", lambda argv: calls.append(list(argv)))
+
+    GenerateFEM.main(
+        [
+            "hip",
+            "density.nii.gz",
+            "left_femur.nii.gz",
+            "--output_path",
+            "models",
+            "--side",
+            "left",
+            "--pistoia_mask",
+            "femoral_neck.nii.gz",
+            "--no-solve",
+        ]
+    )
+
+    assert "--pistoia_mask" in calls[0]
+    assert calls[0][calls[0].index("--pistoia_mask") + 1] == "femoral_neck.nii.gz"
+
+
+def _metadata_args(tmp_path, no_solve=True, **overrides):
+    data = {
+        "dry_run": False,
+        "calibrated_image": tmp_path / "density.nii.gz",
+        "bone_mask": tmp_path / "mask.nii.gz",
+        "output_path": tmp_path,
+        "skip_bc_audit": False,
+        "bc_audit_flat_tolerance": 1.0e-4,
+        "debug": False,
+        "no_solve": no_solve,
+        "target_displacement": None,
+        "exclude": 5000,
+        "critical_volume": None,
+        "critical_strain": None,
+        "no_compress": False,
+        "run_pistoia": False,
+        "require_pistoia": False,
+        "use_absolute_fe_displacement": False,
+        "pistoia_mask": None,
+    }
+    data.update(overrides)
     return type(
         "Args",
         (),
-        {
-            "dry_run": False,
-            "calibrated_image": tmp_path / "density.nii.gz",
-            "bone_mask": tmp_path / "mask.nii.gz",
-            "output_path": tmp_path,
-            "skip_bc_audit": False,
-            "bc_audit_flat_tolerance": 1.0e-4,
-            "debug": False,
-            "no_solve": no_solve,
-            "target_displacement": None,
-            "exclude": 5000,
-            "critical_volume": 2.0,
-            "critical_strain": 0.007,
-            "no_compress": False,
-            "run_pistoia": False,
-            "require_pistoia": False,
-        },
+        data,
     )()
 
 
@@ -322,14 +374,16 @@ def _solve_args(**overrides):
         "n88pistoia_command": None,
         "n88tabulate_command": None,
         "n88copymodel_command": None,
-        "critical_volume": 2.0,
-        "critical_strain": 0.007,
+        "critical_volume": None,
+        "critical_strain": None,
         "exclude": 5000,
         "no_compress": False,
         "run_pistoia": False,
         "require_pistoia": False,
         "dry_run": False,
         "target_displacement": None,
+        "use_absolute_fe_displacement": False,
+        "pistoia_mask": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -391,6 +445,44 @@ def test_solve_model_sets_femur_displacement_from_percent(monkeypatch, tmp_path)
     assert calls[0]["report_profile"] == "femur"
     assert calls[0]["target_displacement"] == 4.0
     assert calls[0]["solve_displacement_percent"] == 4.0
+    assert calls[0]["critical_volume"] == 7.0
+    assert calls[0]["critical_strain"] == 0.009
+
+
+def test_solve_model_can_keep_absolute_femur_displacement(monkeypatch, tmp_path):
+    import ogo.util.faim as faim_module
+
+    calls = []
+    monkeypatch.setattr(faim_module, "run_faim_pipeline", lambda **kwargs: calls.append(kwargs))
+
+    GenerateFEM.solve_model(
+        tmp_path / "density_LT_FEMUR_SF.n88model",
+        _solve_args(use_absolute_fe_displacement=True),
+        "hip",
+        ["density.nii.gz", "mask.nii.gz", "--fe_displacement", "-2.56"],
+    )
+
+    assert calls[0]["report_profile"] == "femur"
+    assert calls[0]["applied_displacement"] == "-2.56"
+    assert calls[0]["target_displacement"] == 2.56
+    assert calls[0]["solve_displacement_percent"] is None
+
+
+def test_solve_model_keeps_explicit_pistoia_criteria(monkeypatch, tmp_path):
+    import ogo.util.faim as faim_module
+
+    calls = []
+    monkeypatch.setattr(faim_module, "run_faim_pipeline", lambda **kwargs: calls.append(kwargs))
+
+    GenerateFEM.solve_model(
+        tmp_path / "density_LT_FEMUR_SF.n88model",
+        _solve_args(critical_volume=2.0, critical_strain=0.007),
+        "hip",
+        ["density.nii.gz", "mask.nii.gz", "--fe_displacement", "-4.0"],
+    )
+
+    assert calls[0]["critical_volume"] == 2.0
+    assert calls[0]["critical_strain"] == 0.007
 
 
 def test_solve_model_can_enable_pistoia(monkeypatch, tmp_path):
@@ -427,6 +519,26 @@ def test_require_pistoia_implies_pistoia_run(monkeypatch, tmp_path):
     assert calls[0]["require_pistoia"] is True
 
 
+def test_pistoia_mask_implies_pistoia_and_sidecar_handoff(monkeypatch, tmp_path):
+    import ogo.util.faim as faim_module
+
+    model = tmp_path / "density_LF.n88model"
+    mask = tmp_path / "density_LF_pistoia_mask.nii.gz"
+    mask.write_text("mask", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(faim_module, "run_faim_pipeline", lambda **kwargs: calls.append(kwargs))
+
+    GenerateFEM.solve_model(
+        model,
+        _solve_args(pistoia_mask=Path("source_femoral_neck.nii.gz")),
+        "hip",
+        ["density.nii.gz", "left_femur.nii.gz", "--fe_displacement", "-4.0"],
+    )
+
+    assert calls[0]["run_pistoia"] is True
+    assert calls[0]["pistoia_mask_file"] == mask
+
+
 def test_option_value_accepts_equals_form():
     assert (
         GenerateFEM.option_value(
@@ -442,6 +554,14 @@ def test_option_value_accepts_equals_form():
             120.0,
         )
         == 175.0
+    )
+    assert (
+        GenerateFEM.option_float(
+            ["--femur_greater_trochanter_inclusion_length=50"],
+            "--femur_greater_trochanter_inclusion_length",
+            0.0,
+        )
+        == 50.0
     )
 
 
@@ -552,7 +672,7 @@ def test_femur_modeling_metadata_records_gt_length_study_mode(tmp_path):
     shaft = data["shaft_standardization"]
     assert shaft["cut_mode"] == "greater_trochanter_length"
     assert shaft["crop_stage"] == (
-        "fixed rough crop before ICP for registration, final GT-relative flat crop after ICP on the full scan"
+        "fixed rough crop before ICP for registration, final GT-disk-relative flat crop after ICP on the full scan"
     )
     assert shaft["rough_pre_icp_crop"] == {
         "enabled": True,
@@ -560,7 +680,35 @@ def test_femur_modeling_metadata_records_gt_length_study_mode(tmp_path):
         "registration_only": True,
     }
     assert shaft["greater_trochanter_length"]["retained_length_mm"] == 175.0
+    assert shaft["greater_trochanter_length"]["gt_inclusion_length_mm"] == 0.0
+    assert shaft["greater_trochanter_length"]["length_origin"] == "detected greater-trochanter disk distal edge"
     assert shaft["cut_plane"] == (
-        "flat post-ICP aligned-frame crop face at fixed distance below detected greater trochanter"
+        "flat post-ICP aligned-frame crop face at fixed shaft length below detected GT-disk distal edge"
     )
     assert data["boundary_conditions"]["fixture_geometry"]["distal_shaft"]["support_fraction"] == 0.9
+
+
+def test_femur_modeling_metadata_records_absolute_displacement(tmp_path):
+    model = tmp_path / "density_LT_FEMUR_SF.n88model"
+    model.write_text("dummy")
+    argv = [
+        "density.nii.gz",
+        "mask.nii.gz",
+        "--femur_side",
+        "1",
+        "--fe_displacement",
+        "-2.56",
+    ]
+
+    path = GenerateFEM.write_modeling_metadata(
+        model,
+        "hip",
+        argv,
+        _metadata_args(tmp_path, use_absolute_fe_displacement=True),
+    )
+    data = json.loads(path.read_text())
+
+    constraint = data["boundary_conditions"]["constraints"][0]
+    assert constraint["value_mm"] == -2.56
+    assert constraint["target_displacement_percent"] is None
+    assert constraint["value_source"] == "explicit --fe_displacement used as absolute model displacement"

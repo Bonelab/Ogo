@@ -1,6 +1,7 @@
 import pytest
 
 from ogo.fea import femur
+from ogo.fea.image_io import write_vtk_image_with_sitk_geometry
 
 
 def _vtk_image_from_array(data, *, origin=(0, 0, 0), spacing=(1, 1, 1)):
@@ -39,6 +40,30 @@ def test_side_suffix_matches_compact_outputs():
 def test_sideways_fall_output_name_uses_compact_side_suffix():
     assert femur.sideways_fall_output_name("density.n88model", 1) == "density_LF.n88model"
     assert femur.sideways_fall_output_name("density.n88model", 2) == "density_RF.n88model"
+
+
+def test_pistoia_mask_output_path_uses_model_stem(tmp_path):
+    assert (
+        femur.pistoia_mask_output_path(tmp_path / "case_LF.n88model")
+        == tmp_path / "case_LF_pistoia_mask.nii.gz"
+    )
+
+
+def test_write_vtk_image_with_sitk_geometry_preserves_origin_and_spacing(tmp_path):
+    np = pytest.importorskip("numpy")
+    sitk = pytest.importorskip("SimpleITK")
+
+    image = _vtk_image_from_array(
+        np.ones((3, 4, 5), dtype=np.uint8),
+        origin=(-10.5, 20.25, 3.75),
+        spacing=(0.8, 0.9, 1.1),
+    )
+    out = write_vtk_image_with_sitk_geometry(image, tmp_path / "mask.nii.gz")
+    reread = sitk.ReadImage(str(out))
+
+    assert reread.GetSize() == (3, 4, 5)
+    assert reread.GetOrigin() == pytest.approx((-10.5, 20.25, 3.75))
+    assert reread.GetSpacing() == pytest.approx((0.8, 0.9, 1.1))
 
 
 def test_icp_transform_sidecar_round_trips_matrix(tmp_path):
@@ -213,6 +238,21 @@ def test_bbox_relative_fixture_plane_uses_authored_y_plane_axes():
     assert high_y_plane["normal"] == pytest.approx((0, -1, 0))
     assert high_y_plane["u_axis"] == pytest.approx((0, 0, 1))
     assert high_y_plane["v_axis"] == pytest.approx((-1, 0, 0))
+
+
+def test_proximal_sideways_fall_fixture_plane_does_not_reach_distal_shaft():
+    bounds = (-30, 30, -40, 80, -95, 120)
+
+    plane = femur.proximal_sideways_fall_fixture_plane(
+        bounds,
+        center_fraction=femur.FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
+    )
+
+    assert plane["footprint"] == "proximal_only"
+    assert plane["center"][2] == pytest.approx(80.0)
+    assert plane["size"] == pytest.approx((80.0, 70.0))
+    assert plane["center"][2] - plane["size"][0] / 2.0 == pytest.approx(40.0)
+    assert plane["center"][2] + plane["size"][0] / 2.0 == pytest.approx(120.0)
 
 
 def test_bbox_relative_oriented_contact_plane_keeps_measured_normal():
@@ -936,11 +976,13 @@ def test_lesser_trochanter_cut_uses_distal_area_peak():
     meta = femur.detect_lesser_trochanter_cut_z(image)
 
     assert meta["greater_trochanter_z"] == pytest.approx(76)
+    assert meta["greater_trochanter_disk_distal_z"] == pytest.approx(73)
+    assert meta["greater_trochanter_disk_proximal_z"] == pytest.approx(79)
     assert meta["lesser_trochanter_z"] == pytest.approx(61)
     assert meta["cut_z"] == pytest.approx(61)
 
 
-def test_greater_trochanter_length_crop_uses_detected_gt_level():
+def test_greater_trochanter_length_crop_uses_gt_disk_distal_origin():
     np = pytest.importorskip("numpy")
     vtk = pytest.importorskip("vtk")
     from ogo.util.vtk_image import vtk_image_to_numpy
@@ -969,17 +1011,21 @@ def test_greater_trochanter_length_crop_uses_detected_gt_level():
     cropped, crop_face, meta = femur.crop_vtk_images_to_greater_trochanter_length(
         [image],
         image,
-        retained_length_mm=30.0,
+        retained_length_mm=10.0,
         labels={1},
     )
 
     cropped_mask = vtk_image_to_numpy(cropped[0]) != 0
     assert meta["method"] == "greater_trochanter_length"
     assert meta["greater_trochanter_z"] == pytest.approx(76)
-    assert meta["cut_z_mm"] == pytest.approx(46)
+    assert meta["greater_trochanter_disk_distal_z"] == pytest.approx(73)
+    assert meta["gt_inclusion_length_mm"] == pytest.approx(0)
+    assert meta["distal_length_origin_z"] == pytest.approx(73)
+    assert meta["cut_z_mm"] == pytest.approx(63)
+    assert meta["available_below_gt_disk_mm"] == pytest.approx(63)
     assert meta["available_below_gt_mm"] == pytest.approx(66)
-    assert meta["retained_length_mm"] == pytest.approx(30)
-    assert cropped[0].GetOrigin()[2] == pytest.approx(46)
+    assert meta["retained_length_mm"] == pytest.approx(10)
+    assert cropped[0].GetOrigin()[2] == pytest.approx(63)
     assert np.argwhere(cropped_mask)[:, 2].min() == 0
     assert vtk_image_to_numpy(crop_face).sum() > 0
 
@@ -1050,6 +1096,8 @@ def test_lesser_trochanter_cut_uses_peak_plateau_center_and_percent_offset():
     )
 
     assert meta["greater_trochanter_z"] == pytest.approx(80)
+    assert meta["greater_trochanter_disk_distal_z"] == pytest.approx(78)
+    assert meta["greater_trochanter_disk_proximal_z"] == pytest.approx(82)
     assert meta["lesser_trochanter_z"] == pytest.approx(58)
     assert meta["distal_offset_mm"] == pytest.approx(11)
     assert meta["cut_z"] == pytest.approx(47)

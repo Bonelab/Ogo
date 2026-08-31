@@ -16,7 +16,8 @@ Default spine workflow:
    only when at least one input spacing dimension is coarser than 2 mm. Then
    generate fixed-thickness anatomy PMMA caps on the superior and inferior body
    surfaces. The maintained cap thickness is 10 mm and the intrusion depth is
-   6 mm.
+   6 mm; projected contact starts at the first stable body footprint so small
+   osteophytes do not define the support plane.
 6. Build materials with the same shared bone/PMMA material-table helper used by
    the femur workflow. The spine convention is trabecular material IDs 1..128
    and cortical IDs 129..256; PMMA is a separate material ID.
@@ -32,6 +33,15 @@ from pathlib import Path
 DEFAULT_SPINE_ISO_RESOLUTION_MM = 1.0
 DEFAULT_SPINE_PMMA_THICKNESS_MM = 10
 DEFAULT_SPINE_PMMA_INTRUSION_MM = 6
+DEFAULT_SPINE_STABLE_CONTACT_ENABLED = True
+DEFAULT_SPINE_STABLE_CONTACT_FRACTION = 0.55
+DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION = 0.12
+DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM = 24.0
+DEFAULT_SPINE_STABLE_CONTACT_INTRUSION_MM = 2
+DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D = True
+DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP = 2
+DEFAULT_SPINE_PROCESS_QC_MAX_AXIAL_TO_TRANSVERSE_RATIO = 0.75
+DEFAULT_SPINE_PROCESS_QC_AXIAL_TOLERANCE_MM = 2.0
 DEFAULT_SPINE_PMMA_MATERIAL_ID = 5000
 DEFAULT_SPINE_POISSONS_RATIO = 0.3
 DEFAULT_SPINE_PMMA_E_MPA = 2500
@@ -48,6 +58,7 @@ DEFAULT_SPINE_REGISTRATION_SCALE = None
 DEFAULT_SPINE_REGISTRATION_MIN_SCALE = "0.8,0.8,0.75"
 DEFAULT_SPINE_REGISTRATION_MAX_SCALE = "1.2,1.2,1.3"
 DEFAULT_SPINE_REGISTRATION_BACKEND = "vtk"
+DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC = True
 DEFAULT_SPINE_REFERENCE_FILENAME = "L4_BODY_SPINE_COMPRESSION_REF.vtk"
 SPINE_CONTACT_SIZE_FRACTION = (1.6, 1.6)
 SPINE_SUPERIOR_CONTACT_CENTER_FRACTION = (0.5, 0.5, 1.05)
@@ -86,6 +97,97 @@ def solve_report_profile(preset=None):
 def default_spine_reference_path():
     """Return the bundled reference body used for spine ICP alignment."""
     return Path(__file__).resolve().parents[1] / "dat" / DEFAULT_SPINE_REFERENCE_FILENAME
+
+
+def pistoia_mask_output_path(output_file):
+    """Return the model-space Pistoia ROI mask sidecar path for a model."""
+    output_path = Path(output_file)
+    return output_path.with_name(f"{output_path.stem}_pistoia_mask.nii.gz")
+
+
+def _mask_centroid_physical(vtk_image):
+    """Return the physical centroid of nonzero voxels in a VTK image."""
+    mask = vtk_to_numpy(vtk_image.GetPointData().GetScalars()).reshape(
+        vtk_image.GetDimensions(),
+        order="F",
+    ) > 0
+    coords = np.argwhere(mask)
+    if coords.size == 0:
+        raise ValueError("mask is empty")
+    origin = np.asarray(vtk_image.GetOrigin(), dtype=float)
+    spacing = np.asarray(vtk_image.GetSpacing(), dtype=float)
+    extent = vtk_image.GetExtent()
+    extent_start = np.asarray((extent[0], extent[2], extent[4]), dtype=float)
+    return origin + (coords.mean(axis=0) + extent_start) * spacing
+
+
+def check_spine_process_orientation(
+    body_vtk_image,
+    process_vtk_image,
+    *,
+    axial_axis="z",
+    max_axial_to_transverse_ratio=DEFAULT_SPINE_PROCESS_QC_MAX_AXIAL_TO_TRANSVERSE_RATIO,
+    axial_tolerance_mm=DEFAULT_SPINE_PROCESS_QC_AXIAL_TOLERANCE_MM,
+):
+    """Raise when the posterior process is oriented along the compression axis."""
+    axis_index = {"x": 0, "y": 1, "z": 2}[str(axial_axis).lower()]
+    body_centroid = _mask_centroid_physical(body_vtk_image)
+    process_centroid = _mask_centroid_physical(process_vtk_image)
+    offset = process_centroid - body_centroid
+    axial_offset = abs(float(offset[axis_index]))
+    transverse_offset = float(np.linalg.norm(np.delete(offset, axis_index)))
+    limit = max(float(axial_tolerance_mm), float(max_axial_to_transverse_ratio) * transverse_offset)
+    metrics = {
+        "status": "ok",
+        "body_centroid": body_centroid.tolist(),
+        "process_centroid": process_centroid.tolist(),
+        "offset_mm": offset.tolist(),
+        "axial_axis": str(axial_axis).lower(),
+        "axial_offset_mm": axial_offset,
+        "transverse_offset_mm": transverse_offset,
+        "max_axial_to_transverse_ratio": float(max_axial_to_transverse_ratio),
+        "axial_tolerance_mm": float(axial_tolerance_mm),
+    }
+    if axial_offset > limit:
+        metrics["status"] = "failed"
+        raise ValueError(
+            "posterior process orientation QC failed: "
+            f"axial_offset_mm={axial_offset:.3f}, "
+            f"transverse_offset_mm={transverse_offset:.3f}, "
+            f"axial_axis={str(axial_axis).lower()}"
+        )
+    return metrics
+
+
+def spine_process_orientation_metrics_for_rotation(
+    body_centroid,
+    process_centroid,
+    reference_to_sample_rotation,
+    *,
+    axial_axis="z",
+    max_axial_to_transverse_ratio=DEFAULT_SPINE_PROCESS_QC_MAX_AXIAL_TO_TRANSVERSE_RATIO,
+    axial_tolerance_mm=DEFAULT_SPINE_PROCESS_QC_AXIAL_TOLERANCE_MM,
+):
+    """Return process-orientation QC metrics for a reference-to-sample rotation."""
+    axis_index = {"x": 0, "y": 1, "z": 2}[str(axial_axis).lower()]
+    offset = np.asarray(process_centroid, dtype=float) - np.asarray(body_centroid, dtype=float)
+    rotation = np.asarray(reference_to_sample_rotation, dtype=float)
+    if rotation.shape != (3, 3):
+        raise ValueError("reference_to_sample_rotation must have shape (3, 3).")
+    reference_offset = offset @ rotation
+    axial_offset = abs(float(reference_offset[axis_index]))
+    transverse_offset = float(np.linalg.norm(np.delete(reference_offset, axis_index)))
+    limit = max(float(axial_tolerance_mm), float(max_axial_to_transverse_ratio) * transverse_offset)
+    status = "failed" if axial_offset > limit else "ok"
+    return {
+        "status": status,
+        "offset_mm": reference_offset.tolist(),
+        "axial_axis": str(axial_axis).lower(),
+        "axial_offset_mm": axial_offset,
+        "transverse_offset_mm": transverse_offset,
+        "max_axial_to_transverse_ratio": float(max_axial_to_transverse_ratio),
+        "axial_tolerance_mm": float(axial_tolerance_mm),
+    }
 
 
 def benchmark_linear_params():
@@ -261,6 +363,7 @@ from ogo.fea.boundary import (
     smooth_binary_mask_vtk,
     smooth_label_mask_vtk,
 )
+from ogo.fea.image_io import write_vtk_image_with_sitk_geometry
 from ogo.fea.model import (
     apply_spine_boundary_conditions as apply_boundary_conditions,
     create_microfe_model,
@@ -574,7 +677,16 @@ def _expand_bounding_box_by_margin(bb, image_data, margin_mm):
     ]
 
 
-def crop_and_transform(fullvertebra, body_output, process_output, image, label_output=None, *, margin_mm=0.0):
+def crop_and_transform(
+    fullvertebra,
+    body_output,
+    process_output,
+    image,
+    label_output=None,
+    *,
+    margin_mm=0.0,
+    extra_label_outputs=None,
+):
 
     _, bb = crop_to_bounding_box(fullvertebra.GetOutput())
     if float(margin_mm) > 0.0:
@@ -582,10 +694,15 @@ def crop_and_transform(fullvertebra, body_output, process_output, image, label_o
     isolated_vertebra, _ = crop_to_bounding_box(body_output, bb)
     isolated_process, _ = crop_to_bounding_box(process_output, bb)
     isolated_image, _ = crop_to_bounding_box(image, bb)
+    out = [isolated_vertebra, isolated_process, isolated_image]
     if label_output is None:
-        return isolated_vertebra, isolated_process, isolated_image
+        return tuple(out)
     isolated_label, _ = crop_to_bounding_box(label_output, bb)
-    return isolated_vertebra, isolated_process, isolated_image, isolated_label
+    out.append(isolated_label)
+    for extra_label_output in extra_label_outputs or []:
+        isolated_extra_label, _ = crop_to_bounding_box(extra_label_output, bb)
+        out.append(isolated_extra_label)
+    return tuple(out)
 
 def perform_marching_cubes(body_output):
     mcubes = vtk.vtkImageMarchingCubes()
@@ -597,12 +714,100 @@ def perform_marching_cubes(body_output):
     return mcubes
 
 
+def _principal_axes_from_points(points):
+    centered = np.asarray(points, dtype=float) - np.asarray(points, dtype=float).mean(axis=0)
+    _, _, vh = np.linalg.svd(centered, full_matrices=False)
+    axes = vh.T
+    if np.linalg.det(axes) < 0:
+        axes[:, -1] *= -1
+    return axes
+
+
+def _proper_signed_axis_permutation_matrices():
+    matrices = []
+    for permutation in [
+        (0, 1, 2),
+        (0, 2, 1),
+        (1, 0, 2),
+        (1, 2, 0),
+        (2, 0, 1),
+        (2, 1, 0),
+    ]:
+        for signs in [
+            (-1, -1, -1),
+            (-1, -1, 1),
+            (-1, 1, -1),
+            (-1, 1, 1),
+            (1, -1, -1),
+            (1, -1, 1),
+            (1, 1, -1),
+            (1, 1, 1),
+        ]:
+            matrix = np.zeros((3, 3), dtype=float)
+            for row, col in enumerate(permutation):
+                matrix[row, col] = signs[row]
+            if np.linalg.det(matrix) > 0:
+                matrices.append(matrix)
+    return matrices
+
+
+def _initial_transform_from_rotation(moving_points, fixed_points, rotation):
+    moving_center = np.asarray(moving_points, dtype=float).mean(axis=0)
+    fixed_center = np.asarray(fixed_points, dtype=float).mean(axis=0)
+    return {
+        "rotation": np.asarray(rotation, dtype=float),
+        "translation": fixed_center - np.asarray(rotation, dtype=float) @ moving_center,
+    }
+
+
+def _spine_pca_initial_transforms(reference_points, sample_points):
+    moving_axes = _principal_axes_from_points(reference_points)
+    fixed_axes = _principal_axes_from_points(sample_points)
+    candidates = []
+    seen = set()
+    for axis_rotation in _proper_signed_axis_permutation_matrices():
+        rotation = fixed_axes @ axis_rotation @ moving_axes.T
+        if np.linalg.det(rotation) < 0:
+            continue
+        key = tuple(np.round(rotation, 8).ravel())
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(_initial_transform_from_rotation(reference_points, sample_points, rotation))
+    return candidates
+
+
+def _icp_transform_to_vtk(transform):
+    matrix = vtk.vtkMatrix4x4()
+    matrix.Identity()
+    rotation = transform["rotation"]
+    translation = transform["translation"]
+    for row in range(3):
+        for col in range(3):
+            matrix.SetElement(row, col, float(rotation[row, col]))
+        matrix.SetElement(row, 3, float(translation[row]))
+
+    vtk_transform = vtk.vtkTransform()
+    vtk_transform.SetMatrix(matrix)
+    return vtk_transform
+
+
+def _icp_process_orientation_metrics(transform, body_centroid, process_centroid):
+    return spine_process_orientation_metrics_for_rotation(
+        body_centroid,
+        process_centroid,
+        transform["rotation"],
+    )
+
+
 def get_icp_with_scaling(
     body,
     reference_path,
+    process=None,
     scale_factors=None,
     min_scale=(0.8, 0.8, 0.75),
     max_scale=(1.2, 1.2, 1.3),
+    retry_on_process_qc=DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
 ):
 
     sample_surface_points = surface_points_from_vtk_mask(
@@ -644,17 +849,69 @@ def get_icp_with_scaling(
         distance_mode="mean",
     )
 
-    matrix = vtk.vtkMatrix4x4()
-    matrix.Identity()
-    rotation = transform["rotation"]
-    translation = transform["translation"]
-    for row in range(3):
-        for col in range(3):
-            matrix.SetElement(row, col, float(rotation[row, col]))
-        matrix.SetElement(row, 3, float(translation[row]))
+    if process is not None and retry_on_process_qc:
+        body_centroid = _mask_centroid_physical(body.GetOutput())
+        process_centroid = _mask_centroid_physical(process.GetOutput())
+        default_process_qc = _icp_process_orientation_metrics(
+            transform,
+            body_centroid,
+            process_centroid,
+        )
+        ogo.message(
+            "Default ICP process-vector QC: "
+            f"axial_offset={default_process_qc['axial_offset_mm']:.2f} mm, "
+            f"transverse_offset={default_process_qc['transverse_offset_mm']:.2f} mm"
+        )
+        if default_process_qc["status"] != "ok":
+            ogo.message("Default ICP failed process-vector QC; trying alternate PCA starts...")
+            retry_candidates = []
+            for initial in _spine_pca_initial_transforms(reference_points * scale_factors, sample_surface_points):
+                candidate = estimate_rigid_icp(
+                    moving_points=reference_points * scale_factors,
+                    fixed_points=sample_surface_points,
+                    iterations=50,
+                    tolerance=1.0e-4,
+                    start_by_matching_centroids_only=False,
+                    convergence="delta",
+                    distance_mode="mean",
+                    initial_transform=initial,
+                )
+                process_qc = _icp_process_orientation_metrics(
+                    candidate,
+                    body_centroid,
+                    process_centroid,
+                )
+                retry_candidates.append((candidate, process_qc))
+            valid = [
+                (candidate, process_qc)
+                for candidate, process_qc in retry_candidates
+                if process_qc["status"] == "ok"
+            ]
+            if valid:
+                transform, chosen_qc = min(valid, key=lambda item: item[0]["mean_distance"])
+                ogo.message(
+                    "Selected alternate ICP start with process-vector QC: "
+                    f"axial_offset={chosen_qc['axial_offset_mm']:.2f} mm, "
+                    f"transverse_offset={chosen_qc['transverse_offset_mm']:.2f} mm, "
+                    f"mean_distance={transform['mean_distance']:.4f}"
+                )
+            else:
+                best_candidate, best_qc = min(
+                    retry_candidates,
+                    key=lambda item: (
+                        item[1]["axial_offset_mm"] / max(item[1]["transverse_offset_mm"], 1.0e-6),
+                        item[0]["mean_distance"],
+                    ),
+                )
+                ogo.message(
+                    "No alternate ICP start passed process-vector QC; "
+                    "using least-bad candidate for downstream QC failure: "
+                    f"axial_offset={best_qc['axial_offset_mm']:.2f} mm, "
+                    f"transverse_offset={best_qc['transverse_offset_mm']:.2f} mm"
+                )
+                transform = best_candidate
 
-    vtk_transform = vtk.vtkTransform()
-    vtk_transform.SetMatrix(matrix)
+    vtk_transform = _icp_transform_to_vtk(transform)
     ogo.message(
         "ICP (with scaled reference) iterations=%d mean_distance=%0.4f"
         % (transform["iterations"], transform["mean_distance"])
@@ -1093,15 +1350,21 @@ def export_nifti_outputs(
 def process_vertebra(input_mask, input_image, n88model_output_path, body_label, process_label, reference_path, **kwargs):
 
     pmma_mat_id = kwargs.get("pmma_mat_id", 5000)
+    pistoia_mask = kwargs.get("pistoia_mask")
     iso_resolution = kwargs.get("iso_resolution", DEFAULT_SPINE_ISO_RESOLUTION_MM)
     pmma_thick = kwargs.get("pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM)
     pmma_intrusion = kwargs.get("pmma_intrusion", DEFAULT_SPINE_PMMA_INTRUSION_MM)
     top_node_set_id = kwargs.get("top_node_set_id", DEFAULT_SPINE_TOP_NODE_SET_ID)
     bottom_node_set_id = kwargs.get("bottom_node_set_id", DEFAULT_SPINE_BOTTOM_NODE_SET_ID)
     quality_control = kwargs.get("quality_control", True)
+    process_orientation_qc = kwargs.get("process_orientation_qc", True)
     registration_scale = kwargs.get("registration_scale", DEFAULT_SPINE_REGISTRATION_SCALE)
     registration_min_scale = kwargs.get("registration_min_scale", DEFAULT_SPINE_REGISTRATION_MIN_SCALE)
     registration_max_scale = kwargs.get("registration_max_scale", DEFAULT_SPINE_REGISTRATION_MAX_SCALE)
+    registration_retry_on_process_qc = kwargs.get(
+        "registration_retry_on_process_qc",
+        DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
+    )
     mask_smoothing_spacing_threshold = kwargs.get(
         "mask_smoothing_spacing_threshold",
         DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
@@ -1118,6 +1381,13 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     image_reader = read(input_image)
     ogo.message(f"Reading mask...: {input_mask}")
     mask_reader = resample_to_match(image_reader.GetOutput(), read(input_mask).GetOutput())
+    pistoia_mask_reader = None
+    if pistoia_mask is not None:
+        ogo.message(f"Reading Pistoia ROI mask...: {pistoia_mask}")
+        pistoia_mask_reader = resample_to_match(
+            image_reader.GetOutput(),
+            read(pistoia_mask).GetOutput(),
+        )
     input_spacing = image_reader.GetOutput().GetSpacing()
 
     # Get and Check labels
@@ -1133,19 +1403,19 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
 
     # Crop everything to same BB
     ogo.message(f"Cropping to common bounding box...")
-    (
-        isolated_vertebra,
-        isolated_process,
-        isolated_image,
-        isolated_labels,
-    ) = crop_and_transform(
+    cropped_outputs = crop_and_transform(
         fullvertebra,
         body.GetOutput(),
         process.GetOutput(),
         image_reader.GetOutput(),
         mask_reader.GetOutput(),
         margin_mm=SPINE_PREPROCESSING_CROP_MARGIN_MM,
+        extra_label_outputs=[]
+        if pistoia_mask_reader is None
+        else [pistoia_mask_reader.GetOutput()],
     )
+    isolated_vertebra, isolated_process, isolated_image, isolated_labels = cropped_outputs[:4]
+    isolated_pistoia_mask = cropped_outputs[4] if pistoia_mask_reader is not None else None
 
     ogo.message("Resampling cropped spine inputs to isotropic spacing before ICP...")
     preprocessed_image = resample_vtk_image_to_spacing(
@@ -1157,6 +1427,15 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         isolated_labels.GetOutput(),
         iso_resolution,
         interpolation="nearest",
+    )
+    preprocessed_pistoia_mask = (
+        resample_vtk_image_to_spacing(
+            isolated_pistoia_mask.GetOutput(),
+            iso_resolution,
+            interpolation="nearest",
+        )
+        if isolated_pistoia_mask is not None
+        else None
     )
     if label_smoothing_sigma_mm > 0:
         ogo.message(
@@ -1177,9 +1456,11 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     icp = get_icp_with_scaling(
         registration_body,
         reference_path,
+        process=isolated_process,
         scale_factors=registration_scale,
         min_scale=registration_min_scale,
         max_scale=registration_max_scale,
+        retry_on_process_qc=registration_retry_on_process_qc,
     )
 
     # Transform Images and resample at the same time (less interpolation)
@@ -1233,6 +1514,19 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         output_spacing=output_spacing,
         interpolation="bspline",
     )
+    transformed_pistoia_mask = (
+        resample_vtk_image_with_point_transform(
+            preprocessed_pistoia_mask,
+            rotation=sample_to_reference_rotation,
+            translation=sample_to_reference_translation,
+            output_origin=output_origin,
+            output_size=output_size,
+            output_spacing=output_spacing,
+            interpolation="nearest",
+        )
+        if preprocessed_pistoia_mask is not None
+        else None
+    )
 
     if should_smooth_resampled_mask(input_spacing, mask_smoothing_spacing_threshold):
         ogo.message(
@@ -1245,6 +1539,17 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         ogo.message(
             "skipping body/process mask smoothing because input spacing "
             f"{input_spacing} is <= {mask_smoothing_spacing_threshold} mm in all dimensions..."
+        )
+
+    if process_orientation_qc:
+        process_qc = check_spine_process_orientation(
+            transformed_vertebra,
+            transformed_process,
+        )
+        ogo.message(
+            "posterior process orientation QC: "
+            f"axial_offset={process_qc['axial_offset_mm']:.2f} mm, "
+            f"transverse_offset={process_qc['transverse_offset_mm']:.2f} mm"
         )
 
     ogo.message(f"relabelling mask and identifying boundary surfaces...")
@@ -1281,10 +1586,23 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     padded_cort_mask = pad_vtk_image(cort_mask, axis='x', pmma_thick=pmma_thick, pad_value=0)
     padded_mask1 = pad_vtk_image(mask1_labeled.GetOutput(), axis='x', pmma_thick=pmma_thick, pad_value=0)
     padded_mask2 = pad_vtk_image(mask2_labeled.GetOutput(), axis='x', pmma_thick=pmma_thick, pad_value=0)
+    padded_pistoia_mask = (
+        pad_vtk_image(transformed_pistoia_mask, axis='x', pmma_thick=pmma_thick, pad_value=0)
+        if transformed_pistoia_mask is not None
+        else None
+    )
 
     ogo.message(
         "generating fixed-thickness anatomy body-cap disks "
-        f"(pmma_thick = {pmma_thick} mm total, pmma_intrusion = {pmma_intrusion} mm)..."
+        f"(pmma_thick = {pmma_thick} mm total, pmma_intrusion = {pmma_intrusion} mm, "
+        f"stable_intrusion = {DEFAULT_SPINE_STABLE_CONTACT_INTRUSION_MM} mm, "
+        f"stable_close_gaps_3d = {DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D}, "
+        f"stable_contact = {DEFAULT_SPINE_STABLE_CONTACT_ENABLED})..."
+    )
+    disk_intrusion = (
+        DEFAULT_SPINE_STABLE_CONTACT_INTRUSION_MM
+        if DEFAULT_SPINE_STABLE_CONTACT_ENABLED
+        else pmma_intrusion
     )
     transformed_body_bounds = foreground_voxel_center_bounds(padded_mask1)
     body_bounds = transformed_body_bounds
@@ -1332,7 +1650,11 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
             size=plane["size"],
             shape=plane["shape"],
             thickness=pmma_thick,
-            intrusion=pmma_intrusion,
+            intrusion=disk_intrusion,
+            stable_surface=DEFAULT_SPINE_STABLE_CONTACT_ENABLED,
+            stable_surface_fraction=DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
+            stable_surface_min_area_fraction=DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
+            stable_surface_max_depth=DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
         )
         for plane in (inferior_plane, superior_plane)
     ]
@@ -1347,6 +1669,21 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
             float(bounds_array[:, 4].min()),
             float(bounds_array[:, 5].max()),
         )
+        images_to_pad = [
+            padded_image,
+            padded_transformed_image,
+            padded_mask,
+            padded_cort_mask,
+            padded_mask1,
+            padded_mask2,
+        ]
+        if padded_pistoia_mask is not None:
+            images_to_pad.append(padded_pistoia_mask)
+        padded_outputs, contact_padding = pad_vtk_images_to_physical_bounds(
+            images_to_pad,
+            desired_bounds=desired_bounds,
+            constants=[0] * len(images_to_pad),
+        )
         (
             padded_image,
             padded_transformed_image,
@@ -1354,18 +1691,9 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
             padded_cort_mask,
             padded_mask1,
             padded_mask2,
-        ), contact_padding = pad_vtk_images_to_physical_bounds(
-            [
-                padded_image,
-                padded_transformed_image,
-                padded_mask,
-                padded_cort_mask,
-                padded_mask1,
-                padded_mask2,
-            ],
-            desired_bounds=desired_bounds,
-            constants=[0, 0, 0, 0, 0, 0],
-        )
+        ) = padded_outputs[:6]
+        if padded_pistoia_mask is not None:
+            padded_pistoia_mask = padded_outputs[6]
         if any(contact_padding["lower"]) or any(contact_padding["upper"]):
             ogo.message(
                 "expanded image canvas for projected disks: lower=%s upper=%s"
@@ -1382,8 +1710,14 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         size=inferior_plane["size"],
         shape=inferior_plane["shape"],
         thickness=pmma_thick,
-        intrusion=pmma_intrusion,
+        intrusion=disk_intrusion,
         anatomy_constrained=True,
+        stable_surface=DEFAULT_SPINE_STABLE_CONTACT_ENABLED,
+        stable_surface_fraction=DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
+        stable_surface_min_area_fraction=DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
+        stable_surface_max_depth=DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
+        close_gaps_3d=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
+        close_gaps_3d_max_gap=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
         output_value=1,
     )
     superior_disk = generate_projected_material_disk_vtk(
@@ -1397,8 +1731,14 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         size=superior_plane["size"],
         shape=superior_plane["shape"],
         thickness=pmma_thick,
-        intrusion=pmma_intrusion,
+        intrusion=disk_intrusion,
         anatomy_constrained=True,
+        stable_surface=DEFAULT_SPINE_STABLE_CONTACT_ENABLED,
+        stable_surface_fraction=DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
+        stable_surface_min_area_fraction=DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
+        stable_surface_max_depth=DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
+        close_gaps_3d=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
+        close_gaps_3d_max_gap=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
         output_value=1,
     )
 
@@ -1438,6 +1778,14 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
             inferior_disk,
             superior_disk,
             n88model_output_path
+        )
+
+    if padded_pistoia_mask is not None:
+        mask_sidecar = pistoia_mask_output_path(n88model_output_path)
+        ogo.message(f"Writing model-space Pistoia ROI mask: {mask_sidecar}")
+        write_vtk_image_with_sitk_geometry(
+            padded_pistoia_mask,
+            mask_sidecar,
         )
 
     # Quality control and output. If quality control is activated output only provided if it passes
@@ -1503,6 +1851,8 @@ def main():
                         help="Label value for the vertebral process in the bone mask.")
     parser.add_argument("--output_path", type=str, default=None,
                         help="Set output path for the N88 model file. (default: same as input image)")
+    parser.add_argument("--pistoia_mask", type=str, default=None,
+                        help="Optional ROI mask aligned with the input image for model-space masked Pistoia reporting.")
     parser.add_argument("--quality_control", type=_as_bool, default=True,
                         help="Set quality control flag (visualise output and add volume checks). (default: %(default)s)")
     parser.add_argument("--iso_resolution", type=float, default=DEFAULT_SPINE_ISO_RESOLUTION_MM,

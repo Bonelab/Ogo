@@ -597,6 +597,23 @@ def _fill_short_boolean_gaps_in_footprint(values, max_gap=2):
     return out
 
 
+def _fill_short_boolean_gaps_in_volume(values, max_gap=2):
+    """Fill short bracketed gaps along each axis in a 3D mask."""
+    import numpy as np
+
+    out = np.asarray(values, dtype=bool).copy()
+    for y in range(out.shape[1]):
+        for z in range(out.shape[2]):
+            out[:, y, z] = _fill_short_boolean_gaps_in_line(out[:, y, z], max_gap)
+    for x in range(out.shape[0]):
+        for z in range(out.shape[2]):
+            out[x, :, z] = _fill_short_boolean_gaps_in_line(out[x, :, z], max_gap)
+    for x in range(out.shape[0]):
+        for y in range(out.shape[1]):
+            out[x, y, :] = _fill_short_boolean_gaps_in_line(out[x, y, :], max_gap)
+    return out
+
+
 def _clean_projected_footprint(mask):
     """Clean a candidate cap footprint before it is extruded into a disk."""
     import numpy as np
@@ -820,6 +837,10 @@ def projected_material_disk_required_bounds(
     shape="anatomy",
     thickness=3.0,
     intrusion=2.0,
+    stable_surface=False,
+    stable_surface_fraction=0.55,
+    stable_surface_min_area_fraction=0.12,
+    stable_surface_max_depth=None,
 ):
     """Return conservative physical bounds needed for a plane-projected disk."""
     import numpy as np
@@ -870,7 +891,22 @@ def projected_material_disk_required_bounds(
     if not np.any(inside & forward):
         return None
 
-    surface_distance = float(np.min(distance[inside & forward]))
+    first_distance, distance_by_key = _surface_distance_by_projected_bucket(
+        active_indices[inside & forward],
+        distance[inside & forward],
+        u[inside & forward],
+        v[inside & forward],
+        spacing=spacing,
+    )
+    surface_distance = first_distance
+    if stable_surface and distance_by_key:
+        stable_contact = _stable_surface_contact_from_bucket_distances(
+            distance_by_key,
+            stable_surface_fraction=stable_surface_fraction,
+            stable_surface_min_area_fraction=stable_surface_min_area_fraction,
+            stable_surface_max_depth=stable_surface_max_depth,
+        )
+        surface_distance = float(stable_contact["stable_distance"])
     cap_inner_distance = surface_distance + max(float(intrusion), 0.0)
     cap_outer_distance = cap_inner_distance - max(float(thickness), 0.0)
     d_min = min(cap_inner_distance, cap_outer_distance)
@@ -963,6 +999,179 @@ def _surface_distance_by_projected_bucket(
     return float(first_distance), {key: float(value[0]) for key, value in best.items()}
 
 
+def _clean_footprint_keys(keys):
+    """Return the largest filled component from projected footprint keys."""
+    import numpy as np
+
+    if not keys:
+        return set()
+    coords = np.asarray(list(keys), dtype=int)
+    lower = coords.min(axis=0)
+    upper = coords.max(axis=0)
+    footprint = np.zeros(tuple((upper - lower + 1).tolist()), dtype=bool)
+    shifted = coords - lower
+    footprint[shifted[:, 0], shifted[:, 1]] = True
+    cleaned = _clean_projected_footprint(footprint)
+    cleaned_coords = np.argwhere(cleaned) + lower
+    return {tuple(int(value) for value in coord) for coord in cleaned_coords}
+
+
+def _stable_surface_contact_from_bucket_distances(
+    distance_by_key,
+    *,
+    stable_surface_fraction=0.55,
+    stable_surface_min_area_fraction=0.12,
+    stable_surface_max_depth=None,
+):
+    """Find the first broad projected surface behind isolated protrusions."""
+    import numpy as np
+
+    if not distance_by_key:
+        return {
+            "first_distance": 0.0,
+            "stable_distance": 0.0,
+            "stable_depth": 0.0,
+            "first_area": 0,
+            "stable_area": 0,
+            "peak_area": 0,
+            "stable_keys": set(),
+        }
+
+    distances = np.asarray(list(distance_by_key.values()), dtype=float)
+    first_distance = float(np.min(distances))
+    full_area = int(len(distance_by_key))
+    first_keys = {
+        key
+        for key, distance in distance_by_key.items()
+        if float(distance) <= first_distance + 1.0e-9
+    }
+    first_area = len(_clean_footprint_keys(first_keys))
+
+    if stable_surface_max_depth is None:
+        max_distance = float(np.max(distances))
+    else:
+        max_distance = first_distance + max(float(stable_surface_max_depth), 0.0)
+    thresholds = np.unique(distances[distances <= max_distance + 1.0e-9])
+    if thresholds.size == 0:
+        thresholds = np.asarray([first_distance], dtype=float)
+
+    surfaces = []
+    peak_area = 0
+    for threshold in thresholds:
+        keys = {
+            key
+            for key, distance in distance_by_key.items()
+            if float(distance) <= float(threshold) + 1.0e-9
+        }
+        clean_keys = _clean_footprint_keys(keys)
+        area = len(clean_keys)
+        peak_area = max(peak_area, area)
+        surfaces.append((float(threshold), area, clean_keys))
+
+    target_area = max(
+        1,
+        int(np.ceil(max(float(stable_surface_fraction), 0.0) * peak_area)),
+        int(np.ceil(max(float(stable_surface_min_area_fraction), 0.0) * full_area)),
+    )
+    stable_distance, stable_area, stable_keys = surfaces[-1]
+    for threshold, area, keys in surfaces:
+        if area >= target_area:
+            stable_distance = threshold
+            stable_area = area
+            stable_keys = keys
+            break
+
+    return {
+        "first_distance": first_distance,
+        "stable_distance": float(stable_distance),
+        "stable_depth": float(stable_distance - first_distance),
+        "first_area": int(first_area),
+        "stable_area": int(stable_area),
+        "peak_area": int(peak_area),
+        "stable_keys": stable_keys,
+    }
+
+
+def projected_stable_surface_contact(
+    active_mask,
+    *,
+    spacing,
+    origin,
+    center,
+    normal,
+    u_axis=None,
+    v_axis=None,
+    size=(24.0, 24.0),
+    shape="square",
+    extent_start=(0, 0, 0),
+    stable_surface_fraction=0.55,
+    stable_surface_min_area_fraction=0.12,
+    stable_surface_max_depth=None,
+):
+    """Return stable projected contact-surface metrics for a physical plane."""
+    import numpy as np
+
+    active = np.asarray(active_mask, dtype=bool)
+    if active.ndim != 3:
+        raise ValueError("active_mask must be a 3D x/y/z array.")
+    if not np.any(active):
+        return _stable_surface_contact_from_bucket_distances({})
+
+    spacing = tuple(float(value) for value in spacing)
+    origin = tuple(float(value) for value in origin)
+    center = np.asarray(center, dtype=float)
+    if center.shape != (3,):
+        raise ValueError("center must contain three values.")
+    normal = _unit_vector(normal, "normal")
+    if u_axis is None or v_axis is None:
+        u_axis, v_axis = _plane_axes_from_normal(normal)
+    else:
+        u_axis = _unit_vector(u_axis, "u_axis")
+        v_axis = _unit_vector(v_axis, "v_axis")
+    if len(size) != 2:
+        raise ValueError("size must contain two in-plane lengths.")
+    half_u = max(float(size[0]) / 2.0, 0.0)
+    half_v = max(float(size[1]) / 2.0, 0.0)
+
+    indices = np.argwhere(active)
+    points = _physical_points_from_indices(
+        indices,
+        spacing=spacing,
+        origin=origin,
+        extent_start=extent_start,
+    )
+    rel = points - center
+    distance = rel @ normal
+    u = rel @ u_axis
+    v = rel @ v_axis
+    tolerance = max(min(spacing) * 0.75, 1.0e-6)
+    inside = _inside_projected_shape(
+        shape,
+        u,
+        v,
+        half_u,
+        half_v,
+        tolerance=tolerance,
+    )
+    forward = distance >= -tolerance
+    candidate = inside & forward
+    if not np.any(candidate):
+        return _stable_surface_contact_from_bucket_distances({})
+    _, distance_by_key = _surface_distance_by_projected_bucket(
+        indices[candidate],
+        distance[candidate],
+        u[candidate],
+        v[candidate],
+        spacing=spacing,
+    )
+    return _stable_surface_contact_from_bucket_distances(
+        distance_by_key,
+        stable_surface_fraction=stable_surface_fraction,
+        stable_surface_min_area_fraction=stable_surface_min_area_fraction,
+        stable_surface_max_depth=stable_surface_max_depth,
+    )
+
+
 def generate_projected_material_disk_mask(
     active_mask,
     *,
@@ -977,6 +1186,12 @@ def generate_projected_material_disk_mask(
     thickness=3.0,
     intrusion=2.0,
     anatomy_constrained=True,
+    stable_surface=False,
+    stable_surface_fraction=0.55,
+    stable_surface_min_area_fraction=0.12,
+    stable_surface_max_depth=None,
+    close_gaps_3d=False,
+    close_gaps_3d_max_gap=2,
     material_mask=None,
     extent_start=(0, 0, 0),
 ):
@@ -1054,17 +1269,39 @@ def generate_projected_material_disk_mask(
     if not distance_by_key:
         return np.zeros(active.shape, dtype=bool)
 
+    support_distance = first_distance
+    stable_keys = None
+    if stable_surface:
+        stable_contact = _stable_surface_contact_from_bucket_distances(
+            distance_by_key,
+            stable_surface_fraction=stable_surface_fraction,
+            stable_surface_min_area_fraction=stable_surface_min_area_fraction,
+            stable_surface_max_depth=stable_surface_max_depth,
+        )
+        support_distance = float(stable_contact["stable_distance"])
+        footprint_min = support_distance - max(2.0 * min(spacing), tolerance)
+        footprint_max = support_distance + intrusion + tolerance
+        stable_keys = _clean_footprint_keys(
+            {
+                key
+                for key, distance in distance_by_key.items()
+                if footprint_min <= float(distance) <= footprint_max
+            }
+        )
+        if not stable_keys:
+            return np.zeros(active.shape, dtype=bool)
+
     if anatomy_constrained:
-        depth_limit = first_distance + intrusion + tolerance
+        depth_limit = support_distance + intrusion + tolerance
         distance_by_key = {
             key: distance
             for key, distance in distance_by_key.items()
-            if distance <= depth_limit
+            if distance <= depth_limit and (stable_keys is None or key in stable_keys)
         }
         if not distance_by_key:
             return np.zeros(active.shape, dtype=bool)
 
-    cap_inner_distance = first_distance + intrusion
+    cap_inner_distance = support_distance + intrusion
     cap_outer_distance = cap_inner_distance - thickness
     full_indices = np.argwhere(np.ones(active.shape, dtype=bool))
     full_points = _physical_points_from_indices(
@@ -1097,11 +1334,17 @@ def generate_projected_material_disk_mask(
         )
         bucket_mask = np.isfinite(local_surface)
         flat_outer = cap_outer_distance
-        if flat_outer >= first_distance:
-            flat_outer = first_distance - thickness
-        local_min = np.minimum(flat_outer, local_surface)
-        local_max = np.maximum(flat_outer, local_surface)
-        depth_ok = (distance >= local_min - tolerance) & (distance <= local_max + tolerance)
+        if flat_outer >= support_distance:
+            flat_outer = support_distance - thickness
+        if stable_surface:
+            depth_ok = (
+                (distance >= flat_outer - tolerance)
+                & (distance <= cap_inner_distance + tolerance)
+            )
+        else:
+            local_min = np.minimum(flat_outer, local_surface)
+            local_max = np.maximum(flat_outer, local_surface)
+            depth_ok = (distance >= local_min - tolerance) & (distance <= local_max + tolerance)
     else:
         bucket_mask = np.ones(full_indices.shape[0], dtype=bool)
         depth_ok = (
@@ -1113,6 +1356,12 @@ def generate_projected_material_disk_mask(
     disk = np.zeros(active.shape, dtype=bool)
     if np.any(keep):
         disk[tuple(full_indices[keep].T)] = True
+    if close_gaps_3d and np.any(disk):
+        disk = _fill_short_boolean_gaps_in_volume(
+            disk,
+            max_gap=int(close_gaps_3d_max_gap),
+        )
+        disk &= ~material
     return disk
 
 
@@ -1394,6 +1643,12 @@ def generate_projected_material_disk_vtk(
     thickness=3.0,
     intrusion=2.0,
     anatomy_constrained=True,
+    stable_surface=False,
+    stable_surface_fraction=0.55,
+    stable_surface_min_area_fraction=0.12,
+    stable_surface_max_depth=None,
+    close_gaps_3d=False,
+    close_gaps_3d_max_gap=2,
     output_value=1,
 ):
     """Generate a VTK material disk from a physical-space contact plane.
@@ -1433,6 +1688,12 @@ def generate_projected_material_disk_vtk(
         thickness=thickness,
         intrusion=intrusion,
         anatomy_constrained=anatomy_constrained,
+        stable_surface=stable_surface,
+        stable_surface_fraction=stable_surface_fraction,
+        stable_surface_min_area_fraction=stable_surface_min_area_fraction,
+        stable_surface_max_depth=stable_surface_max_depth,
+        close_gaps_3d=close_gaps_3d,
+        close_gaps_3d_max_gap=close_gaps_3d_max_gap,
         material_mask=exclusion,
         extent_start=(extent[0], extent[2], extent[4]),
     )

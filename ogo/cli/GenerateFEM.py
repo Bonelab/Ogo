@@ -32,6 +32,7 @@ from ogo.fea.femur import (
     DEFAULT_FEMUR_BBOX_RATIO,
     DEFAULT_FEMUR_CUT_MODE,
     DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM,
+    DEFAULT_FEMUR_GREATER_TROCHANTER_INCLUSION_LENGTH_MM,
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
     DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
     DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
@@ -181,6 +182,19 @@ def expected_femur_model_path(calibrated_image: Path, output_path: Optional[Path
     return output_dir / "{}_{}.n88model".format(remove_extension(calibrated_image), stem)
 
 
+def pistoia_mask_output_path(model_path: Path) -> Path:
+    """Return the model-space Pistoia ROI mask sidecar path for a model."""
+    model_path = Path(model_path)
+    return model_path.with_name(model_path.with_suffix("").name + "_pistoia_mask.nii.gz")
+
+
+def model_space_pistoia_mask_path(model_path: Path, args: argparse.Namespace) -> Optional[Path]:
+    """Return the transformed Pistoia ROI mask sidecar expected by the solver."""
+    if getattr(args, "pistoia_mask", None) is None:
+        return None
+    return pistoia_mask_output_path(model_path)
+
+
 def ensure_output_directory(output_path: Optional[Path]) -> None:
     """Create an explicit model output directory before generation starts."""
     if output_path is not None:
@@ -258,6 +272,20 @@ def solve_report_profile(args: argparse.Namespace, model_type: str) -> dict:
     return profile
 
 
+def critical_volume_percent(args: argparse.Namespace, model_type: str) -> float:
+    """Return the Pistoia critical-volume setting for this model."""
+    if args.critical_volume is not None:
+        return args.critical_volume
+    return float(solve_report_profile(args, model_type).get("critical_volume", 2.0))
+
+
+def critical_strain(args: argparse.Namespace, model_type: str) -> float:
+    """Return the Pistoia critical-strain setting for this model."""
+    if args.critical_strain is not None:
+        return args.critical_strain
+    return float(solve_report_profile(args, model_type).get("critical_strain", 0.007))
+
+
 def percent_displacement_metadata(
     model_path: Path,
     *,
@@ -293,6 +321,21 @@ def percent_displacement_metadata(
     return metadata
 
 
+def absolute_displacement_metadata(generator_argv: Sequence[str], default_value: str) -> dict:
+    """Describe a solve displacement kept as an explicit absolute mm value."""
+    value = option_value(generator_argv, "--fe_displacement", default_value)
+    try:
+        value_mm = float(value)
+    except (TypeError, ValueError):
+        value_mm = value
+    return {
+        "value_mm": value_mm,
+        "target_displacement_percent": None,
+        "characteristic_length_mm": None,
+        "value_source": "explicit --fe_displacement used as absolute model displacement",
+    }
+
+
 def solve_model(
     model_path: Path,
     args: argparse.Namespace,
@@ -318,6 +361,10 @@ def solve_model(
         default_applied_displacement,
     )
 
+    solve_displacement_percent = None if args.use_absolute_fe_displacement else profile["target_displacement_percent"]
+    target_displacement = abs(float(applied_displacement)) if args.use_absolute_fe_displacement else profile["target_displacement_percent"]
+    run_pistoia = args.run_pistoia or args.require_pistoia or args.pistoia_mask is not None
+
     run_faim_pipeline(
         model_file=model_path,
         output_prefix=model_path.with_suffix(""),
@@ -337,14 +384,15 @@ def solve_model(
         n88pistoia_command=args.n88pistoia_command,
         n88tabulate_command=args.n88tabulate_command,
         n88copymodel_command=args.n88copymodel_command,
-        critical_volume=args.critical_volume,
-        critical_strain=args.critical_strain,
+        critical_volume=critical_volume_percent(args, model_type),
+        critical_strain=critical_strain(args, model_type),
         exclude=args.exclude,
-        run_pistoia=args.run_pistoia or args.require_pistoia,
+        run_pistoia=run_pistoia,
+        pistoia_mask_file=model_space_pistoia_mask_path(model_path, args),
         applied_displacement=applied_displacement,
-        target_displacement=profile["target_displacement_percent"],
+        target_displacement=target_displacement,
         report_profile=profile["report_profile"],
-        solve_displacement_percent=profile["target_displacement_percent"],
+        solve_displacement_percent=solve_displacement_percent,
         compress=not args.no_compress,
         require_pistoia=args.require_pistoia,
         dry_run=args.dry_run,
@@ -399,7 +447,11 @@ def write_modeling_metadata(
             "solve_requested": not args.no_solve,
             "target_displacement_percent": target_displacement_percent(args, model_type),
             "target_displacement_definition": "percent strain converted from model geometry for spine; percent of femur length for femur",
-            "run_pistoia": args.run_pistoia or args.require_pistoia,
+            "run_pistoia": args.run_pistoia or args.require_pistoia or args.pistoia_mask is not None,
+            "source_pistoia_mask": None if args.pistoia_mask is None else str(args.pistoia_mask),
+            "model_space_pistoia_mask": None
+            if args.pistoia_mask is None
+            else str(pistoia_mask_output_path(model_path)),
             "compress_solved_model": not args.no_compress,
         },
     }
@@ -408,12 +460,18 @@ def write_modeling_metadata(
         body_label = option_int(generator_argv, "--mask_threshold", 0)
         process_label = option_int(generator_argv, "--process_mask_threshold", 0)
         appendix = option_value(generator_argv, "--appendix")
-        spine_displacement = percent_displacement_metadata(
-            model_path,
-            report_profile="spine",
-            failure_axis="z",
-            target_percent=common["solve_and_reporting"]["target_displacement_percent"],
-        )
+        if args.use_absolute_fe_displacement:
+            spine_displacement = absolute_displacement_metadata(
+                generator_argv,
+                str(spine_solve_report_profile(preset=getattr(args, "preset", None))["default_applied_displacement"]),
+            )
+        else:
+            spine_displacement = percent_displacement_metadata(
+                model_path,
+                report_profile="spine",
+                failure_axis="z",
+                target_percent=common["solve_and_reporting"]["target_displacement_percent"],
+            )
         metadata = common.copy()
         metadata.update({
             "model": "spine-compression",
@@ -590,12 +648,18 @@ def write_modeling_metadata(
             3,
             DEFAULT_FEMUR_BBOX_CROP_FROM,
         )
-        femur_displacement = percent_displacement_metadata(
-            model_path,
-            report_profile="femur",
-            failure_axis="y",
-            target_percent=common["solve_and_reporting"]["target_displacement_percent"],
-        )
+        if args.use_absolute_fe_displacement:
+            femur_displacement = absolute_displacement_metadata(
+                generator_argv,
+                str(femur_solve_report_profile()["default_applied_displacement"]),
+            )
+        else:
+            femur_displacement = percent_displacement_metadata(
+                model_path,
+                report_profile="femur",
+                failure_axis="y",
+                target_percent=common["solve_and_reporting"]["target_displacement_percent"],
+            )
         metadata = common.copy()
         metadata.update({
             "model": "femur-sideways",
@@ -659,7 +723,7 @@ def write_modeling_metadata(
                     if femur_cut_mode == "post_icp_oblique_ratio"
                     else "fixed rough crop before ICP, final flat ratio crop after ICP"
                     if femur_cut_mode == "post_icp_flat_ratio"
-                    else "fixed rough crop before ICP for registration, final GT-relative flat crop after ICP on the full scan"
+                    else "fixed rough crop before ICP for registration, final GT-disk-relative flat crop after ICP on the full scan"
                     if femur_cut_mode == "greater_trochanter_length"
                     else "after ICP on the generated model grid"
                 ),
@@ -675,6 +739,12 @@ def write_modeling_metadata(
                         "--femur_greater_trochanter_distal_length",
                         DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM,
                     ),
+                    "gt_inclusion_length_mm": option_float(
+                        generator_argv,
+                        "--femur_greater_trochanter_inclusion_length",
+                        DEFAULT_FEMUR_GREATER_TROCHANTER_INCLUSION_LENGTH_MM,
+                    ),
+                    "length_origin": "detected greater-trochanter disk distal edge",
                 },
                 "lesser_trochanter_distal_offset_mm": option_float(
                     generator_argv,
@@ -703,7 +773,7 @@ def write_modeling_metadata(
                     if femur_cut_mode == "post_icp_oblique_ratio"
                     else "flat post-ICP aligned-frame crop face"
                     if femur_cut_mode == "post_icp_flat_ratio"
-                    else "flat post-ICP aligned-frame crop face at fixed distance below detected greater trochanter"
+                    else "flat post-ICP aligned-frame crop face at fixed shaft length below detected GT-disk distal edge"
                     if femur_cut_mode == "greater_trochanter_length"
                     else "flat model-grid z plane"
                 ),
@@ -951,14 +1021,14 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--critical_volume",
         type=float,
-        default=2.0,
-        help="Pistoia critical volume percentage.",
+        default=None,
+        help="Pistoia critical volume percentage. Defaults are model-profile specific.",
     )
     parser.add_argument(
         "--critical_strain",
         type=float,
-        default=0.007,
-        help="Pistoia critical EES strain.",
+        default=None,
+        help="Pistoia critical EES strain. Defaults are model-profile specific.",
     )
     parser.add_argument("--exclude", type=int, default=5000, help="Material ID excluded by Pistoia.")
     parser.add_argument(
@@ -972,6 +1042,14 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--use_absolute_fe_displacement",
+        action="store_true",
+        help=(
+            "Solve at the explicit --fe_displacement value in mm instead of "
+            "converting the profile target displacement percent from model geometry."
+        ),
+    )
+    parser.add_argument(
         "--require_pistoia",
         action="store_true",
         help="Fail if Pistoia postprocessing fails.",
@@ -980,6 +1058,16 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
         "--run_pistoia",
         action="store_true",
         help="Run Pistoia postprocessing and include Pistoia metrics when available.",
+    )
+    parser.add_argument(
+        "--pistoia_mask",
+        type=Path,
+        default=None,
+        help=(
+            "Optional ROI mask in input image space for an additional masked Pistoia "
+            "calculation. The model builder writes the transformed model-space mask "
+            "next to the .n88model."
+        ),
     )
     parser.add_argument(
         "--no_compress",
@@ -1070,8 +1158,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if not args.dry_run:
         ensure_output_directory(args.output_path)
 
+    pistoia_mask_args = (
+        ["--pistoia_mask", str(args.pistoia_mask)] if args.pistoia_mask is not None else []
+    )
+
     if args.model_type == "spine":
-        spine_extra_args = spine_preset_args(args.preset) + list(extra_args) + [
+        spine_extra_args = spine_preset_args(args.preset) + pistoia_mask_args + list(extra_args) + [
             "--quality_control",
             str(bool(args.debug)),
         ]
@@ -1104,13 +1196,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         return
 
     if args.model_type == "hip":
+        femur_extra_args = pistoia_mask_args + list(extra_args)
         for side in expand_sides(args.side or ["both"]):
             cmd = build_femur_command(
                 calibrated_image=args.calibrated_image,
                 bone_mask=args.bone_mask,
                 side=side,
                 output_path=args.output_path,
-                extra_args=extra_args,
+                extra_args=femur_extra_args,
             )
             if args.dry_run:
                 print_dry_run("ogoFEA-hip-builder", cmd)

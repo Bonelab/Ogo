@@ -127,13 +127,21 @@ def estimate_rigid_icp(
     start_by_matching_centroids_only=False,
     convergence="delta",
     distance_mode="mean",
+    initial_transform=None,
 ):
     """Estimate a rigid transform from ``moving_points`` to ``fixed_points``."""
     import numpy as np
 
     moving = _points_array(moving_points, "moving_points")
     fixed = _points_array(fixed_points, "fixed_points")
-    if start_by_matching_centroids_only:
+    if initial_transform is not None:
+        rotation = np.asarray(initial_transform["rotation"], dtype=float)
+        translation = np.asarray(initial_transform["translation"], dtype=float)
+        if rotation.shape != (3, 3):
+            raise ValueError("initial_transform rotation must have shape (3, 3).")
+        if translation.shape != (3,):
+            raise ValueError("initial_transform translation must contain three values.")
+    elif start_by_matching_centroids_only:
         rotation = np.eye(3)
         translation = fixed.mean(axis=0) - moving.mean(axis=0)
     else:

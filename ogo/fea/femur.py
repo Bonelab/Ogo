@@ -25,12 +25,12 @@ Default femur workflow:
    ``greater_trochanter_length``, ``lesser_trochanter``, and ``fixed_length``
    modes are available for debugging, sensitivity studies, or historical
    comparisons.
-5. Generate two geometric PMMA fixtures from bbox-relative contact planes:
+5. Generate two geometric PMMA fixtures from proximal contact planes:
    a femoral-head loading fixture on the high-y side and a greater-trochanter
    contact fixture on the low-y side. Defaults are 10 mm PMMA thickness and
-   6 mm intrusion through that fixed thickness. The square fixture footprints
-   scale with the generated model bbox, and the fixture masks themselves do
-   not overwrite bone voxels.
+   6 mm intrusion through that fixed thickness. The fixture footprints are
+   anchored at the proximal femur so they cannot contact the distal shaft crop
+   face, and the fixture masks themselves do not overwrite bone voxels.
 6. Apply sideways-fall boundary conditions: prescribed displacement at the
    femoral-head PMMA cap toward the greater trochanter, loading-direction
    constraint at the greater-trochanter PMMA cap, and distal shaft constraints
@@ -59,6 +59,7 @@ from ogo.fea.boundary import (
     foreground_voxel_center_bounds,
     foreground_voxel_center_bounds_from_mask,
 )
+from ogo.fea.image_io import write_vtk_image_with_sitk_geometry
 
 
 LEFT_FEMUR = 1
@@ -92,6 +93,9 @@ DEFAULT_FEMUR_SHAFT_LENGTH_MM = 120.0
 DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM = 120.0
 DEFAULT_FEMUR_CUT_MODE = "post_icp_flat_ratio"
 DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM = 175.0
+DEFAULT_FEMUR_GREATER_TROCHANTER_INCLUSION_LENGTH_MM = 0.0
+DEFAULT_FEMUR_PISTOIA_CRITICAL_VOLUME_PERCENT = 7.0
+DEFAULT_FEMUR_PISTOIA_CRITICAL_STRAIN = 0.009
 PRE_ICP_CROP_MODES = {"bbox_ratio", "proximal_box_ratio"}
 ROUGH_PRE_ICP_CROP_MODES = {"post_icp_flat_ratio", "post_icp_oblique_ratio", "greater_trochanter_length"}
 FULL_SCAN_AFTER_ROUGH_CROP_MODES = {"greater_trochanter_length"}
@@ -123,7 +127,45 @@ def solve_report_profile():
         "failure_axis": "y",
         "default_applied_displacement": DEFAULT_FEMUR_FE_DISPLACEMENT,
         "target_displacement_percent": target_displacement_percent(),
+        "critical_volume": DEFAULT_FEMUR_PISTOIA_CRITICAL_VOLUME_PERCENT,
+        "critical_strain": DEFAULT_FEMUR_PISTOIA_CRITICAL_STRAIN,
     }
+
+
+def proximal_sideways_fall_fixture_plane(model_bounds, *, center_fraction):
+    """Return a proximal-only sideways-fall PMMA contact plane.
+
+    The shared bbox-relative helper scales y-projected fixtures over the full
+    model z extent. That is unsafe for shaft-length sensitivity models because
+    the proximal PMMA cap can also contact the distal shaft crop face. Keep the
+    contact footprint proximal by using a fixed long-axis footprint anchored at
+    the femoral-head end of the model.
+    """
+    plane = bbox_relative_fixture_plane(
+        model_bounds,
+        center_fraction=center_fraction,
+        size_fraction=SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
+        projection_axis="y",
+        shape=SIDEWAYS_FALL_FIXTURE_SHAPE,
+    )
+    z_min = float(model_bounds[4])
+    z_max = float(model_bounds[5])
+    z_span = z_max - z_min
+    if z_span <= 0.0:
+        raise ValueError("model_bounds must have positive z span.")
+    long_axis_mm = min(float(FEMORAL_HEAD_FIXTURE_LONG_AXIS_EXTENSION_MM), z_span)
+    x_width_mm = (
+        float(model_bounds[1])
+        - float(model_bounds[0])
+        + float(FEMORAL_HEAD_FIXTURE_WIDTH_EXTENSION_MM)
+    )
+    center = list(plane["center"])
+    center[2] = z_max - long_axis_mm / 2.0
+    plane = dict(plane)
+    plane["center"] = tuple(float(value) for value in center)
+    plane["size"] = (float(long_axis_mm), float(x_width_mm))
+    plane["footprint"] = "proximal_only"
+    return plane
 
 
 def side_suffix(femur_side):
@@ -139,6 +181,12 @@ def sideways_fall_output_name(output_file, femur_side):
     """Return the compact side-specific sideways-fall output path."""
     output_path = Path(output_file)
     return str(output_path.with_name(f"{output_path.stem}_{side_suffix(femur_side)}.n88model"))
+
+
+def pistoia_mask_output_path(output_file):
+    """Return the model-space Pistoia ROI mask sidecar path for a model."""
+    output_path = Path(output_file)
+    return output_path.with_name(f"{output_path.stem}_pistoia_mask.nii.gz")
 
 
 def matrix4x4_to_numpy(matrix):
@@ -881,9 +929,10 @@ def crop_vtk_images_to_greater_trochanter_length(
     vtk_mask,
     *,
     retained_length_mm=DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM,
+    gt_inclusion_length_mm=DEFAULT_FEMUR_GREATER_TROCHANTER_INCLUSION_LENGTH_MM,
     labels=None,
 ):
-    """Apply a flat distal crop at a fixed distance below the detected GT level."""
+    """Apply a flat distal crop below the detected GT-disk distal edge."""
     import numpy as np
 
     from ogo.util.vtk_image import vtk_image_to_numpy
@@ -891,6 +940,9 @@ def crop_vtk_images_to_greater_trochanter_length(
     retained_length_mm = float(retained_length_mm)
     if retained_length_mm <= 0.0:
         raise ValueError("retained_length_mm must be positive.")
+    gt_inclusion_length_mm = float(gt_inclusion_length_mm)
+    if gt_inclusion_length_mm < 0.0:
+        raise ValueError("gt_inclusion_length_mm must be non-negative.")
 
     mask_data = vtk_image_to_numpy(vtk_mask)
     active = _active_crop_mask(mask_data, labels)
@@ -907,12 +959,14 @@ def crop_vtk_images_to_greater_trochanter_length(
 
     landmark = detect_lesser_trochanter_cut_z(vtk_mask, distal_offset_mm=0.0)
     gt_z = float(landmark["greater_trochanter_z"])
-    cut_z = gt_z - retained_length_mm
-    available_mm = gt_z - float(landmark["mask_z_min"])
+    gt_disk_distal_z = float(landmark["greater_trochanter_disk_distal_z"])
+    distal_length_origin_z = gt_disk_distal_z - gt_inclusion_length_mm
+    cut_z = distal_length_origin_z - retained_length_mm
+    available_mm = distal_length_origin_z - float(landmark["mask_z_min"])
     if available_mm < retained_length_mm:
         raise ValueError(
-            "Femur scan is too short for the requested greater-trochanter distal length: "
-            "requested %.4f mm, available %.4f mm below GT."
+            "Femur scan is too short for the requested greater-trochanter distal shaft length: "
+            "requested %.4f mm, available %.4f mm below the GT-disk distal length origin."
             % (retained_length_mm, max(0.0, available_mm))
         )
 
@@ -931,11 +985,17 @@ def crop_vtk_images_to_greater_trochanter_length(
             "method": "greater_trochanter_length",
             "retained_length_mm": retained_length_mm,
             "requested_retained_length_mm": retained_length_mm,
-            "available_below_gt_mm": float(available_mm),
+            "gt_inclusion_length_mm": gt_inclusion_length_mm,
+            "available_below_gt_disk_mm": float(available_mm),
+            "available_below_gt_inclusion_mm": float(available_mm),
+            "available_below_gt_mm": float(gt_z - float(landmark["mask_z_min"])),
             "greater_trochanter_z": gt_z,
+            "greater_trochanter_disk_distal_z": gt_disk_distal_z,
+            "greater_trochanter_disk_proximal_z": float(landmark["greater_trochanter_disk_proximal_z"]),
+            "distal_length_origin_z": float(distal_length_origin_z),
             "lesser_trochanter_z": float(landmark["lesser_trochanter_z"]),
             "cut_z_mm": float(cut_z),
-            "reference_axis": "greater_trochanter_z",
+            "reference_axis": "greater_trochanter_disk_distal_z_minus_optional_offset",
             "reference_width_mm": y_width_mm,
             "input_z_length_mm": z_length_mm,
             "status": "cropped",
@@ -1948,6 +2008,24 @@ def _peak_center_z(z, values, indices, *, relative_height=0.95):
     return peak_index, float(np.average(z[plateau], weights=weights))
 
 
+def _peak_disk_bounds_z(z, raw_values, peak_index, indices, *, relative_height=0.5):
+    """Return the distal and proximal z bounds of the dominant peak region."""
+    import numpy as np
+
+    values = np.asarray(raw_values, dtype=float)
+    valid = set(int(i) for i in indices)
+    peak_value = float(values[int(peak_index)])
+    baseline = float(np.percentile(values[list(valid)], 25.0))
+    threshold = baseline + max(0.0, peak_value - baseline) * float(relative_height)
+    left = int(peak_index)
+    right = int(peak_index)
+    while left - 1 in valid and float(values[left - 1]) >= threshold:
+        left -= 1
+    while right + 1 in valid and float(values[right + 1]) >= threshold:
+        right += 1
+    return float(z[left]), float(z[right])
+
+
 def detect_lesser_trochanter_cut_z(
     vtk_mask,
     *,
@@ -1985,6 +2063,12 @@ def detect_lesser_trochanter_cut_z(
         raise ValueError("Cannot identify greater trochanter from femur profile.")
     proximal_indices = np.where(proximal_mask)[0]
     greater_index, greater_z = _peak_center_z(z, y_max, proximal_indices)
+    gt_disk_distal_z, gt_disk_proximal_z = _peak_disk_bounds_z(
+        z,
+        profile["y_max"],
+        greater_index,
+        proximal_indices,
+    )
 
     distal_mask = (
         (z <= greater_z - float(min_distal_to_greater_mm))
@@ -2025,6 +2109,8 @@ def detect_lesser_trochanter_cut_z(
         "cut_z": float(cut_z),
         "lesser_trochanter_z": lesser_z,
         "greater_trochanter_z": greater_z,
+        "greater_trochanter_disk_distal_z": gt_disk_distal_z,
+        "greater_trochanter_disk_proximal_z": gt_disk_proximal_z,
         "mask_z_min": z_min,
         "mask_z_max": z_max,
         "retained_length_mm": float(z_max - cut_z),
@@ -2254,6 +2340,7 @@ def sidewaysFallFe(args):
     image = args.calibrated_image
     mask = args.bone_mask
     compartment_mask = args.compartment_mask
+    pistoia_mask = args.pistoia_mask
 
     mask_threshold = args.mask_threshold
     iso_resolution = args.iso_resolution
@@ -2276,6 +2363,7 @@ def sidewaysFallFe(args):
     femur_bbox_crop_from = args.femur_bbox_crop_from
     femur_experimental_crop_ratio = args.femur_experimental_crop_ratio
     femur_greater_trochanter_distal_length = args.femur_greater_trochanter_distal_length
+    femur_greater_trochanter_inclusion_length = args.femur_greater_trochanter_inclusion_length
     femur_proximal_reference_distance = args.femur_proximal_reference_distance
     femur_proximal_reference_width = args.femur_proximal_reference_width
     femur_lesser_trochanter_distal_offset = args.femur_lesser_trochanter_distal_offset
@@ -2346,13 +2434,19 @@ def sidewaysFallFe(args):
     if femur_cut_mode == "greater_trochanter_length":
         ogo.message("Femur Rough Pre-ICP Retained Length [mm]: %8.4f" % femur_shaft_length)
         ogo.message(
-            "Femur Greater Trochanter Distal Length [mm]: %8.4f"
+            "Femur Additional Offset Distal To GT Disk [mm]: %8.4f"
+            % femur_greater_trochanter_inclusion_length
+        )
+        ogo.message(
+            "Femur Shaft Length Distal To GT Disk [mm]: %8.4f"
             % femur_greater_trochanter_distal_length
         )
     if compartment_mask is not None:
         ogo.message("Compartment Mask: %s" % compartment_mask)
         ogo.message("Cortical Label: %d" % cortical_label)
         ogo.message("Trabecular Label: %d" % trabecular_label)
+    if pistoia_mask is not None:
+        ogo.message("Pistoia ROI Mask: %s" % pistoia_mask)
     if femur_cut_mode == "fixed_length":
         ogo.message("Retained Proximal Femur Length [mm]: %8.4f" % femur_shaft_length)
     elif femur_lesser_trochanter_distal_offset_percent is not None:
@@ -2382,6 +2476,10 @@ def sidewaysFallFe(args):
     if compartment_mask is not None:
         ogo.message("Reading trabecular/cortical compartment mask...")
         compartmentData = ogo.readNii(compartment_mask)
+    pistoiaMaskData = None
+    if pistoia_mask is not None:
+        ogo.message("Reading Pistoia ROI mask...")
+        pistoiaMaskData = ogo.readNii(pistoia_mask)
 
     distal_crop_face = None
     bbox_crop_meta = None
@@ -2409,10 +2507,20 @@ def sidewaysFallFe(args):
             iso_resolution,
             interpolation="nearest",
         )
+    if pistoiaMaskData is not None:
+        pistoiaMaskData = resample_vtk_image_like_workflow(
+            pistoiaMaskData,
+            iso_resolution,
+            interpolation="nearest",
+        )
 
     if femur_cut_mode in PRE_ICP_CROP_MODES:
         ogo.message("Applying %s femur crop after isotropic resampling and before ICP..." % femur_cut_mode)
-        images_to_crop = [imageData, maskThres] + ([compartmentData] if compartmentData is not None else [])
+        images_to_crop = [imageData, maskThres]
+        if compartmentData is not None:
+            images_to_crop.append(compartmentData)
+        if pistoiaMaskData is not None:
+            images_to_crop.append(pistoiaMaskData)
         if femur_cut_mode == "bbox_ratio":
             cropped_images, distal_crop_face, bbox_crop_meta = crop_vtk_images_to_bbox_ratio(
                 images_to_crop,
@@ -2432,8 +2540,12 @@ def sidewaysFallFe(args):
             )
         imageData = cropped_images[0]
         maskThres = cropped_images[1]
+        next_crop_index = 2
         if compartmentData is not None:
-            compartmentData = cropped_images[2]
+            compartmentData = cropped_images[next_crop_index]
+            next_crop_index += 1
+        if pistoiaMaskData is not None:
+            pistoiaMaskData = cropped_images[next_crop_index]
         registration_mask = maskThres
         ogo.message(
             "%s crop slices xyz=%s; output shape xyz=%s; crop face voxels=%d."
@@ -2448,7 +2560,11 @@ def sidewaysFallFe(args):
         ogo.message(
             "Applying fixed-length rough femur crop after isotropic resampling and before ICP..."
         )
-        images_to_crop = [imageData, maskThres] + ([compartmentData] if compartmentData is not None else [])
+        images_to_crop = [imageData, maskThres]
+        if compartmentData is not None:
+            images_to_crop.append(compartmentData)
+        if pistoiaMaskData is not None:
+            images_to_crop.append(pistoiaMaskData)
         cropped_images, rough_crop_face, bbox_crop_meta = crop_vtk_images_to_fixed_proximal_length(
             images_to_crop,
             maskThres,
@@ -2465,8 +2581,12 @@ def sidewaysFallFe(args):
         if femur_cut_mode not in FULL_SCAN_AFTER_ROUGH_CROP_MODES:
             imageData = cropped_images[0]
             maskThres = cropped_images[1]
+            next_crop_index = 2
             if compartmentData is not None:
-                compartmentData = cropped_images[2]
+                compartmentData = cropped_images[next_crop_index]
+                next_crop_index += 1
+            if pistoiaMaskData is not None:
+                pistoiaMaskData = cropped_images[next_crop_index]
         ogo.message(
             "rough pre-ICP crop slices xyz=%s; output shape xyz=%s; retained length=%8.4f; status=%s."
             % (
@@ -2484,6 +2604,8 @@ def sidewaysFallFe(args):
         images_to_pad.append(distal_crop_face)
     if compartmentData is not None:
         images_to_pad.append(compartmentData)
+    if pistoiaMaskData is not None:
+        images_to_pad.append(pistoiaMaskData)
     pad_constants = [0] * len(images_to_pad)
     padded_images, padding = pad_vtk_images_to_foreground_margin(
         images_to_pad,
@@ -2499,6 +2621,9 @@ def sidewaysFallFe(args):
         next_padded_index += 1
     if compartmentData is not None:
         compartmentData = padded_images[next_padded_index]
+        next_padded_index += 1
+    if pistoiaMaskData is not None:
+        pistoiaMaskData = padded_images[next_padded_index]
     if any(padding["lower"]) or any(padding["upper"]):
         ogo.message(
             "Padded isotropic input image extent by lower=%s upper=%s voxels for FE transform safety."
@@ -2513,6 +2638,7 @@ def sidewaysFallFe(args):
     mask_rot = maskThres
     distal_crop_face_rot = distal_crop_face
     compartment_rot = compartmentData
+    pistoia_mask_rot = pistoiaMaskData
 
     ##
     # Align the input femur with the reference model, or reuse a saved transform.
@@ -2651,6 +2777,18 @@ def sidewaysFallFe(args):
         if compartment_rot is not None
         else None
     )
+    pistoia_mask_trans = (
+        transform_resample_vtk_image_to_reference_grid(
+            pistoia_mask_rot,
+            icp,
+            output_origin=output_origin,
+            output_size=output_size,
+            output_spacing=output_spacing,
+            interpolation="nearest",
+        )
+        if pistoia_mask_rot is not None
+        else None
+    )
     smooth_resampled_masks = should_smooth_resampled_mask(
         input_spacing,
         mask_smoothing_spacing_threshold,
@@ -2698,7 +2836,11 @@ def sidewaysFallFe(args):
             ogo.message("Applying flat post-ICP femur crop at fixed distance below detected GT...")
         else:
             ogo.message("Applying flat post-ICP femur crop in aligned reference coordinates...")
-        images_to_crop = [image_trans, mask_trans] + ([compartment_trans] if compartment_trans is not None else [])
+        images_to_crop = [image_trans, mask_trans]
+        if compartment_trans is not None:
+            images_to_crop.append(compartment_trans)
+        if pistoia_mask_trans is not None:
+            images_to_crop.append(pistoia_mask_trans)
         try:
             if femur_cut_mode == "post_icp_oblique_ratio":
                 cropped_images, distal_crop_face_trans, shaft_crop = crop_vtk_images_to_oblique_post_icp_ratio(
@@ -2713,6 +2855,7 @@ def sidewaysFallFe(args):
                     images_to_crop,
                     mask_trans,
                     retained_length_mm=femur_greater_trochanter_distal_length,
+                    gt_inclusion_length_mm=femur_greater_trochanter_inclusion_length,
                     labels={1},
                 )
             else:
@@ -2727,18 +2870,25 @@ def sidewaysFallFe(args):
             sys.exit(1)
         image_trans = cropped_images[0]
         mask_trans = cropped_images[1]
+        next_crop_index = 2
         if compartment_trans is not None:
-            compartment_trans = cropped_images[2]
+            compartment_trans = cropped_images[next_crop_index]
+            next_crop_index += 1
+        if pistoia_mask_trans is not None:
+            pistoia_mask_trans = cropped_images[next_crop_index]
         retained_length_mm = shaft_crop.get("target_length_mm", shaft_crop["retained_length_mm"])
         shaft_crop["pre_icp_crop"] = bbox_crop_meta
         if femur_cut_mode == "greater_trochanter_length":
             ogo.message(
-                "Post-ICP GT-length crop retained z=%8.4f below GT z=%8.4f; cut z=%8.4f; available=%8.4f; slices xyz=%s."
+                "Post-ICP GT-length crop retained shaft z=%8.4f below GT-disk origin z=%8.4f; "
+                "GT center z=%8.4f; GT disk distal z=%8.4f; cut z=%8.4f; available=%8.4f; slices xyz=%s."
                 % (
                     retained_length_mm,
+                    shaft_crop["distal_length_origin_z"],
                     shaft_crop["greater_trochanter_z"],
+                    shaft_crop["greater_trochanter_disk_distal_z"],
                     shaft_crop["cut_z_mm"],
-                    shaft_crop["available_below_gt_mm"],
+                    shaft_crop["available_below_gt_disk_mm"],
                     shaft_crop["crop_slices_xyz"],
                 )
             )
@@ -2787,6 +2937,8 @@ def sidewaysFallFe(args):
             )
         if compartment_trans is not None:
             compartment_trans = flat_crop_vtk_image_below_z(compartment_trans, shaft_crop["cut_z"])
+        if pistoia_mask_trans is not None:
+            pistoia_mask_trans = flat_crop_vtk_image_below_z(pistoia_mask_trans, shaft_crop["cut_z"])
 
     # ogo.message("Writing out temp images...")
     # ogo.writeNii(image_trans, "temp_image.nii", image_pathname)
@@ -2833,6 +2985,11 @@ def sidewaysFallFe(args):
     # Cast the image to Short to "round" float values to nearest whole number
     cast_image = ogo.cast2short(binned_image)
     cast_mask = ogo.cast2unsignchar(mask_trans)
+    pistoia_mask_on_model_grid = (
+        ogo.prepareFiniteElementImage(ogo.cast2unsignchar(pistoia_mask_trans))
+        if pistoia_mask_trans is not None
+        else None
+    )
 
 
     # Apply the mask to the bone
@@ -2873,6 +3030,11 @@ def sidewaysFallFe(args):
             femur_mask_on_model_grid,
             model_cut_z,
         )
+        if pistoia_mask_on_model_grid is not None:
+            pistoia_mask_on_model_grid = flat_crop_vtk_image_below_z(
+                pistoia_mask_on_model_grid,
+                model_cut_z,
+            )
         ogo.message(
             "Applied model-grid distal shaft cut z=%8.4f; model mask z coverage [%8.4f, %8.4f]"
             % (model_cut_z, model_z_min, model_z_max)
@@ -2921,12 +3083,9 @@ def sidewaysFallFe(args):
     # Create PMMA disks from bbox-relative contact planes. The disk normal
     # points from the contact plane toward the anatomy; the generated PMMA
     # image clears any femur-mask voxels so PMMA never occupies the segmentation.
-    femoral_head_plane = bbox_relative_fixture_plane(
+    femoral_head_plane = proximal_sideways_fall_fixture_plane(
         model_bounds,
         center_fraction=FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
-        size_fraction=SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
-        projection_axis="y",
-        shape=SIDEWAYS_FALL_FIXTURE_SHAPE,
     )
     femoral_head_cap_direction = bbox_relative_fixture_direction(
         FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
@@ -2946,12 +3105,9 @@ def sidewaysFallFe(args):
 
     ##
     # Creates the greater trochanter pmma cap
-    greater_trochanter_plane = bbox_relative_fixture_plane(
+    greater_trochanter_plane = proximal_sideways_fall_fixture_plane(
         model_bounds,
         center_fraction=GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
-        size_fraction=SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
-        projection_axis="y",
-        shape=SIDEWAYS_FALL_FIXTURE_SHAPE,
     )
     greater_trochanter_cap_direction = bbox_relative_fixture_direction(
         GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
@@ -2997,6 +3153,8 @@ def sidewaysFallFe(args):
         images_to_fit = [change, femur_mask_on_model_grid]
         if distal_crop_face_change is not None:
             images_to_fit.append(distal_crop_face_change)
+        if pistoia_mask_on_model_grid is not None:
+            images_to_fit.append(pistoia_mask_on_model_grid)
         fitted_images, contact_fit = fit_vtk_images_to_physical_bounds(
             images_to_fit,
             desired_bounds=desired_bounds,
@@ -3006,6 +3164,11 @@ def sidewaysFallFe(args):
         femur_mask_on_model_grid = fitted_images[1]
         if distal_crop_face_change is not None:
             distal_crop_face_change = fitted_images[2]
+            next_fit_index = 3
+        else:
+            next_fit_index = 2
+        if pistoia_mask_on_model_grid is not None:
+            pistoia_mask_on_model_grid = fitted_images[next_fit_index]
         model_bounds = foreground_voxel_center_bounds(femur_mask_on_model_grid)
         ogo.message(
             "Fit model canvas to projected PMMA contact bounds: output_extent=%s"
@@ -3289,6 +3452,14 @@ def sidewaysFallFe(args):
     model2.AppendHistory(
         "Created by %s version %s." % (script_name, script_version))
 
+    if pistoia_mask_on_model_grid is not None:
+        mask_sidecar = pistoia_mask_output_path(N88_fileName)
+        ogo.message("Writing model-space Pistoia ROI mask: %s" % mask_sidecar)
+        write_vtk_image_with_sitk_geometry(
+            ogo.cast2unsignchar(pistoia_mask_on_model_grid),
+            mask_sidecar,
+        )
+
     ##
     # Write out n88model file
     ogo.message("Writing out n88model file: %s" % N88_fileName)
@@ -3380,7 +3551,7 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Retained proximal femur length [mm] for --femur_cut_mode fixed_length. (default: %(default)s [mm])")
     parser.add_argument("--femur_cut_mode", choices=["bbox_ratio", "proximal_box_ratio", "post_icp_oblique_ratio", "post_icp_flat_ratio", "greater_trochanter_length", "lesser_trochanter", "fixed_length"],
                         default=DEFAULT_FEMUR_CUT_MODE,
-                        help="Set the distal femur crop. post_icp_oblique_ratio uses a fixed rough pre-ICP crop, then an angled final ratio crop after ICP following the transformed rough-crop face. post_icp_flat_ratio keeps the flat aligned-frame comparison path. greater_trochanter_length uses the rough crop only for ICP, then crops the transformed full scan to a fixed distance distal to the detected greater trochanter. (default: %(default)s)")
+                        help="Set the distal femur crop. post_icp_oblique_ratio uses a fixed rough pre-ICP crop, then an angled final ratio crop after ICP following the transformed rough-crop face. post_icp_flat_ratio keeps the flat aligned-frame comparison path. greater_trochanter_length uses the rough crop only for ICP, then crops the transformed full scan to a fixed shaft length distal to the detected GT-disk distal edge. (default: %(default)s)")
     parser.add_argument("--femur_bbox_ratio", nargs=3, default=DEFAULT_FEMUR_BBOX_RATIO,
                         help="BBox-ratio crop in recipe order: reference constrained free. Use 'none' for a free axis. (default: %(default)s)")
     parser.add_argument("--femur_bbox_crop_from", nargs=3, default=DEFAULT_FEMUR_BBOX_CROP_FROM,
@@ -3388,7 +3559,9 @@ This script sets up the sideways fall FE model on the hip from the
     parser.add_argument("--femur_experimental_crop_ratio", type=float, default=DEFAULT_FEMUR_EXPERIMENTAL_RATIO,
                         help="Retained proximal femur length as a multiple of the proximal transverse max(x, y) width in proximal_box_ratio mode. (default: %(default)s)")
     parser.add_argument("--femur_greater_trochanter_distal_length", type=float, default=DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM,
-                        help="Retained femur length [mm] distal to the detected greater-trochanter level in greater_trochanter_length mode. (default: %(default)s [mm])")
+                        help="Retained shaft length [mm] distal to the detected GT-disk distal edge in greater_trochanter_length mode. (default: %(default)s [mm])")
+    parser.add_argument("--femur_greater_trochanter_inclusion_length", type=float, default=DEFAULT_FEMUR_GREATER_TROCHANTER_INCLUSION_LENGTH_MM,
+                        help="Optional extra distal offset [mm] below the detected GT-disk distal edge before measuring --femur_greater_trochanter_distal_length. The default makes the disk distal edge 0 mm. (default: %(default)s [mm])")
     parser.add_argument("--femur_proximal_reference_distance", type=float, default=DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
                         help="Proximal-most distance [mm] used to estimate transverse reference width in proximal_box_ratio mode. (default: %(default)s)")
     parser.add_argument("--femur_proximal_reference_width", choices=["max_xy", "rms_xy"], default=DEFAULT_FEMUR_PROXIMAL_REFERENCE_WIDTH,
@@ -3405,6 +3578,8 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Optional path to write the estimated femur ICP transform JSON. (default: %(default)s)")
     parser.add_argument("--compartment_mask", type=str, default=None,
                         help="Optional trabecular/cortical compartment mask aligned with the bone mask. Defaults: cortical=1, trabecular=2.")
+    parser.add_argument("--pistoia_mask", type=str, default=None,
+                        help="Optional ROI mask aligned with the input image for model-space masked Pistoia reporting.")
     parser.add_argument("--cortical_label", type=int, default=DEFAULT_CORTICAL_LABEL,
                         help="Label value for cortical bone in --compartment_mask. (default: %(default)s)")
     parser.add_argument("--trabecular_label", type=int, default=DEFAULT_TRABECULAR_LABEL,

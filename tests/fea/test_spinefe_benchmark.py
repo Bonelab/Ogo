@@ -154,6 +154,85 @@ def test_merge_vtk_images_can_preserve_existing_material_voxels():
     assert out[2, 1, 1] == 5000
 
 
+def _binary_vtk_image(array):
+    vtk = pytest.importorskip("vtk")
+    from ogo.util.vtk_image import numpy_to_vtk_image
+
+    image = vtk.vtkImageData()
+    image.SetDimensions(array.shape)
+    image.SetOrigin(0, 0, 0)
+    image.SetSpacing(1, 1, 1)
+    return numpy_to_vtk_image(array.astype("uint8"), image, vtk_array_type=vtk.VTK_UNSIGNED_CHAR)
+
+
+def test_spine_process_orientation_qc_allows_process_offset_in_xy():
+    np = pytest.importorskip("numpy")
+    from ogo.fea.spine import check_spine_process_orientation
+
+    body = np.zeros((24, 24, 24), dtype=bool)
+    process = np.zeros_like(body)
+    body[9:15, 9:15, 9:15] = True
+    process[17:22, 10:14, 10:14] = True
+
+    qc = check_spine_process_orientation(
+        _binary_vtk_image(body),
+        _binary_vtk_image(process),
+    )
+
+    assert qc["status"] == "ok"
+    assert qc["transverse_offset_mm"] > qc["axial_offset_mm"]
+
+
+def test_spine_process_orientation_qc_rejects_process_offset_along_z():
+    np = pytest.importorskip("numpy")
+    from ogo.fea.spine import check_spine_process_orientation
+
+    body = np.zeros((24, 24, 24), dtype=bool)
+    process = np.zeros_like(body)
+    body[9:15, 9:15, 9:15] = True
+    process[10:14, 10:14, 17:22] = True
+
+    with pytest.raises(ValueError, match="posterior process orientation QC failed"):
+        check_spine_process_orientation(
+            _binary_vtk_image(body),
+            _binary_vtk_image(process),
+        )
+
+
+def test_spine_process_orientation_score_prefers_transverse_registration():
+    np = pytest.importorskip("numpy")
+    from ogo.fea.spine import spine_process_orientation_metrics_for_rotation
+
+    body_centroid = np.array([0.0, 0.0, 0.0])
+    process_centroid = np.array([30.0, 0.0, 0.0])
+    transverse = np.eye(3)
+    x_to_z_swap = np.array(
+        [
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ]
+    )
+
+    good = spine_process_orientation_metrics_for_rotation(
+        body_centroid,
+        process_centroid,
+        transverse,
+    )
+    bad = spine_process_orientation_metrics_for_rotation(
+        body_centroid,
+        process_centroid,
+        x_to_z_swap,
+    )
+
+    assert good["status"] == "ok"
+    assert good["axial_offset_mm"] == pytest.approx(0.0)
+    assert good["transverse_offset_mm"] == pytest.approx(30.0)
+    assert bad["status"] == "failed"
+    assert bad["axial_offset_mm"] == pytest.approx(30.0)
+    assert bad["transverse_offset_mm"] == pytest.approx(0.0)
+
+
 def test_spine_workflow_uses_projected_contact_disks():
     pytest.importorskip("vtk")
 

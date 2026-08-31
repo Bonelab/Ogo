@@ -13,18 +13,29 @@ def log_fe_arguments(**kwargs):
     ogo.message("======================================")
 
 
-def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_id, node_set_name):
-    """Find exterior nodes facing a direction and attach them as a model node set."""
+def visible_node_ids_by_geometry(bc_geometry, normal_vector, bone_material_id, node_set_name):
+    """Return exterior nodes facing a direction on a material geometry."""
     import vtk
     import vtkbone
-
-    import ogo.util.Helper as ogo
 
     visible_nodes_ids = vtk.vtkIdTypeArray()
     vtkbone.vtkboneNodeSetsByGeometry.FindNodesOnVisibleSurface(
         visible_nodes_ids, bc_geometry, normal_vector, bone_material_id
     )
     visible_nodes_ids.SetName(node_set_name)
+    return visible_nodes_ids
+
+
+def find_and_add_visible_nodes(model, bc_geometry, normal_vector, bone_material_id, node_set_name):
+    """Find exterior nodes facing a direction and attach them as a model node set."""
+    import ogo.util.Helper as ogo
+
+    visible_nodes_ids = visible_node_ids_by_geometry(
+        bc_geometry,
+        normal_vector,
+        bone_material_id,
+        node_set_name,
+    )
     model.AddNodeSet(visible_nodes_ids)
     ogo.message(f"Found {visible_nodes_ids.GetNumberOfTuples()} visible nodes for {node_set_name}.")
     return model
@@ -316,6 +327,86 @@ def directional_face_node_ids_from_voxel_mask(
     return node_ids
 
 
+def nearest_coordinate_face_node_ids_from_voxel_mask(
+    model,
+    selected_vtk,
+    *,
+    direction,
+    name=None,
+    tolerance=1.0e-4,
+    max_distance_mm=None,
+):
+    """Return model nodes on the nearest coordinate plane to a label-mask face."""
+    import numpy as np
+    import vtk
+
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
+    selected = vtk_image_to_numpy(selected_vtk) != 0
+    if not np.any(selected):
+        node_ids = vtk.vtkIdTypeArray()
+        if name is not None:
+            node_ids.SetName(str(name))
+        return node_ids
+
+    spacing = np.asarray(selected_vtk.GetSpacing(), dtype=np.float64)
+    origin = np.asarray(selected_vtk.GetOrigin(), dtype=np.float64)
+    extent = selected_vtk.GetExtent()
+    offset = np.asarray([extent[0], extent[2], extent[4]], dtype=np.float64)
+    vector = np.asarray(direction, dtype=np.float64)
+    if vector.shape != (3,) or not np.all(np.isfinite(vector)) or not np.any(vector):
+        raise ValueError("direction must be a finite non-zero 3-vector.")
+    axis = int(np.argmax(np.abs(vector)))
+    side = 1.0 if vector[axis] >= 0.0 else -1.0
+    coords = np.argwhere(selected).astype(np.float64)
+    centers = origin + (coords + offset) * spacing
+    target = (
+        np.max(centers[:, axis] + spacing[axis] / 2.0)
+        if side > 0.0
+        else np.min(centers[:, axis] - spacing[axis] / 2.0)
+    )
+    lateral_axes = [idx for idx in range(3) if idx != axis]
+    lower = np.min(centers[:, lateral_axes] - spacing[lateral_axes] / 2.0, axis=0)
+    upper = np.max(centers[:, lateral_axes] + spacing[lateral_axes] / 2.0, axis=0)
+    band = (
+        float(max_distance_mm)
+        if max_distance_mm is not None
+        else max(float(spacing[axis]) * 1.25, float(tolerance))
+    )
+    lateral_margin = np.maximum(spacing[lateral_axes], float(tolerance))
+
+    candidates = []
+    for point_id in range(model.GetNumberOfPoints()):
+        point = np.asarray(model.GetPoint(point_id), dtype=np.float64)
+        if abs(float(point[axis] - target)) > band:
+            continue
+        lateral = point[lateral_axes]
+        if np.any(lateral < lower - lateral_margin) or np.any(lateral > upper + lateral_margin):
+            continue
+        candidates.append((int(point_id), float(point[axis])))
+
+    node_ids = vtk.vtkIdTypeArray()
+    if name is not None:
+        node_ids.SetName(str(name))
+    if not candidates:
+        return node_ids
+
+    planes = {}
+    plane_tolerance = max(float(tolerance), 1.0e-3)
+    for point_id, coordinate in candidates:
+        key = round(coordinate / plane_tolerance)
+        planes.setdefault(key, []).append((point_id, coordinate))
+    chosen_plane = min(
+        planes.values(),
+        key=lambda values: abs(
+            sum(coordinate for _, coordinate in values) / len(values) - target
+        ),
+    )
+    for point_id, _ in sorted(chosen_plane):
+        node_ids.InsertNextValue(point_id)
+    return node_ids
+
+
 def directional_face_node_ids_from_label_image(
     model,
     labels_vtk,
@@ -336,7 +427,16 @@ def directional_face_node_ids_from_label_image(
         labels_vtk,
         vtk_array_type=vtk.VTK_UNSIGNED_CHAR,
     )
-    return directional_face_node_ids_from_voxel_mask(
+    node_ids = directional_face_node_ids_from_voxel_mask(
+        model,
+        selected_vtk,
+        direction=direction,
+        name=name,
+        tolerance=tolerance,
+    )
+    if node_ids.GetNumberOfTuples() > 0:
+        return node_ids
+    return nearest_coordinate_face_node_ids_from_voxel_mask(
         model,
         selected_vtk,
         direction=direction,
@@ -452,6 +552,17 @@ def create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers,
             name=top_node_set_name,
             tolerance=bc_filter_tolerance,
         )
+        if top_nodes.GetNumberOfTuples() == 0:
+            ogo.message(
+                f"No exact outer-face nodes found for {top_node_set_name}; "
+                "falling back to visible PMMA cap nodes."
+            )
+            top_nodes = visible_node_ids_by_geometry(
+                temp_bc_mesh,
+                top_direction,
+                top_node_set_id,
+                top_node_set_name,
+            )
         bottom_nodes = directional_face_node_ids_from_label_image(
             model,
             bottom_boundary_mask_image,
@@ -460,6 +571,17 @@ def create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers,
             name=bottom_node_set_name,
             tolerance=bc_filter_tolerance,
         )
+        if bottom_nodes.GetNumberOfTuples() == 0:
+            ogo.message(
+                f"No exact outer-face nodes found for {bottom_node_set_name}; "
+                "falling back to visible PMMA cap nodes."
+            )
+            bottom_nodes = visible_node_ids_by_geometry(
+                temp_bc_mesh,
+                bottom_direction,
+                bottom_node_set_id,
+                bottom_node_set_name,
+            )
         model.AddNodeSet(top_nodes)
         model.AddNodeSet(bottom_nodes)
         ogo.message(
@@ -476,9 +598,7 @@ def create_microfe_model(image_with_pads, boundary_masks_with_pads, bin_centers,
             model, temp_bc_mesh, bottom_direction, bottom_node_set_id, bottom_node_set_name
         )
 
-    if filter_bc_node_sets and (
-        top_boundary_mask_image is None or bottom_boundary_mask_image is None
-    ):
+    if filter_bc_node_sets:
         model = filter_node_set_to_dominant_coordinate_plane(
             model,
             top_node_set_name,
