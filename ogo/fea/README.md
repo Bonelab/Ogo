@@ -38,6 +38,53 @@ side-specific femur reference frame.
 
 ## Basic Commands
 
+### Recommended Spine Command
+
+For a standard solved L1 compression model, run the high-level wrapper. This
+generates the `.n88model`, audits the boundary conditions, solves it with
+FAIM/N88, runs optional Pistoia postprocessing, and writes a compact
+`_results.csv` next to the model:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --output_path derivatives/fea \
+  --threads 4 \
+  --faim_bin_dir /path/to/n88/bin \
+  --run_pistoia \
+  --critical_volume 12 \
+  --critical_strain 0.007
+```
+
+The `--vertebra` value is `LEVEL:BODY_LABEL:PROCESS_LABEL`. For example,
+`L1:2:3` means that label `2` is the L1 vertebral body and label `3` is the L1
+posterior process. Repeat `--vertebra` to process more than one level from the
+same image.
+
+To additionally report Pistoia for an ROI such as the vertebral body, pass a
+mask in the same image space as the calibrated CT and segmentation:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --pistoia_mask sub-001_desc-L1Body_mask.nii.gz \
+  --output_path derivatives/fea \
+  --threads 4 \
+  --faim_bin_dir /path/to/n88/bin \
+  --run_pistoia \
+  --critical_volume 12 \
+  --critical_strain 0.007
+```
+
+Ogo transforms this ROI mask through the same preprocessing, alignment,
+resampling, and padding steps as the model, then writes the model-space mask as
+`<model-stem>_pistoia_mask.nii.gz`. The `_results.csv` includes both full-model
+Pistoia fields and `masked_pistoia_*` fields when a mask is supplied.
+
 Generate and solve one L1 model:
 
 ```bash
@@ -168,6 +215,9 @@ ogoFEA spine \
 Other available solver-location options are `--faim_bin_dir`,
 `--faim_install_root`, `--faim_license_dir`, and explicit command overrides
 such as `--faim_command`, `--n88postfaim_command`, and `--n88tabulate_command`.
+Ogo does not search your filesystem for an arbitrary N88 installation. If the
+N88 commands are not already on `PATH`, use `--faim_bin_dir`, `--faim_env`, or
+the explicit command overrides.
 
 FAIM/N88 does not interpret prescribed displacement as percent strain in these
 models. The `.n88model` stores the applied displacement in millimeters. For
@@ -378,7 +428,8 @@ where `rho` is density in g/cc. In code this is
 
 The `benchmark-linear` preset uses this elastic law only. It does not assign a
 bone yield criterion, so the solved model is linear elastic. The maintained
-spine workflow does not run or report Pistoia postprocessing.
+spine workflow runs Pistoia when `--run_pistoia`, `--require_pistoia`, or
+`--pistoia_mask` is supplied.
 
 The `benchmark-nonlinear` preset additionally assigns the Kopperdahl
 compressive yield law:
