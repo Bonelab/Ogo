@@ -23,7 +23,14 @@ For each requested vertebra it:
 8. Solves the model with FAIM/N88 and writes a compact `_results.csv`.
 9. Optionally runs full-model and masked-ROI Pistoia postprocessing.
 
-## Check Out The FEA Branch
+## Fresh Setup On A New Computer
+
+Use this section when setting up a new workstation from scratch.
+
+### 1. Get Ogo
+
+Install Git and a conda-style Python distribution such as Miniforge or
+Miniconda, then check out the FEA branch:
 
 ```bash
 git clone git@github.com:Bonelab/Ogo.git
@@ -32,18 +39,79 @@ git checkout ogo-fea
 git pull origin ogo-fea
 ```
 
-Install or activate Ogo in the environment you want to use for model building:
+### 2. Create The Ogo Environment
+
+If the repository environment file works on your system, use it:
 
 ```bash
+conda env create -n ogo -f environment.yml
 conda activate ogo
 python -m pip install -e .
 ```
 
-Check that the command is available:
+If dependency solving fails, create a plain environment and install Ogo
+editable. Then add any missing Python packages reported by import errors:
 
 ```bash
+conda create -n ogo python=3.10
+conda activate ogo
+python -m pip install -r requirements.txt
+python -m pip install -e .
+```
+
+Check that the command is available from this environment:
+
+```bash
+which ogoFEA
 ogoFEA --help
 ```
+
+### 3. Make N88/FAIM Discoverable
+
+Ogo builds the `.n88model` in Python, but solving and Pistoia require the
+Numerics88/FAIM command-line tools.
+
+If the N88 commands are already on your `PATH`, this should print paths:
+
+```bash
+which n88modelinfo
+which n88pistoia
+which n88tabulate
+which faim
+```
+
+If they are not on `PATH`, decide how Ogo should find them:
+
+| Setup | How to run |
+| --- | --- |
+| N88 tools live in one directory | Pass `--faim_bin_dir /path/to/n88/bin`. |
+| N88 tools live in a separate conda environment | Pass `--faim_env ENV_NAME`. |
+| Individual tools have unusual names or locations | Pass explicit overrides such as `--n88pistoia_command /path/to/n88pistoia`. |
+
+On a machine with a separate N88 environment, a typical check is:
+
+```bash
+conda run -n ogoloco-n88 n88modelinfo --help
+conda run -n ogoloco-n88 n88pistoia --help
+```
+
+### 4. Verify With A Debug Model
+
+Before the first solved run on a new computer, generate an unsolved debug model:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:2:3 \
+  --output_path derivatives/fea_test \
+  --debug \
+  --no-solve
+```
+
+This confirms that Ogo can read the images, find the labels, align the
+vertebra, build the PMMA supports, and write the `.n88model`. After inspecting
+the debug output, run the solved command below in a clean output directory.
 
 ## Required Inputs
 
