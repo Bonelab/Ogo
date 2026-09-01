@@ -36,6 +36,51 @@ The spine mask must contain both the body and posterior process labels. The
 femur workflow currently requires a side-specific run because alignment uses a
 side-specific femur reference frame.
 
+## Conceptual Walkthrough
+
+Think of each FEA run as a reproducible conversion from calibrated CT data to a
+mechanical test:
+
+1. Start with density-calibrated QCT and a segmentation in the same image
+   space. The CT values are treated as density information; the segmentation
+   defines which voxels become bone in the model.
+2. Put the anatomy into a standard model frame. Spine models use the supplied
+   vertebra labels directly. Hip models first use a fixed proximal rough crop to
+   make femur ICP stable, then apply the final model crop after ICP from the
+   transformed full scan.
+3. Resample to an isotropic finite-element grid. The maintained hip and spine
+   workflows use `1.0 mm` isotropic output spacing unless overridden. Density is
+   interpolated continuously; masks and labels use nearest-neighbor
+   interpolation.
+4. Convert density to elastic material properties. The image is thresholded,
+   binned into material IDs, and each material receives an elastic modulus from
+   the selected density-modulus law. PMMA supports are added as separate stiff
+   material regions.
+5. Build support geometry. Spine models receive superior and inferior PMMA caps
+   around the vertebral body. Hip sideways-fall models receive femoral-head and
+   greater-trochanter PMMA supports plus a distal shaft support.
+6. Apply boundary conditions and solve. The spine model is compressed axially.
+   The hip model applies a prescribed femoral-head displacement toward the fixed
+   greater trochanter while the distal shaft removes rigid-body motion.
+7. Report linear mechanics and Pistoia failure estimates. Reaction force and
+   stiffness come from the linear solve. Pistoia estimates the load at which the
+   weakest specified tissue volume reaches the critical strain. If a
+   `--pistoia_mask` is provided, both full-model and masked-ROI Pistoia values
+   are reported.
+
+The most important hip convention is the short-femur shaft definition. In
+`greater_trochanter_length` mode, the requested length is not measured from the
+femoral head and not from the raw GT landmark. It is measured after the
+generated greater-trochanter support. The boundary-condition audit reports the
+final model-space measurement as:
+
+```text
+p5(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
+```
+
+This definition makes the requested shaft length a property of the generated
+mechanical model, not an intermediate preprocessing coordinate.
+
 ## Basic Commands
 
 ### Recommended Spine Command
