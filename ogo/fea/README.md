@@ -172,6 +172,30 @@ resampling, and padding steps as the model, then writes the model-space mask as
 `<model-stem>_pistoia_mask.nii.gz`. The `_results.csv` includes both full-model
 Pistoia fields and `masked_pistoia_*` fields when a mask is supplied.
 
+If the ROI is already a label inside the main segmentation, keep the workflow
+less error-prone by selecting that label directly. For example, if label `20`
+is the L1 vertebral body and label `48` is the posterior process, this command
+uses the main segmentation as the Pistoia ROI source but keeps only label `20`
+for masked Pistoia:
+
+```bash
+ogoFEA spine \
+  sub-001_desc-vqct_ct.nii.gz \
+  sub-001_desc-spine_labels.nii.gz \
+  --vertebra L1:20:48 \
+  --pistoia_mask_label 20 \
+  --output_path derivatives/fea \
+  --threads 4 \
+  --run_pistoia \
+  --critical_volume 12 \
+  --critical_strain 0.007
+```
+
+When `--pistoia_mask_label` is supplied without `--pistoia_mask`, the main
+`bone_mask` is used as the ROI source. Repeat `--pistoia_mask_label` to keep a
+multi-label ROI. Without any label selection, `--pistoia_mask` remains a binary
+mask: every nonzero voxel in that mask is included.
+
 Generate and solve one L1 model:
 
 ```bash
@@ -477,6 +501,12 @@ Femur reporting defaults to stiffness and force at `4%` displacement. When
 `--run_pistoia` is supplied, the high-level wrapper also reports full-model
 Pistoia failure load and, if `--pistoia_mask` is supplied, masked-region
 Pistoia failure load.
+
+Femur masked Pistoia follows the same ROI convention as spine. A separate
+femoral-neck mask can be passed with `--pistoia_mask`. If the femoral-neck ROI
+is a label inside the same segmentation used as the femur mask, pass
+`--pistoia_mask_label LABEL` and omit `--pistoia_mask`; Ogo will use the main
+segmentation as the ROI source and keep only that label.
 
 For the maintained short-femur cohort model, use:
 

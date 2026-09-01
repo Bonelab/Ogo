@@ -2352,6 +2352,7 @@ def sidewaysFallFe(args):
     mask = args.bone_mask
     compartment_mask = args.compartment_mask
     pistoia_mask = args.pistoia_mask
+    pistoia_mask_label = args.pistoia_mask_label or []
 
     mask_threshold = args.mask_threshold
     iso_resolution = args.iso_resolution
@@ -2458,6 +2459,8 @@ def sidewaysFallFe(args):
         ogo.message("Trabecular Label: %d" % trabecular_label)
     if pistoia_mask is not None:
         ogo.message("Pistoia ROI Mask: %s" % pistoia_mask)
+        if pistoia_mask_label:
+            ogo.message("Pistoia ROI Label(s): %s" % pistoia_mask_label)
     if femur_cut_mode == "fixed_length":
         ogo.message("Retained Proximal Femur Length [mm]: %8.4f" % femur_shaft_length)
     elif femur_lesser_trochanter_distal_offset_percent is not None:
@@ -2491,6 +2494,8 @@ def sidewaysFallFe(args):
     if pistoia_mask is not None:
         ogo.message("Reading Pistoia ROI mask...")
         pistoiaMaskData = ogo.readNii(pistoia_mask)
+        if pistoia_mask_label:
+            pistoiaMaskData = ogo.maskThreshold(pistoiaMaskData, pistoia_mask_label)
 
     distal_crop_face = None
     bbox_crop_meta = None
@@ -3593,6 +3598,8 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Optional trabecular/cortical compartment mask aligned with the bone mask. Defaults: cortical=1, trabecular=2.")
     parser.add_argument("--pistoia_mask", type=str, default=None,
                         help="Optional ROI mask aligned with the input image for model-space masked Pistoia reporting.")
+    parser.add_argument("--pistoia_mask_label", type=int, action="append", default=None,
+                        help="Label to keep from --pistoia_mask before masked Pistoia. Repeat for a multi-label ROI.")
     parser.add_argument("--cortical_label", type=int, default=DEFAULT_CORTICAL_LABEL,
                         help="Label value for cortical bone in --compartment_mask. (default: %(default)s)")
     parser.add_argument("--trabecular_label", type=int, default=DEFAULT_TRABECULAR_LABEL,

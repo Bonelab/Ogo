@@ -188,9 +188,18 @@ def pistoia_mask_output_path(model_path: Path) -> Path:
     return model_path.with_name(model_path.with_suffix("").name + "_pistoia_mask.nii.gz")
 
 
+def pistoia_mask_source_path(args: argparse.Namespace) -> Optional[Path]:
+    """Return the input-space source image used for masked Pistoia, if any."""
+    if getattr(args, "pistoia_mask", None) is not None:
+        return Path(args.pistoia_mask)
+    if getattr(args, "pistoia_mask_label", None):
+        return Path(args.bone_mask)
+    return None
+
+
 def model_space_pistoia_mask_path(model_path: Path, args: argparse.Namespace) -> Optional[Path]:
     """Return the transformed Pistoia ROI mask sidecar expected by the solver."""
-    if getattr(args, "pistoia_mask", None) is None:
+    if pistoia_mask_source_path(args) is None:
         return None
     return pistoia_mask_output_path(model_path)
 
@@ -363,7 +372,7 @@ def solve_model(
 
     solve_displacement_percent = None if args.use_absolute_fe_displacement else profile["target_displacement_percent"]
     target_displacement = abs(float(applied_displacement)) if args.use_absolute_fe_displacement else profile["target_displacement_percent"]
-    run_pistoia = args.run_pistoia or args.require_pistoia or args.pistoia_mask is not None
+    run_pistoia = args.run_pistoia or args.require_pistoia or pistoia_mask_source_path(args) is not None
 
     run_faim_pipeline(
         model_file=model_path,
@@ -447,10 +456,13 @@ def write_modeling_metadata(
             "solve_requested": not args.no_solve,
             "target_displacement_percent": target_displacement_percent(args, model_type),
             "target_displacement_definition": "percent strain converted from model geometry for spine; percent of femur length for femur",
-            "run_pistoia": args.run_pistoia or args.require_pistoia or args.pistoia_mask is not None,
-            "source_pistoia_mask": None if args.pistoia_mask is None else str(args.pistoia_mask),
+            "run_pistoia": args.run_pistoia or args.require_pistoia or pistoia_mask_source_path(args) is not None,
+            "source_pistoia_mask": None
+            if pistoia_mask_source_path(args) is None
+            else str(pistoia_mask_source_path(args)),
+            "pistoia_mask_labels": list(args.pistoia_mask_label or []),
             "model_space_pistoia_mask": None
-            if args.pistoia_mask is None
+            if pistoia_mask_source_path(args) is None
             else str(pistoia_mask_output_path(model_path)),
             "compress_solved_model": not args.no_compress,
         },
@@ -1070,6 +1082,17 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--pistoia_mask_label",
+        type=int,
+        action="append",
+        default=None,
+        help=(
+            "Label to keep from the Pistoia ROI source before masked Pistoia. Repeat "
+            "for a multi-label ROI. If labels are supplied without --pistoia_mask, "
+            "the main bone mask is used as the ROI source."
+        ),
+    )
+    parser.add_argument(
         "--no_compress",
         action="store_true",
         help="Skip n88copymodel --compress after solving.",
@@ -1158,9 +1181,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if not args.dry_run:
         ensure_output_directory(args.output_path)
 
-    pistoia_mask_args = (
-        ["--pistoia_mask", str(args.pistoia_mask)] if args.pistoia_mask is not None else []
-    )
+    pistoia_mask_source = pistoia_mask_source_path(args)
+    pistoia_mask_args = []
+    if pistoia_mask_source is not None:
+        pistoia_mask_args.extend(["--pistoia_mask", str(pistoia_mask_source)])
+    for label in args.pistoia_mask_label or []:
+        pistoia_mask_args.extend(["--pistoia_mask_label", str(label)])
 
     if args.model_type == "spine":
         spine_extra_args = spine_preset_args(args.preset) + pistoia_mask_args + list(extra_args) + [

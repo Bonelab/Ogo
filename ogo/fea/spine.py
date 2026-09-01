@@ -1351,6 +1351,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
 
     pmma_mat_id = kwargs.get("pmma_mat_id", 5000)
     pistoia_mask = kwargs.get("pistoia_mask")
+    pistoia_mask_label = kwargs.get("pistoia_mask_label") or []
     iso_resolution = kwargs.get("iso_resolution", DEFAULT_SPINE_ISO_RESOLUTION_MM)
     pmma_thick = kwargs.get("pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM)
     pmma_intrusion = kwargs.get("pmma_intrusion", DEFAULT_SPINE_PMMA_INTRUSION_MM)
@@ -1388,6 +1389,12 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
             image_reader.GetOutput(),
             read(pistoia_mask).GetOutput(),
         )
+        if pistoia_mask_label:
+            ogo.message(f"Keeping Pistoia ROI label(s): {pistoia_mask_label}")
+            pistoia_mask_reader = resample_to_match(
+                image_reader.GetOutput(),
+                ogo.maskThreshold(pistoia_mask_reader.GetOutput(), pistoia_mask_label),
+            )
     input_spacing = image_reader.GetOutput().GetSpacing()
 
     # Get and Check labels
@@ -1853,6 +1860,8 @@ def main():
                         help="Set output path for the N88 model file. (default: same as input image)")
     parser.add_argument("--pistoia_mask", type=str, default=None,
                         help="Optional ROI mask aligned with the input image for model-space masked Pistoia reporting.")
+    parser.add_argument("--pistoia_mask_label", type=int, action="append", default=None,
+                        help="Label to keep from --pistoia_mask before masked Pistoia. Repeat for a multi-label ROI.")
     parser.add_argument("--quality_control", type=_as_bool, default=True,
                         help="Set quality control flag (visualise output and add volume checks). (default: %(default)s)")
     parser.add_argument("--iso_resolution", type=float, default=DEFAULT_SPINE_ISO_RESOLUTION_MM,

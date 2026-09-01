@@ -307,6 +307,62 @@ def test_spine_forwards_pistoia_mask_to_builder(monkeypatch, tmp_path, solve_cal
     assert calls[0][calls[0].index("--pistoia_mask") + 1] == "vertebral_body_roi.nii.gz"
 
 
+def test_spine_pistoia_mask_label_uses_bone_mask_when_mask_omitted(monkeypatch, tmp_path, solve_calls):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(GenerateFEM, "run_spine_command", lambda argv: calls.append(list(argv)))
+
+    GenerateFEM.main(
+        [
+            "spine",
+            "density.nii.gz",
+            "spine_mask.nii.gz",
+            "--output_path",
+            "models",
+            "--vertebra",
+            "L1:20:48",
+            "--pistoia_mask_label",
+            "20",
+            "--no-solve",
+        ]
+    )
+
+    assert "--pistoia_mask" in calls[0]
+    assert calls[0][calls[0].index("--pistoia_mask") + 1] == "spine_mask.nii.gz"
+    assert "--pistoia_mask_label" in calls[0]
+    assert calls[0][calls[0].index("--pistoia_mask_label") + 1] == "20"
+
+
+def test_spine_forwards_multiple_pistoia_mask_labels(monkeypatch, tmp_path, solve_calls):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(GenerateFEM, "run_spine_command", lambda argv: calls.append(list(argv)))
+
+    GenerateFEM.main(
+        [
+            "spine",
+            "density.nii.gz",
+            "spine_mask.nii.gz",
+            "--output_path",
+            "models",
+            "--vertebra",
+            "L1:20:48",
+            "--pistoia_mask",
+            "spine_labels.nii.gz",
+            "--pistoia_mask_label",
+            "20",
+            "--pistoia_mask_label",
+            "48",
+            "--no-solve",
+        ]
+    )
+
+    label_indexes = [
+        index + 1 for index, value in enumerate(calls[0]) if value == "--pistoia_mask_label"
+    ]
+    assert [calls[0][index] for index in label_indexes] == ["20", "48"]
+
+
 def test_hip_forwards_pistoia_mask_to_builder(monkeypatch, tmp_path, solve_calls):
     monkeypatch.chdir(tmp_path)
     calls = []
@@ -331,6 +387,32 @@ def test_hip_forwards_pistoia_mask_to_builder(monkeypatch, tmp_path, solve_calls
     assert calls[0][calls[0].index("--pistoia_mask") + 1] == "femoral_neck.nii.gz"
 
 
+def test_hip_pistoia_mask_label_uses_bone_mask_when_mask_omitted(monkeypatch, tmp_path, solve_calls):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(GenerateFEM, "run_femur_command", lambda argv: calls.append(list(argv)))
+
+    GenerateFEM.main(
+        [
+            "hip",
+            "density.nii.gz",
+            "left_femur_labels.nii.gz",
+            "--output_path",
+            "models",
+            "--side",
+            "left",
+            "--pistoia_mask_label",
+            "7",
+            "--no-solve",
+        ]
+    )
+
+    assert "--pistoia_mask" in calls[0]
+    assert calls[0][calls[0].index("--pistoia_mask") + 1] == "left_femur_labels.nii.gz"
+    assert "--pistoia_mask_label" in calls[0]
+    assert calls[0][calls[0].index("--pistoia_mask_label") + 1] == "7"
+
+
 def _metadata_args(tmp_path, no_solve=True, **overrides):
     data = {
         "dry_run": False,
@@ -350,6 +432,7 @@ def _metadata_args(tmp_path, no_solve=True, **overrides):
         "require_pistoia": False,
         "use_absolute_fe_displacement": False,
         "pistoia_mask": None,
+        "pistoia_mask_label": None,
     }
     data.update(overrides)
     return type(
@@ -362,6 +445,7 @@ def _metadata_args(tmp_path, no_solve=True, **overrides):
 def _solve_args(**overrides):
     data = {
         "threads": 4,
+        "bone_mask": Path("mask.nii.gz"),
         "faim_env": None,
         "conda_executable": "conda",
         "faim_install_root": None,
@@ -384,6 +468,7 @@ def _solve_args(**overrides):
         "target_displacement": None,
         "use_absolute_fe_displacement": False,
         "pistoia_mask": None,
+        "pistoia_mask_label": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -533,6 +618,26 @@ def test_pistoia_mask_implies_pistoia_and_sidecar_handoff(monkeypatch, tmp_path)
         _solve_args(pistoia_mask=Path("source_femoral_neck.nii.gz")),
         "hip",
         ["density.nii.gz", "left_femur.nii.gz", "--fe_displacement", "-4.0"],
+    )
+
+    assert calls[0]["run_pistoia"] is True
+    assert calls[0]["pistoia_mask_file"] == mask
+
+
+def test_pistoia_mask_label_implies_pistoia_and_sidecar_handoff(monkeypatch, tmp_path):
+    import ogo.util.faim as faim_module
+
+    model = tmp_path / "density_L1.n88model"
+    mask = tmp_path / "density_L1_pistoia_mask.nii.gz"
+    mask.write_text("mask", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(faim_module, "run_faim_pipeline", lambda **kwargs: calls.append(kwargs))
+
+    GenerateFEM.solve_model(
+        model,
+        _solve_args(pistoia_mask=None, pistoia_mask_label=[20]),
+        "spine",
+        ["density.nii.gz", "spine_mask.nii.gz", "--fe_displacement", "-0.2"],
     )
 
     assert calls[0]["run_pistoia"] is True
