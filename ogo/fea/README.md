@@ -36,50 +36,92 @@ The spine mask must contain both the body and posterior process labels. The
 femur workflow currently requires a side-specific run because alignment uses a
 side-specific femur reference frame.
 
-## Conceptual Walkthrough
+## Implementation Walkthrough
 
-Think of each FEA run as a reproducible conversion from calibrated CT data to a
-mechanical test:
+The high-level command is `ogoFEA`, implemented in `ogo/cli/GenerateFEM.py`.
+That file is intentionally the best starting point for a new developer because
+it owns the user-facing arguments, the lower-level anatomy command construction,
+the solve/reporting path, and the `_modeling.json` provenance record.
 
-1. Start with density-calibrated QCT and a segmentation in the same image
-   space. The CT values are treated as density information; the segmentation
-   defines which voxels become bone in the model.
-2. Put the anatomy into a standard model frame. Spine models use the supplied
-   vertebra labels directly. Hip models first use a fixed proximal rough crop to
-   make femur ICP stable, then apply the final model crop after ICP from the
-   transformed full scan.
-3. Resample to an isotropic finite-element grid. The maintained hip and spine
-   workflows use `1.0 mm` isotropic output spacing unless overridden. Density is
-   interpolated continuously; masks and labels use nearest-neighbor
-   interpolation.
-4. Convert density to elastic material properties. The image is thresholded,
-   binned into material IDs, and each material receives an elastic modulus from
-   the selected density-modulus law. PMMA supports are added as separate stiff
-   material regions.
-5. Build support geometry. Spine models receive superior and inferior PMMA caps
-   around the vertebral body. Hip sideways-fall models receive femoral-head and
-   greater-trochanter PMMA supports plus a distal shaft support.
-6. Apply boundary conditions and solve. The spine model is compressed axially.
-   The hip model applies a prescribed femoral-head displacement toward the fixed
-   greater trochanter while the distal shaft removes rigid-body motion.
-7. Report linear mechanics and Pistoia failure estimates. Reaction force and
-   stiffness come from the linear solve. Pistoia estimates the load at which the
-   weakest specified tissue volume reaches the critical strain. If a
-   `--pistoia_mask` is provided, both full-model and masked-ROI Pistoia values
-   are reported.
+Use this map when tracing a run:
 
-The most important hip convention is the short-femur shaft definition. In
-`greater_trochanter_length` mode, the requested length is not measured from the
-femoral head and not from the raw GT landmark. It is measured after the
-generated greater-trochanter support. The boundary-condition audit reports the
-final model-space measurement as:
+| Question | Main code location |
+| --- | --- |
+| Which command-line options are exposed? | `ogo/cli/GenerateFEM.py::build_parser` |
+| How does `ogoFEA spine` become a lower-level model-builder call? | `ogo/cli/GenerateFEM.py::build_spine_command` |
+| How does `ogoFEA hip` become a lower-level model-builder call? | `ogo/cli/GenerateFEM.py::build_femur_command` |
+| Where are solve endpoints, Pistoia settings, and result columns selected? | `ogo/cli/GenerateFEM.py::solve_report_profile`, `critical_volume_percent`, `solve_model` |
+| Where is model provenance written? | `ogo/cli/GenerateFEM.py::write_modeling_metadata` |
+| Where is the generated `.n88model` audited? | `ogo/cli/GenerateFEM.py::audit_generated_model`, `ogo/cli/CheckFEModelBC.py` |
+
+The anatomy-specific implementation is split below the CLI:
+
+| Anatomy | Main file | What belongs there |
+| --- | --- | --- |
+| Spine compression | `ogo/fea/spine.py` | Vertebra labels, body/process QC, spine ICP, 1 mm resampling, stable PMMA cap generation, axial compression defaults. |
+| Hip sideways fall | `ogo/fea/femur.py` | Side handling, femur reference alignment, rough pre-ICP crop, post-ICP GT-length crop, femoral-head/GT/distal supports, sideways-fall defaults. |
+| Shared material tables | `ogo/fea/materials.py` | Bone material ID ranges, PMMA material, shared femur/spine material-table construction. |
+| Material laws | `ogo/fea/material_laws.py` | Density-to-modulus and yield-strength functions such as `default_E` and `kopperdahl_trab_E`. |
+| Shared geometry/BC helpers | `ogo/fea/boundary.py` | Resampling helpers, projected material disks, PMMA caps, contact footprint calculations. |
+| N88 model writing | `ogo/fea/model.py` | `create_microfe_model` and `write_model`. |
+| FAIM/N88 adapter | `ogo/util/faim.py` | Solver command resolution, running `faim`/N88 tools, Pistoia parsing, masked Pistoia, compact `_results.csv`. |
+
+For spine, the maintained path is:
+
+1. `GenerateFEM.py::build_spine_command` forwards the calibrated image,
+   segmentation, target `LEVEL:BODY_LABEL:PROCESS_LABEL`, preset, optional
+   Pistoia mask, and any lower-level overrides.
+2. `spine.py::main` thresholds the requested body/process labels, crops around
+   the vertebra, checks posterior-process orientation, and runs scaled ICP to
+   the bundled L4 body reference from `default_spine_reference_path`.
+3. `spine.py` applies the transform and resamples the density image with cubic
+   interpolation and labels/masks with nearest-neighbor interpolation.
+4. `boundary.py::generate_bone_cap_mask` and related helpers generate superior
+   and inferior PMMA caps. The stable-contact settings are defined by
+   `DEFAULT_SPINE_STABLE_CONTACT_*` constants in `spine.py`.
+5. `materials.py::build_spine_material_table` assigns bone and PMMA material
+   definitions. The default benchmark linear preset uses
+   `material_laws.kopperdahl_trab_E`.
+6. `model.py::create_microfe_model` writes the N88 model structure, and the
+   high-level wrapper solves at the selected endpoint, defaulting to Crawford
+   `0.68%` strain for the maintained linear spine workflow.
+
+For hip, the maintained short-femur path is:
+
+1. `GenerateFEM.py::build_femur_command` forwards side, optional compartment
+   mask, optional Pistoia mask, and the femur crop settings.
+2. `femur.py::main` selects the side-specific femur mask and aligns it to the
+   bundled left or mirrored-right reference. The fixed rough crop for ICP
+   stability is controlled by `DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM`.
+3. In `greater_trochanter_length` mode, the rough crop is used only for the ICP
+   estimate. The final model is then regenerated from the transformed full scan.
+4. `femur.py::crop_vtk_images_to_greater_trochanter_length` applies the final
+   post-ICP flat shaft crop. The requested distal length is measured after the
+   generated GT support, not from the femoral head and not from the raw GT
+   landmark.
+5. `femur.py::proximal_sideways_fall_fixture_plane` and
+   `boundary.py::generate_projected_material_disk_vtk` create the femoral-head
+   and greater-trochanter PMMA supports. The distal crop face becomes the distal
+   shaft support.
+6. `materials.py::build_femur_material_table` assigns bone and PMMA material
+   definitions. The simple whole-femur path uses one trabecular-style bone
+   region unless a compartment mask is supplied.
+7. The high-level wrapper solves and reports the maintained hip endpoint,
+   defaulting to `4%` displacement.
+
+The most important short-femur convention is the final shaft-length definition.
+In `greater_trochanter_length` mode the requested value is the distance between
+the final GT support and the final distal shaft boundary condition. The audit in
+`ogo/cli/CheckFEModelBC.py::audit_femur_sideways` reports the robust model-space
+measurement as:
 
 ```text
 p5(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
 ```
 
-This definition makes the requested shaft length a property of the generated
-mechanical model, not an intermediate preprocessing coordinate.
+This is deliberately a boundary-condition measurement. It verifies the
+mechanical model that FAIM/N88 will solve rather than an intermediate crop
+coordinate.
 
 ## Basic Commands
 
