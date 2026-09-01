@@ -41,30 +41,50 @@ git pull origin ogo-fea
 
 ### 2. Create The Ogo Environment
 
-If the repository environment file works on your system, use it:
+The most reliable setup is to create an environment that gets `vtkbone` from
+the Numerics88 conda channel. This avoids the slow full `environment.yml` solve
+and avoids the common plain-`requirements.txt` failure where `vtkbone` is
+missing.
 
 ```bash
-conda env create -n ogo -f environment.yml
+conda create -n ogo -c numerics88 -c conda-forge \
+  git pandas nibabel pyyaml vtkbone pbr "setuptools<69" wheel python=3
 conda activate ogo
-python -m pip install -e .
+PBR_VERSION=0.0.1 pip install -e .
 ```
 
-If dependency solving fails, create a plain environment and install Ogo
-editable. Then add any missing Python packages reported by import errors:
-
-```bash
-conda create -n ogo python=3.10
-conda activate ogo
-python -m pip install -r requirements.txt
-python -m pip install -e .
-```
-
-Check that the command is available from this environment:
+Then verify the command-line entry point:
 
 ```bash
 which ogoFEA
 ogoFEA --help
 ```
+
+The repository also contains `environment.yml`, but it can take a long time to
+solve on a new machine. Use it only if you need to reproduce that exact pinned
+environment:
+
+```bash
+conda env create -n ogo-pinned -f environment.yml
+```
+
+If `pip install -e .` fails with a PBR versioning error, first check whether
+Git is available inside the active environment:
+
+```bash
+which git
+```
+
+If this prints nothing, install Git into the environment and rerun the editable
+install:
+
+```bash
+conda install -c conda-forge git
+PBR_VERSION=0.0.1 pip install -e .
+```
+
+`PBR_VERSION=0.0.1` is only used for package metadata during installation. It
+does not change the checked-out Ogo code.
 
 ### 3. Make N88/FAIM Discoverable
 
