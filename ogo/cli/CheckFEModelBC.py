@@ -43,6 +43,15 @@ def _centroid(points):
     return {"x": float(center[0]), "y": float(center[1]), "z": float(center[2])}
 
 
+def _z_percentiles(points):
+    z = np.asarray(points[:, 2], dtype=float)
+    return {
+        "p05": float(np.percentile(z, 5)),
+        "p50": float(np.percentile(z, 50)),
+        "p95": float(np.percentile(z, 95)),
+    }
+
+
 def _planarity(points):
     if len(points) < 3:
         return {"rms_mm": 0.0, "normal": [0.0, 0.0, 1.0]}
@@ -65,6 +74,7 @@ def read_node_sets(root):
             "count": int(len(node_numbers)),
             "bounds": _bounds(points),
             "centroid": _centroid(points),
+            "z_percentiles": _z_percentiles(points),
             "planarity": _planarity(points),
         }
     return out
@@ -132,6 +142,20 @@ def audit_femur_sideways(node_sets, constraints, tolerance):
             "name": "distal shaft set is a planar support surface",
             "passed": rms <= max(float(tolerance), 1.5),
             "detail": f"planarity_rms_mm={rms:.6g}",
+        })
+
+    if gt and distal:
+        gt_distal_z = gt["z_percentiles"]["p05"]
+        distal_z = distal["z_percentiles"]["p50"]
+        shaft_length = gt_distal_z - distal_z
+        checks.append({
+            "name": "post-GT-support shaft length is positive",
+            "passed": shaft_length > max(float(tolerance), 1.0),
+            "detail": (
+                "gt_z_p05_minus_distal_z_median="
+                f"{shaft_length:.6g} mm; gt_z_p05={gt_distal_z:.6g}; "
+                f"distal_z_median={distal_z:.6g}"
+            ),
         })
 
     expected_zero_constraints = {
@@ -215,6 +239,7 @@ def write_csv(path, node_sets, constraints, checks):
         for name, data in source.items():
             bounds = data["bounds"]
             center = data["centroid"]
+            z_percentiles = data.get("z_percentiles", {})
             rows.append({
                 "kind": kind,
                 "name": name,
@@ -224,6 +249,9 @@ def write_csv(path, node_sets, constraints, checks):
                 "centroid_x": center["x"],
                 "centroid_y": center["y"],
                 "centroid_z": center["z"],
+                "z_p05": z_percentiles.get("p05", ""),
+                "z_p50": z_percentiles.get("p50", ""),
+                "z_p95": z_percentiles.get("p95", ""),
                 **bounds,
             })
 
@@ -237,6 +265,9 @@ def write_csv(path, node_sets, constraints, checks):
             "centroid_x": "",
             "centroid_y": "",
             "centroid_z": "",
+            "z_p05": "",
+            "z_p50": "",
+            "z_p95": "",
             "x_min": "",
             "x_max": "",
             "y_min": "",

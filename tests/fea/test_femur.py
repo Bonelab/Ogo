@@ -982,21 +982,21 @@ def test_lesser_trochanter_cut_uses_distal_area_peak():
     assert meta["cut_z"] == pytest.approx(61)
 
 
-def test_greater_trochanter_length_crop_uses_gt_disk_distal_origin():
+def test_greater_trochanter_length_crop_uses_gt_support_distal_origin():
     np = pytest.importorskip("numpy")
     vtk = pytest.importorskip("vtk")
     from ogo.util.vtk_image import vtk_image_to_numpy
     from vtk.util.numpy_support import numpy_to_vtk
 
-    data = np.zeros((60, 80, 90), dtype=np.uint8)
+    data = np.zeros((60, 80, 130), dtype=np.uint8)
     x = np.arange(data.shape[0])[:, None]
     y = np.arange(data.shape[1])[None, :]
-    for z in range(10, 86):
+    for z in range(5, 126):
         radius = 10
         y_center = 35
-        if 58 <= z <= 64:
+        if 98 <= z <= 104:
             radius = 19
-        if 73 <= z <= 79:
+        if 113 <= z <= 119:
             y_center = 50
             radius = 12
         section = ((x - 30) ** 2 + (y - y_center) ** 2) <= radius**2
@@ -1017,15 +1017,18 @@ def test_greater_trochanter_length_crop_uses_gt_disk_distal_origin():
 
     cropped_mask = vtk_image_to_numpy(cropped[0]) != 0
     assert meta["method"] == "greater_trochanter_length"
-    assert meta["greater_trochanter_z"] == pytest.approx(76)
-    assert meta["greater_trochanter_disk_distal_z"] == pytest.approx(73)
+    assert meta["greater_trochanter_z"] == pytest.approx(116)
+    assert meta["greater_trochanter_disk_distal_z"] == pytest.approx(113)
+    assert meta["greater_trochanter_support_distal_z"] == pytest.approx(45)
+    assert meta["greater_trochanter_support_length_mm"] == pytest.approx(80)
     assert meta["gt_inclusion_length_mm"] == pytest.approx(0)
-    assert meta["distal_length_origin_z"] == pytest.approx(73)
-    assert meta["cut_z_mm"] == pytest.approx(63)
-    assert meta["available_below_gt_disk_mm"] == pytest.approx(63)
-    assert meta["available_below_gt_mm"] == pytest.approx(66)
+    assert meta["distal_length_origin_z"] == pytest.approx(45)
+    assert meta["cut_z_mm"] == pytest.approx(35)
+    assert meta["available_below_gt_disk_mm"] == pytest.approx(108)
+    assert meta["available_below_gt_support_mm"] == pytest.approx(40)
+    assert meta["available_below_gt_mm"] == pytest.approx(111)
     assert meta["retained_length_mm"] == pytest.approx(10)
-    assert cropped[0].GetOrigin()[2] == pytest.approx(63)
+    assert cropped[0].GetOrigin()[2] == pytest.approx(35)
     assert np.argwhere(cropped_mask)[:, 2].min() == 0
     assert vtk_image_to_numpy(crop_face).sum() > 0
 
@@ -1035,15 +1038,15 @@ def test_greater_trochanter_length_crop_rejects_short_femur():
     vtk = pytest.importorskip("vtk")
     from vtk.util.numpy_support import numpy_to_vtk
 
-    data = np.zeros((60, 80, 90), dtype=np.uint8)
+    data = np.zeros((60, 80, 130), dtype=np.uint8)
     x = np.arange(data.shape[0])[:, None]
     y = np.arange(data.shape[1])[None, :]
-    for z in range(10, 86):
+    for z in range(5, 126):
         radius = 10
         y_center = 35
-        if 58 <= z <= 64:
+        if 98 <= z <= 104:
             radius = 19
-        if 73 <= z <= 79:
+        if 113 <= z <= 119:
             y_center = 50
             radius = 12
         section = ((x - 30) ** 2 + (y - y_center) ** 2) <= radius**2
@@ -1055,11 +1058,11 @@ def test_greater_trochanter_length_crop_rejects_short_femur():
     image.SetSpacing(1, 1, 1)
     image.GetPointData().SetScalars(numpy_to_vtk(data.ravel(order="F"), deep=True))
 
-    with pytest.raises(ValueError, match="too short for the requested greater-trochanter"):
+    with pytest.raises(ValueError, match="too short for the requested post-GT-support"):
         femur.crop_vtk_images_to_greater_trochanter_length(
             [image],
             image,
-            retained_length_mm=80.0,
+            retained_length_mm=50.0,
             labels={1},
         )
 

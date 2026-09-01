@@ -365,13 +365,16 @@ The femur workflow builds one sideways-fall model per side:
 5. Smooth the transformed femur mask with one binary close/open pass only when
    at least one input spacing dimension is coarser than 2 mm. If a compartment
    mask is supplied, the derived cortical binary mask follows the same rule.
-6. Standardize the distal shaft with a flat model-grid cut. The default cut
-   mode detects the lesser trochanter and keeps `50 mm` distal to it. If the
-   required distal field of view is missing, model generation fails.
-7. Generate bbox-relative rectangular PMMA fixtures for the femoral head and
-   greater trochanter. The femoral-head fixture is placed on the high-y side,
-   the greater-trochanter fixture is placed on the low-y side, and both
-   footprints scale with the generated model bbox.
+6. Standardize the distal shaft with a flat post-ICP model-grid cut. In
+   `greater_trochanter_length` mode, the fixed rough crop is used only to make
+   ICP stable; the final model is then generated from the transformed full scan.
+   The requested shaft length is measured after the generated
+   greater-trochanter support, not from the femoral-head support and not from
+   the raw GT landmark alone.
+7. Generate PMMA fixtures for the femoral head and greater trochanter. The
+   femoral-head fixture is placed on the high-y side and the greater-trochanter
+   fixture is placed on the low-y side. Both fixtures are anchored to the
+   proximal model footprint so they do not overwrite bone voxels.
 8. Convert density to material IDs and construct the N88 model.
 9. Apply sideways-fall boundary conditions.
 
@@ -383,8 +386,34 @@ Default femur boundary conditions:
 | Greater trochanter PMMA | `Greater_Trochanter_PMMA_Nodes` | Constrained in the loading direction. |
 | Distal shaft cut face | `Distal_Femur_Nodes` | Constrained to remove rigid-body motion. |
 
-Femur reporting defaults to stiffness and force at `4%` displacement. Pistoia
-postprocessing is not run for femur models by the high-level wrapper.
+Femur reporting defaults to stiffness and force at `4%` displacement. When
+`--run_pistoia` is supplied, the high-level wrapper also reports full-model
+Pistoia failure load and, if `--pistoia_mask` is supplied, masked-region
+Pistoia failure load.
+
+For the maintained short-femur cohort model, use:
+
+```bash
+ogoFEA hip image.nii.gz femur_mask.nii.gz \
+  --side left \
+  --femur_cut_mode greater_trochanter_length \
+  --femur_greater_trochanter_distal_length 20 \
+  --femur_shaft_length 120 \
+  --run_pistoia \
+  --critical_volume 10 \
+  --critical_strain 0.009
+```
+
+The generated model can be audited with `ogoFEA check-bc`. For hip sideways
+fall, the post-GT-support shaft length is measured from final boundary-condition
+node sets as:
+
+```text
+p5(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
+```
+
+The low GT percentile and distal-shaft median make this measurement robust to a
+small number of edge voxels or support-surface bleed-through nodes.
 
 ## Materials
 
@@ -490,12 +519,13 @@ ogoFEA spine image.nii.gz labels.nii.gz \
   --iso_resolution 0.8
 ```
 
-Change femur shaft retention:
+Change femur shaft retention after the greater-trochanter support:
 
 ```bash
 ogoFEA hip image.nii.gz femur_mask.nii.gz \
   --side left \
-  --femur_lesser_trochanter_distal_offset 70
+  --femur_cut_mode greater_trochanter_length \
+  --femur_greater_trochanter_distal_length 45
 ```
 
 Change PMMA dimensions:

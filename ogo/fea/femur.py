@@ -18,13 +18,12 @@ Default femur workflow:
    at least one input spacing dimension is coarser than 2 mm. If a compartment
    mask is supplied, the derived cortical binary mask follows the same rule.
 4. Stabilize registration with a fixed 120 mm proximal rough crop after
-   isotropic resampling, then standardize the distal shaft after ICP with a
-   flat crop that keeps z length at 1.2 times the aligned y width. The post-ICP
-   crop face becomes the distal support surface. ``bbox_ratio``,
-   ``proximal_box_ratio``, ``post_icp_oblique_ratio``,
-   ``greater_trochanter_length``, ``lesser_trochanter``, and ``fixed_length``
-   modes are available for debugging, sensitivity studies, or historical
-   comparisons.
+   isotropic resampling. For GT-length analyses, rerun the final model from the
+   transformed full scan and crop after ICP so the requested shaft length is
+   measured distal to the generated greater-trochanter PMMA support. The
+   post-ICP crop face becomes the distal support surface. Historical ratio,
+   lesser-trochanter, and fixed-length modes remain available for debugging and
+   sensitivity checks.
 5. Generate two geometric PMMA fixtures from proximal contact planes:
    a femoral-head loading fixture on the high-y side and a greater-trochanter
    contact fixture on the low-y side. Defaults are 10 mm PMMA thickness and
@@ -932,7 +931,14 @@ def crop_vtk_images_to_greater_trochanter_length(
     gt_inclusion_length_mm=DEFAULT_FEMUR_GREATER_TROCHANTER_INCLUSION_LENGTH_MM,
     labels=None,
 ):
-    """Apply a flat distal crop below the detected GT-disk distal edge."""
+    """Apply the post-ICP crop for a requested shaft length after GT support.
+
+    The generated sideways-fall GT fixture uses a proximal z footprint with the
+    same long-axis length as the femoral-head fixture. Reserve that footprint
+    first, then keep ``retained_length_mm`` of shaft distal to it. Final QC
+    measures this on generated node sets as low-percentile GT-support z minus
+    median distal-shaft-support z.
+    """
     import numpy as np
 
     from ogo.util.vtk_image import vtk_image_to_numpy
@@ -960,13 +966,15 @@ def crop_vtk_images_to_greater_trochanter_length(
     landmark = detect_lesser_trochanter_cut_z(vtk_mask, distal_offset_mm=0.0)
     gt_z = float(landmark["greater_trochanter_z"])
     gt_disk_distal_z = float(landmark["greater_trochanter_disk_distal_z"])
-    distal_length_origin_z = gt_disk_distal_z - gt_inclusion_length_mm
+    support_length_mm = min(float(FEMORAL_HEAD_FIXTURE_LONG_AXIS_EXTENSION_MM), z_length_mm)
+    gt_support_distal_z = float(landmark["mask_z_max"]) - support_length_mm
+    distal_length_origin_z = gt_support_distal_z - gt_inclusion_length_mm
     cut_z = distal_length_origin_z - retained_length_mm
     available_mm = distal_length_origin_z - float(landmark["mask_z_min"])
     if available_mm < retained_length_mm:
         raise ValueError(
-            "Femur scan is too short for the requested greater-trochanter distal shaft length: "
-            "requested %.4f mm, available %.4f mm below the GT-disk distal length origin."
+            "Femur scan is too short for the requested post-GT-support shaft length: "
+            "requested %.4f mm, available %.4f mm below the GT-support distal length origin."
             % (retained_length_mm, max(0.0, available_mm))
         )
 
@@ -986,16 +994,19 @@ def crop_vtk_images_to_greater_trochanter_length(
             "retained_length_mm": retained_length_mm,
             "requested_retained_length_mm": retained_length_mm,
             "gt_inclusion_length_mm": gt_inclusion_length_mm,
-            "available_below_gt_disk_mm": float(available_mm),
+            "available_below_gt_disk_mm": float(gt_disk_distal_z - float(landmark["mask_z_min"])),
+            "available_below_gt_support_mm": float(available_mm),
             "available_below_gt_inclusion_mm": float(available_mm),
             "available_below_gt_mm": float(gt_z - float(landmark["mask_z_min"])),
             "greater_trochanter_z": gt_z,
             "greater_trochanter_disk_distal_z": gt_disk_distal_z,
             "greater_trochanter_disk_proximal_z": float(landmark["greater_trochanter_disk_proximal_z"]),
+            "greater_trochanter_support_distal_z": float(gt_support_distal_z),
+            "greater_trochanter_support_length_mm": float(support_length_mm),
             "distal_length_origin_z": float(distal_length_origin_z),
             "lesser_trochanter_z": float(landmark["lesser_trochanter_z"]),
             "cut_z_mm": float(cut_z),
-            "reference_axis": "greater_trochanter_disk_distal_z_minus_optional_offset",
+            "reference_axis": "greater_trochanter_support_distal_z_minus_optional_offset",
             "reference_width_mm": y_width_mm,
             "input_z_length_mm": z_length_mm,
             "status": "cropped",
@@ -2880,15 +2891,17 @@ def sidewaysFallFe(args):
         shaft_crop["pre_icp_crop"] = bbox_crop_meta
         if femur_cut_mode == "greater_trochanter_length":
             ogo.message(
-                "Post-ICP GT-length crop retained shaft z=%8.4f below GT-disk origin z=%8.4f; "
-                "GT center z=%8.4f; GT disk distal z=%8.4f; cut z=%8.4f; available=%8.4f; slices xyz=%s."
+                "Post-ICP GT-length crop retained shaft z=%8.4f below GT-support origin z=%8.4f; "
+                "GT center z=%8.4f; GT disk distal z=%8.4f; GT support distal z=%8.4f; "
+                "cut z=%8.4f; available=%8.4f; slices xyz=%s."
                 % (
                     retained_length_mm,
                     shaft_crop["distal_length_origin_z"],
                     shaft_crop["greater_trochanter_z"],
                     shaft_crop["greater_trochanter_disk_distal_z"],
+                    shaft_crop["greater_trochanter_support_distal_z"],
                     shaft_crop["cut_z_mm"],
-                    shaft_crop["available_below_gt_disk_mm"],
+                    shaft_crop["available_below_gt_support_mm"],
                     shaft_crop["crop_slices_xyz"],
                 )
             )
