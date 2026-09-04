@@ -146,7 +146,7 @@ labels_dict = {
    95: {'RGB': [ 198,  152,   32], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Skeletal Muscle', 'TOTSEG': 'empty'},
    96: {'RGB': [  82,   40,    3], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Not bone', 'TOTSEG': 'empty'},
    97: {'RGB': [  50,   22,    5], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Metal', 'TOTSEG': 'empty'},
-   98: {'RGB': [   0,    0,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Empty Label 98', 'TOTSEG': 'empty'},
+   98: {'RGB': [   0,    0,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Trabecular Bone', 'TOTSEG': 'empty'},
    99: {'RGB': [   0,    0,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Empty Label 99', 'TOTSEG': 'empty'},
   100: {'RGB': [   0,    0,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Empty Label 100', 'TOTSEG': 'empty'},
   101: {'RGB': [   0,    0,    0], 'A': 1.0, 'VIS': 1, 'IDX': 1, 'LABEL': 'Empty Label 101', 'TOTSEG': 'empty'},
