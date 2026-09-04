@@ -30,7 +30,7 @@ import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from collections import OrderedDict
 import ogo.dat.OgoMasterLabels as lb
-import ogo.cli.ref.material_laws 
+import ogo.fea.material_laws
 from ogo.calib.internal_calibration import InternalCalibration
 
 start_time = time.time()
@@ -414,6 +414,21 @@ def applyMask(imageData, maskData):
     return mask.GetOutput()
 
 
+def applyMaskByArray(imageData, maskData):
+    """Apply a mask by scalar array index for images already on the same grid."""
+    from ogo.util.vtk_image import numpy_to_vtk_image, vtk_image_to_numpy
+
+    image_scalars = vtk_image_to_numpy(imageData).ravel(order="F")
+    mask_scalars = vtk_image_to_numpy(maskData).ravel(order="F")
+    if image_scalars.shape != mask_scalars.shape:
+        raise ValueError(
+            "Cannot apply array mask because image and mask scalar arrays have different sizes "
+            f"({image_scalars.shape} vs {mask_scalars.shape})."
+        )
+    masked_values = np.where(mask_scalars > 0, image_scalars, 0)
+    return numpy_to_vtk_image(masked_values, imageData)
+
+
 def applyTestBase(mesh, material_table):
     """Constructs to the FEM object.
     The first argument is the Image Mesh.
@@ -428,7 +443,7 @@ def applyTestBase(mesh, material_table):
     return generator.GetOutput()
 
 
-def applyTransform(vtk_image, matrix):
+def applyTransform(vtk_image, matrix, interpolation="cubic"):
     """Applies the transform matrix to the image.
     The first argument is the vtk image data.
     The second argument is the 4x4 rotation matrix.
@@ -440,12 +455,53 @@ def applyTransform(vtk_image, matrix):
 
     reslice = vtk.vtkImageReslice()
     reslice.SetInputData(vtk_image)
-    reslice.SetInterpolationModeToCubic()
+    if interpolation == "nearest":
+        reslice.SetInterpolationModeToNearestNeighbor()
+    else:
+        reslice.SetInterpolationModeToCubic()
     reslice.SetResliceTransform(transform)
     reslice.AutoCropOutputOn()
     reslice.Update()
 
     return reslice.GetOutput()
+
+
+def applyLabelTransform(vtk_image, matrix):
+    """Apply a transform to a label image using nearest-neighbor interpolation."""
+    return applyTransform(vtk_image, matrix, interpolation="nearest")
+
+
+def transformResample(vtk_image, matrix, isotropic_voxel_size, interpolation="cubic"):
+    """Apply a transform and set isotropic output spacing in one VTK reslice."""
+    transform = vtk.vtkTransform()
+    transform.SetMatrix(matrix)
+    transform.Update()
+
+    reslice = vtk.vtkImageReslice()
+    reslice.SetInputData(vtk_image)
+    if interpolation == "nearest":
+        reslice.SetInterpolationModeToNearestNeighbor()
+    else:
+        reslice.SetInterpolationModeToCubic()
+    reslice.SetResliceTransform(transform)
+    reslice.SetOutputSpacing(
+        float(isotropic_voxel_size),
+        float(isotropic_voxel_size),
+        float(isotropic_voxel_size),
+    )
+    reslice.AutoCropOutputOn()
+    reslice.Update()
+    return reslice.GetOutput()
+
+
+def labelTransformResample(vtk_image, matrix, isotropic_voxel_size):
+    """Apply a transform and isotropic resampling to a label image."""
+    return transformResample(
+        vtk_image,
+        matrix,
+        isotropic_voxel_size,
+        interpolation="nearest",
+    )
 
 
 def bmd_K2hpo4ToAsh(vtk_image):
@@ -649,11 +705,19 @@ def cast2unsignchar(vtk_image):
     return cast.GetOutput()
 
 
-def changeInfo(vtk_image):
-    """Changes the origin of image to 0,0,0"""
+def cast2sameScalarType(vtk_image, template_image):
+    """Cast image data to match a template image scalar type."""
+    cast = vtk.vtkImageCast()
+    cast.SetInputData(vtk_image)
+    cast.SetOutputScalarType(template_image.GetScalarType())
+    cast.Update()
+    return cast.GetOutput()
+
+
+def prepareFiniteElementImage(vtk_image):
+    """Prepare image data for FE meshing while preserving physical metadata."""
     change = vtk.vtkImageChangeInformation()
     change.SetInputData(vtk_image)
-    change.SetOutputOrigin(0, 0, 0)
     change.Update()
     return change.GetOutput()
 
@@ -673,23 +737,25 @@ def combineImageData_SF(image, fh_pmma_id_pad, gt_pmma_id_pad, pmma_mat_id):
     fh_pad.SetOutputWholeExtent(image.GetExtent())
     fh_pad.SetConstant(0)
     fh_pad.Update()
+    fh_pad_image = cast2sameScalarType(fh_pad.GetOutput(), image)
 
     gt_pad = vtk.vtkImageConstantPad()
     gt_pad.SetInputData(gt_pmma_id_pad)
     gt_pad.SetOutputWholeExtent(image.GetExtent())
     gt_pad.SetConstant(0)
     gt_pad.Update()
+    gt_pad_image = cast2sameScalarType(gt_pad.GetOutput(), image)
 
     message("Combining PMMA Caps with Image Data...")
     fh_logic = vtk.vtkImageLogic()
-    fh_logic.SetInput1Data(fh_pad.GetOutput())
+    fh_logic.SetInput1Data(fh_pad_image)
     fh_logic.SetInput2Data(image)
     fh_logic.SetOperationToAnd()
     fh_logic.SetOutputTrueValue(pmma_mat_id)
     fh_logic.Update()
 
     fh_math = vtk.vtkImageMathematics()
-    fh_math.SetInput1Data(fh_pad.GetOutput())
+    fh_math.SetInput1Data(fh_pad_image)
     fh_math.SetInput2Data(fh_logic.GetOutput())
     fh_math.SetOperationToSubtract()
     fh_math.Update()
@@ -701,14 +767,14 @@ def combineImageData_SF(image, fh_pmma_id_pad, gt_pmma_id_pad, pmma_mat_id):
     combo_image.Update()
 
     gt_logic = vtk.vtkImageLogic()
-    gt_logic.SetInput1Data(gt_pad.GetOutput())
+    gt_logic.SetInput1Data(gt_pad_image)
     gt_logic.SetInput2Data(image)
     gt_logic.SetOperationToAnd()
     gt_logic.SetOutputTrueValue(pmma_mat_id)
     gt_logic.Update()
 
     gt_math = vtk.vtkImageMathematics()
-    gt_math.SetInput1Data(gt_pad.GetOutput())
+    gt_math.SetInput1Data(gt_pad_image)
     gt_math.SetInput2Data(gt_logic.GetOutput())
     gt_math.SetOperationToSubtract()
     gt_math.Update()
@@ -748,23 +814,25 @@ def combineImageData_VC(image, sup_pmma_id_pad, inf_pmma_id_pad, pmma_mat_id):
     sup_pad.SetOutputWholeExtent(image.GetExtent())
     sup_pad.SetConstant(0)
     sup_pad.Update()
+    sup_pad_image = cast2sameScalarType(sup_pad.GetOutput(), image)
 
     inf_pad = vtk.vtkImageConstantPad()
     inf_pad.SetInputData(inf_pmma_id_pad)
     inf_pad.SetOutputWholeExtent(image.GetExtent())
     inf_pad.SetConstant(0)
     inf_pad.Update()
+    inf_pad_image = cast2sameScalarType(inf_pad.GetOutput(), image)
 
     message("Combining PMMA Caps with Image Data...")
     sup_logic = vtk.vtkImageLogic()
-    sup_logic.SetInput1Data(sup_pad.GetOutput())
+    sup_logic.SetInput1Data(sup_pad_image)
     sup_logic.SetInput2Data(image)
     sup_logic.SetOperationToAnd()
     sup_logic.SetOutputTrueValue(pmma_mat_id)
     sup_logic.Update()
 
     sup_math = vtk.vtkImageMathematics()
-    sup_math.SetInput1Data(sup_pad.GetOutput())
+    sup_math.SetInput1Data(sup_pad_image)
     sup_math.SetInput2Data(sup_logic.GetOutput())
     sup_math.SetOperationToSubtract()
     sup_math.Update()
@@ -776,14 +844,14 @@ def combineImageData_VC(image, sup_pmma_id_pad, inf_pmma_id_pad, pmma_mat_id):
     combo_image.Update()
 
     inf_logic = vtk.vtkImageLogic()
-    inf_logic.SetInput1Data(inf_pad.GetOutput())
+    inf_logic.SetInput1Data(inf_pad_image)
     inf_logic.SetInput2Data(image)
     inf_logic.SetOperationToAnd()
     inf_logic.SetOutputTrueValue(pmma_mat_id)
     inf_logic.Update()
 
     inf_math = vtk.vtkImageMathematics()
-    inf_math.SetInput1Data(inf_pad.GetOutput())
+    inf_math.SetInput1Data(inf_pad_image)
     inf_math.SetInput2Data(inf_logic.GetOutput())
     inf_math.SetOperationToSubtract()
     inf_math.Update()
@@ -1179,7 +1247,7 @@ def imageConnectivity(vtk_image):
     return conn.GetOutput()
 
 
-def imageResample(vtk_image, isotropic_voxel_size):
+def imageResample(vtk_image, isotropic_voxel_size, interpolation="cubic"):
     """Resample the input vtk image to isotropic voxel size as specified.
     The first argument is the input vtk Image Data.
     The second argument is the isotropic output voxel size.
@@ -1187,13 +1255,21 @@ def imageResample(vtk_image, isotropic_voxel_size):
     """
     image_resample = vtk.vtkImageResample()
     image_resample.SetInputData(vtk_image)
-    image_resample.SetInterpolationModeToCubic()
+    if interpolation == "nearest":
+        image_resample.SetInterpolationModeToNearestNeighbor()
+    else:
+        image_resample.SetInterpolationModeToCubic()
     image_resample.SetDimensionality(3)
     image_resample.SetAxisOutputSpacing(0, isotropic_voxel_size)
     image_resample.SetAxisOutputSpacing(1, isotropic_voxel_size)
     image_resample.SetAxisOutputSpacing(2, isotropic_voxel_size)
     image_resample.Update()
     return image_resample.GetOutput()
+
+
+def labelImageResample(vtk_image, isotropic_voxel_size):
+    """Resample a label image using nearest-neighbor interpolation."""
+    return imageResample(vtk_image, isotropic_voxel_size, interpolation="nearest")
 
 
 def isotropicResampling(image, iso_resolution, image_type):
@@ -1333,11 +1409,11 @@ def iterativeClosestPoint(source, target):
     icp.SetTarget(target)
     icp.StartByMatchingCentroidsOn()
     icp.GetLandmarkTransform().SetModeToRigidBody()
-    icp.SetMeanDistanceModeToRMS()
+    icp.SetMeanDistanceModeToAbsoluteValue()
     icp.SetMaximumMeanDistance(0.05)
     icp.CheckMeanDistanceOn()
-    icp.SetMaximumNumberOfLandmarks(250)
-    icp.SetMaximumNumberOfIterations(75)
+    icp.SetMaximumNumberOfLandmarks(8000)
+    icp.SetMaximumNumberOfIterations(50)
     icp.Update()
     return icp.GetMatrix()
 
@@ -1477,13 +1553,18 @@ def density2materialID(density_image, n_bins=128, cort_mask=None):
         vtkImageData: Binned image with material IDs (0 for background, 1 to n_bins for other densities).
         np.ndarray: Bin center values representing the densities for each bin.
     """
+    from ogo.util.vtk_image import numpy_to_vtk_image
+    from ogo.util.vtk_image import vtk_image_to_numpy
+
     # Extract the density values as a numpy array
-    density_array = vtk_to_numpy(density_image.GetPointData().GetScalars())
+    density_array = vtk_image_to_numpy(density_image).ravel(order="F")
     # Preserve the background (values equal to 0)
     background_mask = density_array == 0
 
     # Determine the density range, excluding background
     density_nonzero = density_array[~background_mask]
+    if density_nonzero.size == 0:
+        raise ValueError("Cannot bin material IDs because the masked density image is empty.")
     density_min = np.min(density_nonzero)
     density_max = np.max(density_nonzero)
 
@@ -1499,15 +1580,12 @@ def density2materialID(density_image, n_bins=128, cort_mask=None):
     binned_values[background_mask] = 0
 
     if cort_mask is not None:
-        cort_array = vtk_to_numpy(cort_mask.GetPointData().GetScalars())
+        cort_array = vtk_image_to_numpy(cort_mask).ravel(order="F")
         binned_values[cort_array > 0] += n_bins
         bin_centers = np.concatenate([bin_centers, bin_centers])  # Duplicate bin centers for cortical region
 
-    # Convert the binned values back to a VTK array
-    binned_vtk = numpy_to_vtk(binned_values, deep=True)
-    binned_image = vtk.vtkImageData()
-    binned_image.DeepCopy(density_image)
-    binned_image.GetPointData().SetScalars(binned_vtk)
+    # Convert the binned values back to a VTK image while preserving geometry.
+    binned_image = numpy_to_vtk_image(binned_values, density_image)
 
     return binned_image, bin_centers
 
@@ -1596,64 +1674,6 @@ def add_bone_material(
               f"Yield Strength (Comp):{yc} MPa; Yield Strength (Tens):{yt} MPa")
     return material_table
 
-def add_bone_material_depreciated(material_table, bin_centers, elastic_Emax=10500, elastic_exponent=2.29, mu=0.3, 
-                                    bone_yield_compression=None, bone_yield_tension=None, bin_range=None, material_name='BoneMat'):
-    """
-    Adds Mohr-Coulomb elastoplastic bone material properties to a VTK material table based on density bins.
-
-    Parameters:
-        material_table (vtkbone.vtkboneMaterialTable): The material table to populate.
-        bin_centers (np.ndarray): Array of density values (in mg/ccm) for each bin.
-        elastic_Emax (float): Maximum elastic modulus (MPa).
-        elastic_exponent (float): Exponent for power-law calculation of modulus.
-        mu (float): Constant Poisson's ratio for all materials.
-        yield_strength_compressive (float): Yield strength (MPa) for compression.
-        yield_strength_tensile (float): Yield strength (MPa) for tension.
-
-    Returns:
-        vtkbone.vtkboneMaterialTable: The updated material table with Mohr-Coulomb bone properties.
-    """
-
-    # Apply bin range filtering if provided
-    if bin_range is not None:
-        if len(bin_range) != 2:
-            raise ValueError("bin_range must be a list or tuple with exactly two values [min_bin_idx, max_bin_idx].")
-        
-        min_bin_idx, max_bin_idx = bin_range
-        if min_bin_idx < 0 or max_bin_idx > len(bin_centers):
-            raise ValueError(f"bin_range indices must be within [0, {len(bin_centers)}]")
-
-        # Convert to zero-based indexing for slicing
-        bin_centers = bin_centers[min_bin_idx : max_bin_idx]
-
-    # Loop through each density bin
-    for i, density in enumerate(bin_centers, start=1):
-        # Calculate Young's modulus using the power-law formula (Converting density to g/ccm)
-        E = elastic_Emax * ((density / 1000) ** elastic_exponent)
-
-        print(f"ID:{i+bin_range[0]}; Density(g/cc):{density/1000:.4f}; Modulus(MPa):{E:.4f}; "
-              f"Yield Strength (Comp):{bone_yield_compression} MPa; Yield Strength (Tens):{bone_yield_tension} MPa")
-
-        # Create a Mohr-Coulomb elastoplastic material
-        if bone_yield_tension is not None and bone_yield_compression is not None:
-            bone_material = vtkbone.vtkboneMohrCoulombIsotropicMaterial()
-            bone_material.SetYieldStrengths(bone_yield_tension, bone_yield_compression)
-            bone_material.SetName(f"MohrCoulomb_{material_name}{i}")
-        else:
-            bone_material = vtkbone.vtkboneLinearIsotropicMaterial()
-            bone_material.SetName(f"LinearIsotropic_{material_name}{i}")
-
-        bone_material.SetYoungsModulus(E)
-        bone_material.SetPoissonsRatio(mu)
-
-        # Set a dynamic name for the material
-
-        # Add material to the table with an ID corresponding to the bin index
-        material_table.AddMaterial(i+bin_range[0], bone_material)
-
-    return material_table
-
-
 def add_pmma_material(material_table, pmma_mat_id, pmma_E, pmma_v, pmma_yield_tension=None, pmma_yield_compression=None):
     """
     Adds a PMMA material to the provided material table.
@@ -1727,7 +1747,7 @@ def point2cellData(vtk_image):
 
 
 def preRotateImage(image, mask, z_rotation):
-    """Pre-rotation the image for ICP alignment."""
+    """Rotate an image/mask pair around the image z axis for ICP initialization."""
     message("Pre-rotating image...")
     spacing = image.GetSpacing()
     origin = image.GetOrigin()
@@ -1740,7 +1760,6 @@ def preRotateImage(image, mask, z_rotation):
 
     transform = vtk.vtkTransform()
     transform.Translate(center[0], center[1], center[2])
-    transform.RotateY(180)
     transform.RotateZ(z_rotation)
     transform.Translate(-center[0], -center[1], -center[2])
 
@@ -1763,14 +1782,17 @@ def preRotateImage(image, mask, z_rotation):
 
 
 def readPolyData(vtk_poly):
-    """Reads a VTK Legacy file in PolyData Format.
-    The first argument is the filename.
-    Returns the Poly Data reader output.
-    """
+    """Read VTK polydata as RAS physical reference geometry."""
     poly = vtk.vtkPolyDataReader()
     poly.SetFileName(vtk_poly)
     poly.Update()
-    return poly.GetOutput()
+    transform = vtk.vtkTransform()
+    transform.Scale(-1.0, -1.0, 1.0)
+    transform_filter = vtk.vtkTransformPolyDataFilter()
+    transform_filter.SetInputData(poly.GetOutput())
+    transform_filter.SetTransform(transform)
+    transform_filter.Update()
+    return transform_filter.GetOutput()
 
 
 def readTransform(transform_file):
@@ -2634,11 +2656,14 @@ def readDCM(fileDir):
     return flip2.GetOutput()
 # 
 def readNii(filename):
-     """Reads a NIFTI image.
-     The first argument is the image filename.
-     Returns the Image as vtk Output Data
-     """
-     image = vtk.vtkNIFTIImageReader()
-     image.SetFileName(filename)
-     image.Update()
-     return image.GetOutput()
+     """Read a NIfTI image into a RAS physical-space VTK image."""
+     image = sitk.DICOMOrient(sitk.ReadImage(str(filename)), "RAS")
+     array_xyz = np.ascontiguousarray(np.transpose(sitk.GetArrayFromImage(image), (2, 1, 0)))
+
+     vtk_image = vtk.vtkImageData()
+     vtk_image.SetDimensions(array_xyz.shape)
+     vtk_image.SetSpacing(tuple(float(value) for value in image.GetSpacing()))
+     origin_lps = image.GetOrigin()
+     vtk_image.SetOrigin(-float(origin_lps[0]), -float(origin_lps[1]), float(origin_lps[2]))
+     vtk_image.GetPointData().SetScalars(numpy_to_vtk(array_xyz.ravel(order="F"), deep=True))
+     return vtk_image

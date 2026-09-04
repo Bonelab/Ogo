@@ -36,6 +36,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           miniconda-version: "latest"
+          mamba-version: "*"
           activate-environment: test
           channels: numerics88,simpleitk,conda-forge
           auto-activate-base: false
@@ -47,11 +48,11 @@ jobs:
       - name: Create and install dependencies
         if: steps.conda-env-cache.outputs.cache-hit != 'true'
         run: |
-          conda install -n test n88tools click flake8 matplotlib nose numpy opencv pandas pbr scipy simpleitk six sphinx pydicom gdcm
+          mamba install -y -n test n88tools click flake8 matplotlib nose numpy opencv pandas pbr pytest scipy simpleitk six sphinx pydicom gdcm
       - name: Install package
         run: |
           conda activate test
           pip install -e .
       - name: Run tests
         run: |
-          nosetests tests
+          python -m pytest tests

@@ -6,6 +6,7 @@ click
 simpleitk
 numpy<2.0
 matplotlib
+netCDF4
 
 # Statistics
 scipy>=1.7,<1.13
