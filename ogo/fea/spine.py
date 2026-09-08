@@ -8,7 +8,9 @@ Default spine workflow:
    vertebra mask to the same bounding box.
 3. ICP-align the vertebral body to the bundled L4 compression reference. By
    default the reference is PCA-scaled within 0.8,0.8,0.75 to 1.2,1.2,1.3 before
-   rigid ICP; users can override the scale/reference explicitly.
+   VTK rigid ICP; users can override the scale/reference explicitly. A
+   deterministic NumPy point-cloud ICP backend is kept for debugging and
+   process-orientation rescue attempts.
 4. Apply the ICP transform and set the final output spacing to
    1.0 x 1.0 x 1.0 mm in one shared VTK reslice helper. Image data use cubic
    interpolation; body/process labels use nearest-neighbor interpolation.
@@ -344,6 +346,7 @@ from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 from ogo.fea.alignment import (
     estimate_rigid_icp,
+    estimate_rigid_icp_vtk,
     invert_point_transform,
     output_grid_for_point_transform,
     point_cloud_axis_lengths,
@@ -808,6 +811,7 @@ def get_icp_with_scaling(
     min_scale=(0.8, 0.8, 0.75),
     max_scale=(1.2, 1.2, 1.3),
     retry_on_process_qc=DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
+    backend=DEFAULT_SPINE_REGISTRATION_BACKEND,
 ):
 
     sample_surface_points = surface_points_from_vtk_mask(
@@ -839,15 +843,30 @@ def get_icp_with_scaling(
     ogo.message(f"PCA axis lengths (reference): {np.round(ref_lengths, 2)}")
     ogo.message(f"Scale factors applied to reference ({scale_source}): {np.round(scale_factors, 3)}")
 
-    transform = estimate_rigid_icp(
-        moving_points=reference_points * scale_factors,
-        fixed_points=sample_surface_points,
-        iterations=50,
-        tolerance=1.0e-4,
-        start_by_matching_centroids_only=False,
-        convergence="delta",
-        distance_mode="mean",
-    )
+    backend = str(backend).strip().lower()
+    scaled_reference_points = reference_points * scale_factors
+    if backend == "vtk":
+        transform = estimate_rigid_icp_vtk(
+            moving_points=scaled_reference_points,
+            fixed_points=sample_surface_points,
+            landmarks=250,
+            iterations=75,
+            maximum_mean_distance=0.05,
+            distance_mode="rms",
+            start_by_matching_centroids=True,
+        )
+    elif backend == "numpy":
+        transform = estimate_rigid_icp(
+            moving_points=scaled_reference_points,
+            fixed_points=sample_surface_points,
+            iterations=50,
+            tolerance=1.0e-4,
+            start_by_matching_centroids_only=False,
+            convergence="delta",
+            distance_mode="mean",
+        )
+    else:
+        raise ValueError("registration_backend must be 'vtk' or 'numpy'.")
 
     if process is not None and retry_on_process_qc:
         body_centroid = _mask_centroid_physical(body.GetOutput())
@@ -863,11 +882,14 @@ def get_icp_with_scaling(
             f"transverse_offset={default_process_qc['transverse_offset_mm']:.2f} mm"
         )
         if default_process_qc["status"] != "ok":
-            ogo.message("Default ICP failed process-vector QC; trying alternate PCA starts...")
+            ogo.message(
+                "Default ICP failed process-vector QC; trying alternate PCA starts "
+                "with the deterministic point-cloud backend..."
+            )
             retry_candidates = []
-            for initial in _spine_pca_initial_transforms(reference_points * scale_factors, sample_surface_points):
+            for initial in _spine_pca_initial_transforms(scaled_reference_points, sample_surface_points):
                 candidate = estimate_rigid_icp(
-                    moving_points=reference_points * scale_factors,
+                    moving_points=scaled_reference_points,
                     fixed_points=sample_surface_points,
                     iterations=50,
                     tolerance=1.0e-4,
@@ -913,8 +935,8 @@ def get_icp_with_scaling(
 
     vtk_transform = _icp_transform_to_vtk(transform)
     ogo.message(
-        "ICP (with scaled reference) iterations=%d mean_distance=%0.4f"
-        % (transform["iterations"], transform["mean_distance"])
+        "ICP (%s backend, scaled reference) iterations=%d mean_distance=%0.4f"
+        % (backend, transform["iterations"], transform["mean_distance"])
     )
     ogo.message("ICP reference-to-sample Matrix:")
     print_matrix(vtk_transform.GetMatrix())
@@ -1362,6 +1384,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     registration_scale = kwargs.get("registration_scale", DEFAULT_SPINE_REGISTRATION_SCALE)
     registration_min_scale = kwargs.get("registration_min_scale", DEFAULT_SPINE_REGISTRATION_MIN_SCALE)
     registration_max_scale = kwargs.get("registration_max_scale", DEFAULT_SPINE_REGISTRATION_MAX_SCALE)
+    registration_backend = kwargs.get("registration_backend", DEFAULT_SPINE_REGISTRATION_BACKEND)
     registration_retry_on_process_qc = kwargs.get(
         "registration_retry_on_process_qc",
         DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
@@ -1468,6 +1491,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         min_scale=registration_min_scale,
         max_scale=registration_max_scale,
         retry_on_process_qc=registration_retry_on_process_qc,
+        backend=registration_backend,
     )
 
     # Transform Images and resample at the same time (less interpolation)
@@ -1894,8 +1918,8 @@ def main():
                         help="Minimum sx,sy,sz clamp for automatic PCA registration scaling. (default: %(default)s)")
     parser.add_argument("--registration_max_scale", type=str, default=DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
                         help="Maximum sx,sy,sz clamp for automatic PCA registration scaling. (default: %(default)s)")
-    parser.add_argument("--registration_backend", choices=("vtk",), default=DEFAULT_SPINE_REGISTRATION_BACKEND,
-                        help="Spine reference alignment backend. (default: %(default)s)")
+    parser.add_argument("--registration_backend", choices=("vtk", "numpy"), default=DEFAULT_SPINE_REGISTRATION_BACKEND,
+                        help="Spine reference alignment backend. vtk keeps the original VTK ICP solver; numpy uses the deterministic point-cloud helper. (default: %(default)s)")
     parser.add_argument("--top_node_set_id", type=int, default=DEFAULT_SPINE_TOP_NODE_SET_ID,
                         help="ID for the top node set. (default: %(default)s)")
     parser.add_argument("--bottom_node_set_id", type=int, default=DEFAULT_SPINE_BOTTOM_NODE_SET_ID,

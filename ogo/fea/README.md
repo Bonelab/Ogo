@@ -58,7 +58,7 @@ The anatomy-specific implementation is split below the CLI:
 
 | Anatomy | Main file | What belongs there |
 | --- | --- | --- |
-| Spine compression | `ogo/fea/spine.py` | Vertebra labels, body/process QC, spine ICP, 1 mm resampling, stable PMMA cap generation, axial compression defaults. |
+| Spine compression | `ogo/fea/spine.py` | Vertebra labels, body/process QC, VTK spine ICP, 1 mm resampling, stable PMMA cap generation, axial compression defaults. |
 | Hip sideways fall | `ogo/fea/femur.py` | Side handling, femur reference alignment, rough pre-ICP crop, post-ICP GT-length crop, femoral-head/GT/distal supports, sideways-fall defaults. |
 | Shared material tables | `ogo/fea/materials.py` | Bone material ID ranges, PMMA material, shared femur/spine material-table construction. |
 | Material laws | `ogo/fea/material_laws.py` | Density-to-modulus and yield-strength functions such as `default_E` and `kopperdahl_trab_E`. |
@@ -73,7 +73,12 @@ For spine, the maintained path is:
    Pistoia mask, and any lower-level overrides.
 2. `spine.py::main` thresholds the requested body/process labels, crops around
    the vertebra, checks posterior-process orientation, and runs scaled ICP to
-   the bundled L4 body reference from `default_spine_reference_path`.
+   the bundled L4 body reference from `default_spine_reference_path`. The
+   default backend is VTK ICP through `alignment.py::estimate_rigid_icp_vtk`,
+   matching the original spine registration behavior. The deterministic NumPy
+   point-cloud ICP helper remains available as `--registration_backend numpy`
+   and is also used for alternate PCA-start rescue attempts when process-vector
+   QC flags an implausible orientation.
 3. `spine.py` applies the transform and resamples the density image with cubic
    interpolation and labels/masks with nearest-neighbor interpolation.
 4. `boundary.py::generate_bone_cap_mask` and related helpers generate superior

@@ -184,6 +184,58 @@ def estimate_rigid_icp(
     }
 
 
+def estimate_rigid_icp_vtk(
+    *,
+    moving_points,
+    fixed_points,
+    landmarks=250,
+    iterations=75,
+    maximum_mean_distance=0.05,
+    distance_mode="rms",
+    start_by_matching_centroids=True,
+):
+    """Estimate a rigid ICP transform with VTK and return the shared dict format."""
+    import numpy as np
+    import vtk
+
+    moving_polydata = polydata_from_points(moving_points)
+    fixed_polydata = polydata_from_points(fixed_points)
+
+    icp = vtk.vtkIterativeClosestPointTransform()
+    icp.SetSource(moving_polydata)
+    icp.SetTarget(fixed_polydata)
+    if start_by_matching_centroids:
+        icp.StartByMatchingCentroidsOn()
+    else:
+        icp.StartByMatchingCentroidsOff()
+    icp.GetLandmarkTransform().SetModeToRigidBody()
+    if str(distance_mode).strip().lower() == "rms":
+        icp.SetMeanDistanceModeToRMS()
+    else:
+        icp.SetMeanDistanceModeToAbsoluteValue()
+    icp.SetMaximumMeanDistance(float(maximum_mean_distance))
+    icp.CheckMeanDistanceOn()
+    icp.SetMaximumNumberOfLandmarks(int(landmarks))
+    icp.SetMaximumNumberOfIterations(int(iterations))
+    icp.Update()
+
+    matrix = icp.GetMatrix()
+    rotation = np.asarray(
+        [[float(matrix.GetElement(row, col)) for col in range(3)] for row in range(3)],
+        dtype=float,
+    )
+    translation = np.asarray(
+        [float(matrix.GetElement(row, 3)) for row in range(3)],
+        dtype=float,
+    )
+    return {
+        "rotation": rotation,
+        "translation": translation,
+        "iterations": int(icp.GetNumberOfIterations()),
+        "mean_distance": float(icp.GetMeanDistance()),
+    }
+
+
 def invert_point_transform(rotation, translation):
     """Invert ``points @ rotation.T + translation`` row-vector transforms."""
     import numpy as np

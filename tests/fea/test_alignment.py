@@ -59,6 +59,35 @@ def test_estimate_rigid_icp_recovers_simple_translation():
     assert transform["translation"] == pytest.approx((3.0, -2.0, 5.0))
 
 
+def test_estimate_rigid_icp_vtk_recovers_simple_translation():
+    pytest.importorskip("vtk")
+    np = pytest.importorskip("numpy")
+
+    from ogo.fea.alignment import estimate_rigid_icp_vtk
+
+    moving = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 1.0],
+        ]
+    )
+    fixed = moving + np.asarray([3.0, -2.0, 5.0])
+
+    transform = estimate_rigid_icp_vtk(
+        moving_points=moving,
+        fixed_points=fixed,
+        iterations=20,
+        maximum_mean_distance=1.0e-6,
+    )
+
+    assert transform["rotation"] == pytest.approx(np.eye(3), abs=1.0e-6)
+    assert transform["translation"] == pytest.approx((3.0, -2.0, 5.0), abs=1.0e-6)
+
+
 def test_invert_point_transform_reverses_row_vector_transform():
     np = pytest.importorskip("numpy")
 
