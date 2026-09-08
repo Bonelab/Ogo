@@ -205,7 +205,8 @@ def test_dry_run_prints_commands_without_running(monkeypatch, capsys):
         capsys.readouterr().out.strip()
         == "ogoFEA-spine-builder density.nii.gz spine_mask.nii.gz "
         "--mask_threshold 6 --process_mask_threshold 5 --appendix L2 "
-        "--quality_control False"
+        + " ".join(SPINE_DEFAULT_REGISTRATION_ARGS)
+        + " --quality_control False"
     )
 
 
