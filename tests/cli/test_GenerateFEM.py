@@ -43,6 +43,14 @@ BENCHMARK_NONLINEAR_ARGS = [
 ]
 
 SPINE_DEFAULT_QC_ARGS = ["--quality_control", "False"]
+SPINE_DEFAULT_REGISTRATION_ARGS = [
+    "--registration_backend",
+    "vtk",
+    "--registration_landmarks",
+    "250",
+    "--registration_iterations",
+    "75",
+]
 
 
 @pytest.fixture
@@ -92,6 +100,7 @@ def test_spine_runs_each_requested_vertebra(monkeypatch, tmp_path, solve_calls):
             "--output_path",
             "models",
             *BENCHMARK_LINEAR_ARGS,
+            *SPINE_DEFAULT_REGISTRATION_ARGS,
             "--iso_resolution",
             "1.2",
             *SPINE_DEFAULT_QC_ARGS,
@@ -108,6 +117,7 @@ def test_spine_runs_each_requested_vertebra(monkeypatch, tmp_path, solve_calls):
             "--output_path",
             "models",
             *BENCHMARK_LINEAR_ARGS,
+            *SPINE_DEFAULT_REGISTRATION_ARGS,
             "--iso_resolution",
             "1.2",
             *SPINE_DEFAULT_QC_ARGS,
@@ -225,6 +235,7 @@ def test_spine_preset_none_keeps_command_minimal(monkeypatch, solve_calls):
             "7",
             "--appendix",
             "L3",
+            *SPINE_DEFAULT_REGISTRATION_ARGS,
             *SPINE_DEFAULT_QC_ARGS,
         ]
     ]
@@ -257,9 +268,37 @@ def test_spine_nonlinear_benchmark_preset(monkeypatch, solve_calls):
             "--appendix",
             "T10",
             *BENCHMARK_NONLINEAR_ARGS,
+            *SPINE_DEFAULT_REGISTRATION_ARGS,
             *SPINE_DEFAULT_QC_ARGS,
         ]
     ]
+
+
+def test_spine_forwards_registration_options(monkeypatch, solve_calls):
+    calls = []
+    monkeypatch.setattr(GenerateFEM, "run_spine_command", lambda argv: calls.append(list(argv)))
+
+    GenerateFEM.main(
+        [
+            "spine",
+            "density.nii.gz",
+            "spine_mask.nii.gz",
+            "--vertebra",
+            "L1:20:48",
+            "--registration_backend",
+            "numpy",
+            "--registration_landmarks",
+            "8000",
+            "--registration_iterations",
+            "50",
+            "--no-solve",
+        ]
+    )
+
+    assert "--registration_backend" in calls[0]
+    assert calls[0][calls[0].index("--registration_backend") + 1] == "numpy"
+    assert calls[0][calls[0].index("--registration_landmarks") + 1] == "8000"
+    assert calls[0][calls[0].index("--registration_iterations") + 1] == "50"
 
 
 def test_spine_explicit_options_follow_preset_for_overrides(monkeypatch, solve_calls):
@@ -697,6 +736,8 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
 
     assert data["target"] == {"vertebra": "L1", "body_label": 2, "process_label": 3}
     assert data["alignment"]["registration_backend"] == "vtk"
+    assert data["alignment"]["registration_landmarks"] == 250
+    assert data["alignment"]["registration_iterations"] == 75
     assert data["geometry"]["model_coordinates"] == "preprocessed_image_physical_space"
     assert data["materials"]["trabecular"]["elastic_E_func"] == "kopperdahl_trab_E"
     assert data["materials"]["cortical"]["material_id_range"] == [129, 256]

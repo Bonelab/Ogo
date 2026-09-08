@@ -60,6 +60,8 @@ DEFAULT_SPINE_REGISTRATION_SCALE = None
 DEFAULT_SPINE_REGISTRATION_MIN_SCALE = "0.8,0.8,0.75"
 DEFAULT_SPINE_REGISTRATION_MAX_SCALE = "1.2,1.2,1.3"
 DEFAULT_SPINE_REGISTRATION_BACKEND = "vtk"
+DEFAULT_SPINE_REGISTRATION_LANDMARKS = 250
+DEFAULT_SPINE_REGISTRATION_ITERATIONS = 75
 DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC = True
 DEFAULT_SPINE_REFERENCE_FILENAME = "L4_BODY_SPINE_COMPRESSION_REF.vtk"
 SPINE_CONTACT_SIZE_FRACTION = (1.6, 1.6)
@@ -812,17 +814,19 @@ def get_icp_with_scaling(
     max_scale=(1.2, 1.2, 1.3),
     retry_on_process_qc=DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
     backend=DEFAULT_SPINE_REGISTRATION_BACKEND,
+    landmarks=DEFAULT_SPINE_REGISTRATION_LANDMARKS,
+    iterations=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
 ):
 
     sample_surface_points = surface_points_from_vtk_mask(
         body.GetOutput(),
-        max_points=8000,
+        max_points=landmarks,
         sample_mode="stride",
     )
     reference_polydata = ogo.readPolyData(reference_path)
     reference_points = sample_points(
         polydata_points(reference_polydata),
-        max_points=8000,
+        max_points=landmarks,
         mode="linspace",
     )
 
@@ -849,8 +853,8 @@ def get_icp_with_scaling(
         transform = estimate_rigid_icp_vtk(
             moving_points=scaled_reference_points,
             fixed_points=sample_surface_points,
-            landmarks=250,
-            iterations=75,
+            landmarks=landmarks,
+            iterations=iterations,
             maximum_mean_distance=0.05,
             distance_mode="rms",
             start_by_matching_centroids=True,
@@ -859,7 +863,7 @@ def get_icp_with_scaling(
         transform = estimate_rigid_icp(
             moving_points=scaled_reference_points,
             fixed_points=sample_surface_points,
-            iterations=50,
+            iterations=iterations,
             tolerance=1.0e-4,
             start_by_matching_centroids_only=False,
             convergence="delta",
@@ -891,7 +895,7 @@ def get_icp_with_scaling(
                 candidate = estimate_rigid_icp(
                     moving_points=scaled_reference_points,
                     fixed_points=sample_surface_points,
-                    iterations=50,
+                    iterations=iterations,
                     tolerance=1.0e-4,
                     start_by_matching_centroids_only=False,
                     convergence="delta",
@@ -1385,6 +1389,8 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     registration_min_scale = kwargs.get("registration_min_scale", DEFAULT_SPINE_REGISTRATION_MIN_SCALE)
     registration_max_scale = kwargs.get("registration_max_scale", DEFAULT_SPINE_REGISTRATION_MAX_SCALE)
     registration_backend = kwargs.get("registration_backend", DEFAULT_SPINE_REGISTRATION_BACKEND)
+    registration_landmarks = kwargs.get("registration_landmarks", DEFAULT_SPINE_REGISTRATION_LANDMARKS)
+    registration_iterations = kwargs.get("registration_iterations", DEFAULT_SPINE_REGISTRATION_ITERATIONS)
     registration_retry_on_process_qc = kwargs.get(
         "registration_retry_on_process_qc",
         DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
@@ -1492,6 +1498,8 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         max_scale=registration_max_scale,
         retry_on_process_qc=registration_retry_on_process_qc,
         backend=registration_backend,
+        landmarks=registration_landmarks,
+        iterations=registration_iterations,
     )
 
     # Transform Images and resample at the same time (less interpolation)
@@ -1920,6 +1928,10 @@ def main():
                         help="Maximum sx,sy,sz clamp for automatic PCA registration scaling. (default: %(default)s)")
     parser.add_argument("--registration_backend", choices=("vtk", "numpy"), default=DEFAULT_SPINE_REGISTRATION_BACKEND,
                         help="Spine reference alignment backend. vtk keeps the original VTK ICP solver; numpy uses the deterministic point-cloud helper. (default: %(default)s)")
+    parser.add_argument("--registration_landmarks", type=int, default=DEFAULT_SPINE_REGISTRATION_LANDMARKS,
+                        help="Maximum spine ICP landmarks/sampled points. For vtk this maps to SetMaximumNumberOfLandmarks; for numpy this caps sampled surface points. (default: %(default)s)")
+    parser.add_argument("--registration_iterations", type=int, default=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
+                        help="Maximum spine ICP iterations. (default: %(default)s)")
     parser.add_argument("--top_node_set_id", type=int, default=DEFAULT_SPINE_TOP_NODE_SET_ID,
                         help="ID for the top node set. (default: %(default)s)")
     parser.add_argument("--bottom_node_set_id", type=int, default=DEFAULT_SPINE_BOTTOM_NODE_SET_ID,

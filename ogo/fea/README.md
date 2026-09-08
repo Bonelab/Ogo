@@ -469,6 +469,27 @@ Available spine presets:
 | `benchmark-nonlinear` | Nonlinear material/yield settings for benchmark-style runs. |
 | `none` | Pass only explicit lower-level options. |
 
+Spine registration can be switched without editing code. The maintained default
+keeps the original VTK ICP behavior:
+
+```bash
+ogoFEA spine image.nii.gz spine_labels.nii.gz \
+  --vertebra L1:20:48 \
+  --registration_backend vtk \
+  --registration_landmarks 250 \
+  --registration_iterations 75
+```
+
+For sensitivity checks, the deterministic point-cloud ICP path can be selected:
+
+```bash
+ogoFEA spine image.nii.gz spine_labels.nii.gz \
+  --vertebra L1:20:48 \
+  --registration_backend numpy \
+  --registration_landmarks 8000 \
+  --registration_iterations 50
+```
+
 ## Femur Model
 
 The femur workflow builds one sideways-fall model per side:

@@ -23,6 +23,8 @@ from ogo.fea.spine import (
     DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
     DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
     DEFAULT_SPINE_REGISTRATION_BACKEND,
+    DEFAULT_SPINE_REGISTRATION_ITERATIONS,
+    DEFAULT_SPINE_REGISTRATION_LANDMARKS,
     SPINE_ALIGNMENT_METHOD,
     default_spine_reference_path,
     solve_report_profile as spine_solve_report_profile,
@@ -120,6 +122,18 @@ def expand_sides(sides: Sequence[str]) -> List[str]:
 def spine_preset_args(name: str) -> List[str]:
     """Return a copy of the lower-level arguments for one spine preset."""
     return list(SPINE_PRESETS[name])
+
+
+def spine_registration_args(args: argparse.Namespace) -> List[str]:
+    """Return lower-level spine registration options owned by the wrapper."""
+    return [
+        "--registration_backend",
+        str(args.registration_backend),
+        "--registration_landmarks",
+        str(args.registration_landmarks),
+        "--registration_iterations",
+        str(args.registration_iterations),
+    ]
 
 
 def build_spine_command(
@@ -514,6 +528,16 @@ def write_modeling_metadata(
                     generator_argv,
                     "--registration_backend",
                     DEFAULT_SPINE_REGISTRATION_BACKEND,
+                ),
+                "registration_landmarks": option_int(
+                    generator_argv,
+                    "--registration_landmarks",
+                    DEFAULT_SPINE_REGISTRATION_LANDMARKS,
+                ),
+                "registration_iterations": option_int(
+                    generator_argv,
+                    "--registration_iterations",
+                    DEFAULT_SPINE_REGISTRATION_ITERATIONS,
                 ),
             },
             "image_processing": {
@@ -1152,6 +1176,32 @@ def build_parser() -> argparse.ArgumentParser:
             "explicit lower-level options."
         ),
     )
+    spine.add_argument(
+        "--registration_backend",
+        choices=("vtk", "numpy"),
+        default=DEFAULT_SPINE_REGISTRATION_BACKEND,
+        help=(
+            "Spine reference alignment backend. vtk keeps the original VTK ICP "
+            "solver; numpy uses the deterministic point-cloud helper. "
+            "(default: %(default)s)"
+        ),
+    )
+    spine.add_argument(
+        "--registration_landmarks",
+        type=int,
+        default=DEFAULT_SPINE_REGISTRATION_LANDMARKS,
+        help=(
+            "Maximum spine ICP landmarks/sampled points. For vtk this maps to "
+            "SetMaximumNumberOfLandmarks; for numpy this caps sampled surface "
+            "points. (default: %(default)s)"
+        ),
+    )
+    spine.add_argument(
+        "--registration_iterations",
+        type=int,
+        default=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
+        help="Maximum spine ICP iterations. (default: %(default)s)",
+    )
 
     hip = subparsers.add_parser(
         "hip",
@@ -1189,10 +1239,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         pistoia_mask_args.extend(["--pistoia_mask_label", str(label)])
 
     if args.model_type == "spine":
-        spine_extra_args = spine_preset_args(args.preset) + pistoia_mask_args + list(extra_args) + [
+        spine_extra_args = (
+            spine_preset_args(args.preset)
+            + spine_registration_args(args)
+            + pistoia_mask_args
+            + list(extra_args)
+            + [
             "--quality_control",
             str(bool(args.debug)),
-        ]
+        ])
         for target in args.vertebra:
             cmd = build_spine_command(
                 calibrated_image=args.calibrated_image,

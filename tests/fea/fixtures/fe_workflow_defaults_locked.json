@@ -145,6 +145,8 @@
       "pmma_thickness_mm": 10,
       "reference_filename": "L4_BODY_SPINE_COMPRESSION_REF.vtk",
       "registration_backend": "vtk",
+      "registration_iterations": 75,
+      "registration_landmarks": 250,
       "registration_max_scale": "1.2,1.2,1.3",
       "registration_min_scale": "0.8,0.8,0.75",
       "superior_contact_center_fraction": [

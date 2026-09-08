@@ -29,6 +29,8 @@ def _locked_workflow_defaults():
                 "top_node_set_id": spine.DEFAULT_SPINE_TOP_NODE_SET_ID,
                 "bottom_node_set_id": spine.DEFAULT_SPINE_BOTTOM_NODE_SET_ID,
                 "registration_backend": spine.DEFAULT_SPINE_REGISTRATION_BACKEND,
+                "registration_landmarks": spine.DEFAULT_SPINE_REGISTRATION_LANDMARKS,
+                "registration_iterations": spine.DEFAULT_SPINE_REGISTRATION_ITERATIONS,
                 "registration_min_scale": spine.DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
                 "registration_max_scale": spine.DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
                 "reference_filename": spine.DEFAULT_SPINE_REFERENCE_FILENAME,
