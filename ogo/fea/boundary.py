@@ -614,6 +614,26 @@ def _fill_short_boolean_gaps_in_volume(values, max_gap=2):
     return out
 
 
+def _close_boolean_gaps_in_xy_slices(values, max_gap=2):
+    """Aggressively close in-plane disk holes without bridging across z slices."""
+    import numpy as np
+    from scipy import ndimage
+
+    out = np.asarray(values, dtype=bool).copy()
+    radius = max(int(max_gap), 0)
+    if radius <= 0:
+        return out
+    structure = np.ones((2 * radius + 1, 2 * radius + 1), dtype=bool)
+    for z in range(out.shape[2]):
+        plane = out[:, :, z]
+        if not np.any(plane):
+            continue
+        closed = ndimage.binary_closing(plane, structure=structure)
+        filled = ndimage.binary_fill_holes(closed)
+        out[:, :, z] = plane | filled
+    return out
+
+
 def _clean_projected_footprint(mask):
     """Clean a candidate cap footprint before it is extruded into a disk."""
     import numpy as np
@@ -841,6 +861,8 @@ def projected_material_disk_required_bounds(
     stable_surface_fraction=0.55,
     stable_surface_min_area_fraction=0.12,
     stable_surface_max_depth=None,
+    stable_surface_min_shift=0.0,
+    stable_surface_trim_fraction=0.0,
 ):
     """Return conservative physical bounds needed for a plane-projected disk."""
     import numpy as np
@@ -905,6 +927,8 @@ def projected_material_disk_required_bounds(
             stable_surface_fraction=stable_surface_fraction,
             stable_surface_min_area_fraction=stable_surface_min_area_fraction,
             stable_surface_max_depth=stable_surface_max_depth,
+            stable_surface_min_shift=stable_surface_min_shift,
+            stable_surface_trim_fraction=stable_surface_trim_fraction,
         )
         surface_distance = float(stable_contact["stable_distance"])
     cap_inner_distance = surface_distance + max(float(intrusion), 0.0)
@@ -1022,8 +1046,18 @@ def _stable_surface_contact_from_bucket_distances(
     stable_surface_fraction=0.55,
     stable_surface_min_area_fraction=0.12,
     stable_surface_max_depth=None,
+    stable_surface_min_shift=0.0,
+    stable_surface_trim_fraction=0.0,
 ):
-    """Find the first broad projected surface behind isolated protrusions."""
+    """Find the first broad projected surface behind isolated protrusions.
+
+    The fraction criteria identify a broad footprint. ``stable_surface_min_shift``
+    then makes the correction depth-aware: shallow shifts are treated as normal
+    anatomy/noise rather than osteophytes and the first-contact surface is kept.
+    When ``stable_surface_trim_fraction`` is positive, the selected surface is
+    the projected depth after ignoring that superficial fraction of the support
+    footprint instead of the older broad-footprint fraction rule.
+    """
     import numpy as np
 
     if not distance_by_key:
@@ -1034,6 +1068,7 @@ def _stable_surface_contact_from_bucket_distances(
             "first_area": 0,
             "stable_area": 0,
             "peak_area": 0,
+            "used_stable_surface": False,
             "stable_keys": set(),
         }
 
@@ -1068,11 +1103,18 @@ def _stable_surface_contact_from_bucket_distances(
         peak_area = max(peak_area, area)
         surfaces.append((float(threshold), area, clean_keys))
 
-    target_area = max(
-        1,
-        int(np.ceil(max(float(stable_surface_fraction), 0.0) * peak_area)),
-        int(np.ceil(max(float(stable_surface_min_area_fraction), 0.0) * full_area)),
-    )
+    trim_fraction = max(float(stable_surface_trim_fraction), 0.0)
+    if trim_fraction > 0.0:
+        target_area = max(
+            1,
+            int(np.ceil(min(trim_fraction, 1.0) * peak_area)),
+        )
+    else:
+        target_area = max(
+            1,
+            int(np.ceil(max(float(stable_surface_fraction), 0.0) * peak_area)),
+            int(np.ceil(max(float(stable_surface_min_area_fraction), 0.0) * full_area)),
+        )
     stable_distance, stable_area, stable_keys = surfaces[-1]
     for threshold, area, keys in surfaces:
         if area >= target_area:
@@ -1080,14 +1122,22 @@ def _stable_surface_contact_from_bucket_distances(
             stable_area = area
             stable_keys = keys
             break
+    stable_depth = float(stable_distance - first_distance)
+    used_stable_surface = stable_depth >= max(float(stable_surface_min_shift), 0.0)
+    if not used_stable_surface:
+        stable_distance = first_distance
+        stable_depth = 0.0
+        stable_area = first_area
+        stable_keys = _clean_footprint_keys(first_keys)
 
     return {
         "first_distance": first_distance,
         "stable_distance": float(stable_distance),
-        "stable_depth": float(stable_distance - first_distance),
+        "stable_depth": stable_depth,
         "first_area": int(first_area),
         "stable_area": int(stable_area),
         "peak_area": int(peak_area),
+        "used_stable_surface": bool(used_stable_surface),
         "stable_keys": stable_keys,
     }
 
@@ -1107,6 +1157,8 @@ def projected_stable_surface_contact(
     stable_surface_fraction=0.55,
     stable_surface_min_area_fraction=0.12,
     stable_surface_max_depth=None,
+    stable_surface_min_shift=0.0,
+    stable_surface_trim_fraction=0.0,
 ):
     """Return stable projected contact-surface metrics for a physical plane."""
     import numpy as np
@@ -1169,6 +1221,8 @@ def projected_stable_surface_contact(
         stable_surface_fraction=stable_surface_fraction,
         stable_surface_min_area_fraction=stable_surface_min_area_fraction,
         stable_surface_max_depth=stable_surface_max_depth,
+        stable_surface_min_shift=stable_surface_min_shift,
+        stable_surface_trim_fraction=stable_surface_trim_fraction,
     )
 
 
@@ -1190,8 +1244,11 @@ def generate_projected_material_disk_mask(
     stable_surface_fraction=0.55,
     stable_surface_min_area_fraction=0.12,
     stable_surface_max_depth=None,
+    stable_surface_min_shift=0.0,
+    stable_surface_trim_fraction=0.0,
     close_gaps_3d=False,
     close_gaps_3d_max_gap=2,
+    keep_largest_component=False,
     material_mask=None,
     extent_start=(0, 0, 0),
 ):
@@ -1277,19 +1334,35 @@ def generate_projected_material_disk_mask(
             stable_surface_fraction=stable_surface_fraction,
             stable_surface_min_area_fraction=stable_surface_min_area_fraction,
             stable_surface_max_depth=stable_surface_max_depth,
+            stable_surface_min_shift=stable_surface_min_shift,
+            stable_surface_trim_fraction=stable_surface_trim_fraction,
         )
-        support_distance = float(stable_contact["stable_distance"])
-        footprint_min = support_distance - max(2.0 * min(spacing), tolerance)
-        footprint_max = support_distance + intrusion + tolerance
-        stable_keys = _clean_footprint_keys(
-            {
+        if stable_contact["used_stable_surface"]:
+            support_distance = float(stable_contact["stable_distance"])
+            footprint_min = support_distance - tolerance
+            footprint_max = support_distance + intrusion + tolerance
+            # Keep local surface bumps that are shallower than the selected
+            # support plane but smaller than the required osteophyte shift.
+            # Without this per-column guard, one real osteophyte can activate
+            # stable contact and then normal surface bumps punch holes in the
+            # PMMA footprint.
+            local_trim_limit = support_distance - max(float(stable_surface_min_shift), 0.0) - tolerance
+            support_keys = {
                 key
                 for key, distance in distance_by_key.items()
-                if footprint_min <= float(distance) <= footprint_max
+                if local_trim_limit <= float(distance) <= footprint_max
             }
-        )
-        if not stable_keys:
-            return np.zeros(active.shape, dtype=bool)
+            stable_keys = _clean_footprint_keys(support_keys)
+            protrusion_keys = {
+                key
+                for key, distance in distance_by_key.items()
+                if float(distance) < local_trim_limit
+            }
+            stable_keys -= protrusion_keys
+            if not stable_keys:
+                return np.zeros(active.shape, dtype=bool)
+        else:
+            stable_surface = False
 
     if anatomy_constrained:
         depth_limit = support_distance + intrusion + tolerance
@@ -1333,13 +1406,22 @@ def generate_projected_material_disk_mask(
             dtype=float,
         )
         bucket_mask = np.isfinite(local_surface)
+        support_column_mask = bucket_mask.copy()
         flat_outer = cap_outer_distance
         if flat_outer >= support_distance:
             flat_outer = support_distance - thickness
         if stable_surface:
+            support_column_mask = np.asarray([key in stable_keys for key in keys], dtype=bool)
+            bucket_mask = support_column_mask
+            stable_surface_distance = np.where(
+                np.isfinite(local_surface),
+                local_surface,
+                support_distance - tolerance,
+            )
+            stable_inner = np.minimum(cap_inner_distance, stable_surface_distance)
             depth_ok = (
                 (distance >= flat_outer - tolerance)
-                & (distance <= cap_inner_distance + tolerance)
+                & (distance <= stable_inner + 1.0e-9)
             )
         else:
             local_min = np.minimum(flat_outer, local_surface)
@@ -1347,22 +1429,43 @@ def generate_projected_material_disk_mask(
             depth_ok = (distance >= local_min - tolerance) & (distance <= local_max + tolerance)
     else:
         bucket_mask = np.ones(full_indices.shape[0], dtype=bool)
+        support_column_mask = bucket_mask.copy()
         depth_ok = (
             (distance >= cap_outer_distance - tolerance)
             & (distance <= cap_inner_distance + tolerance)
         )
 
+    supported_columns = np.zeros(active.shape, dtype=bool)
+    supported_columns[tuple(full_indices[support_column_mask].T)] = True
     keep = inside & depth_ok & empty & bucket_mask
     disk = np.zeros(active.shape, dtype=bool)
     if np.any(keep):
         disk[tuple(full_indices[keep].T)] = True
     if close_gaps_3d and np.any(disk):
-        disk = _fill_short_boolean_gaps_in_volume(
-            disk,
-            max_gap=int(close_gaps_3d_max_gap),
-        )
+        gap = int(close_gaps_3d_max_gap)
+        disk = _fill_short_boolean_gaps_in_volume(disk, max_gap=gap)
+        disk = _close_boolean_gaps_in_xy_slices(disk, max_gap=gap)
+        # The closing step is intentionally allowed to repair holes in the
+        # projected PMMA footprint.  The final safety rule is that PMMA must
+        # never overwrite anatomy.
         disk &= ~material
+    if keep_largest_component and np.any(disk):
+        disk = _largest_connected_component(disk)
     return disk
+
+
+def _largest_connected_component(mask):
+    """Return only the largest 3D connected component from a boolean mask."""
+    import numpy as np
+    from scipy import ndimage
+
+    mask = np.asarray(mask, dtype=bool)
+    labels, count = ndimage.label(mask, structure=np.ones((3, 3, 3), dtype=bool))
+    if count <= 1:
+        return mask
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0
+    return labels == int(np.argmax(sizes))
 
 
 def _generate_projected_bone_caps_from_mask(mask, *, extrusion_axis, thickness, intrusion_depth, shape):
@@ -1647,8 +1750,11 @@ def generate_projected_material_disk_vtk(
     stable_surface_fraction=0.55,
     stable_surface_min_area_fraction=0.12,
     stable_surface_max_depth=None,
+    stable_surface_min_shift=0.0,
+    stable_surface_trim_fraction=0.0,
     close_gaps_3d=False,
     close_gaps_3d_max_gap=2,
+    keep_largest_component=False,
     output_value=1,
 ):
     """Generate a VTK material disk from a physical-space contact plane.
@@ -1692,8 +1798,11 @@ def generate_projected_material_disk_vtk(
         stable_surface_fraction=stable_surface_fraction,
         stable_surface_min_area_fraction=stable_surface_min_area_fraction,
         stable_surface_max_depth=stable_surface_max_depth,
+        stable_surface_min_shift=stable_surface_min_shift,
+        stable_surface_trim_fraction=stable_surface_trim_fraction,
         close_gaps_3d=close_gaps_3d,
         close_gaps_3d_max_gap=close_gaps_3d_max_gap,
+        keep_largest_component=keep_largest_component,
         material_mask=exclusion,
         extent_start=(extent[0], extent[2], extent[4]),
     )

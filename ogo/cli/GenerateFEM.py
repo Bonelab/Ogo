@@ -38,6 +38,9 @@ from ogo.fea.femur import (
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
     DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
     DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
+    DEFAULT_FEMUR_REGISTRATION_BACKEND,
+    DEFAULT_FEMUR_REGISTRATION_ITERATIONS,
+    DEFAULT_FEMUR_REGISTRATION_LANDMARKS,
     DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
     DEFAULT_PMMA_INTRUSION_MM,
     DEFAULT_PMMA_THICKNESS_MM,
@@ -126,6 +129,18 @@ def spine_preset_args(name: str) -> List[str]:
 
 def spine_registration_args(args: argparse.Namespace) -> List[str]:
     """Return lower-level spine registration options owned by the wrapper."""
+    return [
+        "--registration_backend",
+        str(args.registration_backend),
+        "--registration_landmarks",
+        str(args.registration_landmarks),
+        "--registration_iterations",
+        str(args.registration_iterations),
+    ]
+
+
+def femur_registration_args(args: argparse.Namespace) -> List[str]:
+    """Return lower-level femur registration options owned by the wrapper."""
     return [
         "--registration_backend",
         str(args.registration_backend),
@@ -486,6 +501,11 @@ def write_modeling_metadata(
         body_label = option_int(generator_argv, "--mask_threshold", 0)
         process_label = option_int(generator_argv, "--process_mask_threshold", 0)
         appendix = option_value(generator_argv, "--appendix")
+        spine_reference_path = option_value(
+            generator_argv,
+            "--reference_path",
+            str(default_spine_reference_path()),
+        )
         if args.use_absolute_fe_displacement:
             spine_displacement = absolute_displacement_metadata(
                 generator_argv,
@@ -508,11 +528,7 @@ def write_modeling_metadata(
             },
             "alignment": {
                 "method": SPINE_ALIGNMENT_METHOD,
-                "reference_path": option_value(
-                    generator_argv,
-                    "--reference_path",
-                    str(default_spine_reference_path()),
-                ),
+                "reference_path": spine_reference_path,
                 "registration_scale": option_value(generator_argv, "--registration_scale", "auto"),
                 "registration_min_scale": option_value(
                     generator_argv,
@@ -707,6 +723,21 @@ def write_modeling_metadata(
             "alignment": {
                 "method": "ICP to side-specific femur reference from cropped/padded input geometry",
                 "reference_path": option_value(generator_argv, "--reference_path", "bundled side-specific femur reference"),
+                "registration_backend": option_value(
+                    generator_argv,
+                    "--registration_backend",
+                    DEFAULT_FEMUR_REGISTRATION_BACKEND,
+                ),
+                "registration_landmarks": option_int(
+                    generator_argv,
+                    "--registration_landmarks",
+                    DEFAULT_FEMUR_REGISTRATION_LANDMARKS,
+                ),
+                "registration_iterations": option_int(
+                    generator_argv,
+                    "--registration_iterations",
+                    DEFAULT_FEMUR_REGISTRATION_ITERATIONS,
+                ),
             },
             "image_processing": {
                 "iso_resolution_mm": option_float(generator_argv, "--iso_resolution", DEFAULT_FEMUR_ISO_RESOLUTION_MM),
@@ -1177,6 +1208,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     spine.add_argument(
+        "--reference_path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional spine ICP reference surface. If omitted, the bundled "
+            "vertebral-body reference is used."
+        ),
+    )
+    spine.add_argument(
         "--registration_backend",
         choices=("vtk", "numpy"),
         default=DEFAULT_SPINE_REGISTRATION_BACKEND,
@@ -1202,7 +1242,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
         help="Maximum spine ICP iterations. (default: %(default)s)",
     )
-
     hip = subparsers.add_parser(
         "hip",
         help="Generate hip sideways-fall FE models for left, right, or both femurs.",
@@ -1214,6 +1253,31 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["left", "right", "both"],
         default=None,
         help="Femur side to process. Repeatable; defaults to both.",
+    )
+    hip.add_argument(
+        "--registration_backend",
+        choices=("vtk", "numpy"),
+        default=DEFAULT_FEMUR_REGISTRATION_BACKEND,
+        help=(
+            "Femur reference alignment backend. vtk uses vtkIterativeClosestPointTransform; "
+            "numpy uses the deterministic point-cloud helper. (default: %(default)s)"
+        ),
+    )
+    hip.add_argument(
+        "--registration_landmarks",
+        type=int,
+        default=DEFAULT_FEMUR_REGISTRATION_LANDMARKS,
+        help=(
+            "Maximum femur ICP landmarks/sampled points. For vtk this maps to "
+            "SetMaximumNumberOfLandmarks; for numpy this caps sampled surface "
+            "points. (default: %(default)s)"
+        ),
+    )
+    hip.add_argument(
+        "--registration_iterations",
+        type=int,
+        default=DEFAULT_FEMUR_REGISTRATION_ITERATIONS,
+        help="Maximum femur ICP iterations. (default: %(default)s)",
     )
 
     return parser
@@ -1239,9 +1303,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         pistoia_mask_args.extend(["--pistoia_mask_label", str(label)])
 
     if args.model_type == "spine":
+        reference_args = []
+        if args.reference_path is not None:
+            reference_args.extend(["--reference_path", str(args.reference_path)])
         spine_extra_args = (
             spine_preset_args(args.preset)
             + spine_registration_args(args)
+            + reference_args
             + pistoia_mask_args
             + list(extra_args)
             + [
@@ -1277,7 +1345,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         return
 
     if args.model_type == "hip":
-        femur_extra_args = pistoia_mask_args + list(extra_args)
+        femur_extra_args = femur_registration_args(args) + pistoia_mask_args + list(extra_args)
         for side in expand_sides(args.side or ["both"]):
             cmd = build_femur_command(
                 calibrated_image=args.calibrated_image,

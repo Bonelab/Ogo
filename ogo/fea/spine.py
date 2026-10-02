@@ -6,11 +6,11 @@ Default spine workflow:
    posterior-process labels are explicit and traceable.
 2. Crop the vertebral body, posterior process, calibrated image, and combined
    vertebra mask to the same bounding box.
-3. ICP-align the vertebral body to the bundled L4 compression reference. By
-   default the reference is PCA-scaled within 0.8,0.8,0.75 to 1.2,1.2,1.3 before
-   VTK rigid ICP; users can override the scale/reference explicitly. A
-   deterministic NumPy point-cloud ICP backend is kept for debugging and
-   process-orientation rescue attempts.
+3. ICP-align the vertebral body to the bundled L4 compression reference. The
+   reference is PCA-scaled within 0.8,0.8,0.75 to 1.2,1.2,1.3, then registered
+   with the deterministic NumPy point-cloud ICP backend using dense surface
+   sampling. Process-orientation QC retries alternate PCA starts and records
+   failures instead of silently accepting flipped models.
 4. Apply the ICP transform and set the final output spacing to
    1.0 x 1.0 x 1.0 mm in one shared VTK reslice helper. Image data use cubic
    interpolation; body/process labels use nearest-neighbor interpolation.
@@ -35,13 +35,14 @@ from pathlib import Path
 DEFAULT_SPINE_ISO_RESOLUTION_MM = 1.0
 DEFAULT_SPINE_PMMA_THICKNESS_MM = 10
 DEFAULT_SPINE_PMMA_INTRUSION_MM = 6
-DEFAULT_SPINE_STABLE_CONTACT_ENABLED = True
-DEFAULT_SPINE_STABLE_CONTACT_FRACTION = 0.55
+DEFAULT_SPINE_STABLE_CONTACT_FRACTION = 0.0
+DEFAULT_SPINE_STABLE_CONTACT_TRIM_FRACTION = 0.10
 DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION = 0.12
 DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM = 24.0
-DEFAULT_SPINE_STABLE_CONTACT_INTRUSION_MM = 2
+DEFAULT_SPINE_STABLE_CONTACT_MIN_SHIFT_MM = 3.0
 DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D = True
 DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP = 2
+DEFAULT_SPINE_STABLE_CONTACT_KEEP_LARGEST_COMPONENT = True
 DEFAULT_SPINE_PROCESS_QC_MAX_AXIAL_TO_TRANSVERSE_RATIO = 0.75
 DEFAULT_SPINE_PROCESS_QC_AXIAL_TOLERANCE_MM = 2.0
 DEFAULT_SPINE_PMMA_MATERIAL_ID = 5000
@@ -59,16 +60,16 @@ DEFAULT_SPINE_BOTTOM_NODE_SET_ID = 3
 DEFAULT_SPINE_REGISTRATION_SCALE = None
 DEFAULT_SPINE_REGISTRATION_MIN_SCALE = "0.8,0.8,0.75"
 DEFAULT_SPINE_REGISTRATION_MAX_SCALE = "1.2,1.2,1.3"
-DEFAULT_SPINE_REGISTRATION_BACKEND = "vtk"
-DEFAULT_SPINE_REGISTRATION_LANDMARKS = 250
-DEFAULT_SPINE_REGISTRATION_ITERATIONS = 75
+DEFAULT_SPINE_REGISTRATION_BACKEND = "numpy"
+DEFAULT_SPINE_REGISTRATION_LANDMARKS = 8000
+DEFAULT_SPINE_REGISTRATION_ITERATIONS = 50
 DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC = True
 DEFAULT_SPINE_REFERENCE_FILENAME = "L4_BODY_SPINE_COMPRESSION_REF.vtk"
 SPINE_CONTACT_SIZE_FRACTION = (1.6, 1.6)
 SPINE_SUPERIOR_CONTACT_CENTER_FRACTION = (0.5, 0.5, 1.05)
 SPINE_INFERIOR_CONTACT_CENTER_FRACTION = (0.5, 0.5, -0.05)
 
-SPINE_ALIGNMENT_METHOD = "scaled ICP to reference vertebral body"
+SPINE_ALIGNMENT_METHOD = "scaled NumPy ICP to reference vertebral body"
 
 BENCHMARK_LINEAR_FE_DISPLACEMENT_MM = -0.2
 BENCHMARK_NONLINEAR_FE_DISPLACEMENT_MM = -2.0
@@ -99,7 +100,7 @@ def solve_report_profile(preset=None):
 
 
 def default_spine_reference_path():
-    """Return the bundled reference body used for spine ICP alignment."""
+    """Return the bundled vertebral-body reference used for spine ICP alignment."""
     return Path(__file__).resolve().parents[1] / "dat" / DEFAULT_SPINE_REFERENCE_FILENAME
 
 
@@ -962,8 +963,8 @@ def get_icp(body, reference_path):
     icp.SetMeanDistanceModeToRMS()
     icp.SetMaximumMeanDistance(0.05)
     icp.CheckMeanDistanceOn()
-    icp.SetMaximumNumberOfLandmarks(250)
-    icp.SetMaximumNumberOfIterations(75)
+    icp.SetMaximumNumberOfLandmarks(DEFAULT_SPINE_REGISTRATION_LANDMARKS)
+    icp.SetMaximumNumberOfIterations(DEFAULT_SPINE_REGISTRATION_ITERATIONS)
     icp.Update()
 
     ogo.message("ICP Matrix:")
@@ -1381,6 +1382,39 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     iso_resolution = kwargs.get("iso_resolution", DEFAULT_SPINE_ISO_RESOLUTION_MM)
     pmma_thick = kwargs.get("pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM)
     pmma_intrusion = kwargs.get("pmma_intrusion", DEFAULT_SPINE_PMMA_INTRUSION_MM)
+    stable_surface_fraction = float(
+        kwargs.get("stable_surface_fraction", DEFAULT_SPINE_STABLE_CONTACT_FRACTION)
+    )
+    stable_surface_trim_fraction = float(
+        kwargs.get("stable_surface_trim_fraction", DEFAULT_SPINE_STABLE_CONTACT_TRIM_FRACTION)
+    )
+    stable_surface_min_area_fraction = float(
+        kwargs.get(
+            "stable_surface_min_area_fraction",
+            DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
+        )
+    )
+    stable_surface_max_depth = float(
+        kwargs.get("stable_surface_max_depth", DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM)
+    )
+    stable_surface_min_shift = float(
+        kwargs.get("stable_surface_min_shift", DEFAULT_SPINE_STABLE_CONTACT_MIN_SHIFT_MM)
+    )
+    stable_surface_close_gaps_3d = kwargs.get(
+        "stable_surface_close_gaps_3d",
+        DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
+    )
+    stable_surface_close_gaps_max_gap = int(
+        kwargs.get(
+            "stable_surface_close_gaps_max_gap",
+            DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
+        )
+    )
+    stable_surface_keep_largest_component = kwargs.get(
+        "stable_surface_keep_largest_component",
+        DEFAULT_SPINE_STABLE_CONTACT_KEEP_LARGEST_COMPONENT,
+    )
+    stable_surface_enabled = stable_surface_fraction > 0.0 or stable_surface_trim_fraction > 0.0
     top_node_set_id = kwargs.get("top_node_set_id", DEFAULT_SPINE_TOP_NODE_SET_ID)
     bottom_node_set_id = kwargs.get("bottom_node_set_id", DEFAULT_SPINE_BOTTOM_NODE_SET_ID)
     quality_control = kwargs.get("quality_control", True)
@@ -1488,7 +1522,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     isolated_process = threshold(preprocessed_labels, process_label)
 
     # Marching Cubes and Registration
-    ogo.message(f"Starting ICP registration to reference...: {reference_path} ")
+    ogo.message(f"Starting ICP registration to vertebral-body reference...: {reference_path} ")
     icp = get_icp_with_scaling(
         registration_body,
         reference_path,
@@ -1634,15 +1668,17 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     ogo.message(
         "generating fixed-thickness anatomy body-cap disks "
         f"(pmma_thick = {pmma_thick} mm total, pmma_intrusion = {pmma_intrusion} mm, "
-        f"stable_intrusion = {DEFAULT_SPINE_STABLE_CONTACT_INTRUSION_MM} mm, "
-        f"stable_close_gaps_3d = {DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D}, "
-        f"stable_contact = {DEFAULT_SPINE_STABLE_CONTACT_ENABLED})..."
+        f"stable_surface_fraction = {stable_surface_fraction}, "
+        f"stable_surface_trim_fraction = {stable_surface_trim_fraction}, "
+        f"stable_surface_min_area_fraction = {stable_surface_min_area_fraction}, "
+        f"stable_surface_max_depth = {stable_surface_max_depth} mm, "
+        f"stable_surface_min_shift = {stable_surface_min_shift} mm, "
+        f"stable_close_gaps_3d = {stable_surface_close_gaps_3d}, "
+        f"stable_close_gaps_max_gap = {stable_surface_close_gaps_max_gap}, "
+        f"stable_keep_largest_component = {stable_surface_keep_largest_component}, "
+        f"stable_contact = {stable_surface_enabled})..."
     )
-    disk_intrusion = (
-        DEFAULT_SPINE_STABLE_CONTACT_INTRUSION_MM
-        if DEFAULT_SPINE_STABLE_CONTACT_ENABLED
-        else pmma_intrusion
-    )
+    disk_intrusion = pmma_intrusion
     transformed_body_bounds = foreground_voxel_center_bounds(padded_mask1)
     body_bounds = transformed_body_bounds
     inferior_plane = bbox_relative_contact_plane(
@@ -1690,10 +1726,12 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
             shape=plane["shape"],
             thickness=pmma_thick,
             intrusion=disk_intrusion,
-            stable_surface=DEFAULT_SPINE_STABLE_CONTACT_ENABLED,
-            stable_surface_fraction=DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
-            stable_surface_min_area_fraction=DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
-            stable_surface_max_depth=DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
+            stable_surface=stable_surface_enabled,
+            stable_surface_fraction=stable_surface_fraction,
+            stable_surface_min_area_fraction=stable_surface_min_area_fraction,
+            stable_surface_max_depth=stable_surface_max_depth,
+            stable_surface_min_shift=stable_surface_min_shift,
+            stable_surface_trim_fraction=stable_surface_trim_fraction,
         )
         for plane in (inferior_plane, superior_plane)
     ]
@@ -1751,12 +1789,15 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         thickness=pmma_thick,
         intrusion=disk_intrusion,
         anatomy_constrained=True,
-        stable_surface=DEFAULT_SPINE_STABLE_CONTACT_ENABLED,
-        stable_surface_fraction=DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
-        stable_surface_min_area_fraction=DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
-        stable_surface_max_depth=DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
-        close_gaps_3d=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
-        close_gaps_3d_max_gap=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
+        stable_surface=stable_surface_enabled,
+        stable_surface_fraction=stable_surface_fraction,
+        stable_surface_min_area_fraction=stable_surface_min_area_fraction,
+        stable_surface_max_depth=stable_surface_max_depth,
+        stable_surface_min_shift=stable_surface_min_shift,
+        stable_surface_trim_fraction=stable_surface_trim_fraction,
+        close_gaps_3d=stable_surface_close_gaps_3d,
+        close_gaps_3d_max_gap=stable_surface_close_gaps_max_gap,
+        keep_largest_component=stable_surface_keep_largest_component,
         output_value=1,
     )
     superior_disk = generate_projected_material_disk_vtk(
@@ -1772,12 +1813,15 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         thickness=pmma_thick,
         intrusion=disk_intrusion,
         anatomy_constrained=True,
-        stable_surface=DEFAULT_SPINE_STABLE_CONTACT_ENABLED,
-        stable_surface_fraction=DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
-        stable_surface_min_area_fraction=DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
-        stable_surface_max_depth=DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
-        close_gaps_3d=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
-        close_gaps_3d_max_gap=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
+        stable_surface=stable_surface_enabled,
+        stable_surface_fraction=stable_surface_fraction,
+        stable_surface_min_area_fraction=stable_surface_min_area_fraction,
+        stable_surface_max_depth=stable_surface_max_depth,
+        stable_surface_min_shift=stable_surface_min_shift,
+        stable_surface_trim_fraction=stable_surface_trim_fraction,
+        close_gaps_3d=stable_surface_close_gaps_3d,
+        close_gaps_3d_max_gap=stable_surface_close_gaps_max_gap,
+        keep_largest_component=stable_surface_keep_largest_component,
         output_value=1,
     )
 

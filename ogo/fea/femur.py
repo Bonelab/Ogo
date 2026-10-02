@@ -43,6 +43,7 @@ from pathlib import Path
 
 from ogo.fea.alignment import (
     estimate_rigid_icp,
+    estimate_rigid_icp_vtk,
     point_cloud_axis_lengths,
     polydata_from_points,
     polydata_points,
@@ -85,6 +86,9 @@ DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM = 40.0
 DEFAULT_FEMUR_PROXIMAL_REFERENCE_WIDTH = "max_xy"
 DEFAULT_FEMUR_REFERENCE_MIN_SCALE = (0.8, 0.8, 0.75)
 DEFAULT_FEMUR_REFERENCE_MAX_SCALE = (1.2, 1.2, 1.3)
+DEFAULT_FEMUR_REGISTRATION_BACKEND = "numpy"
+DEFAULT_FEMUR_REGISTRATION_LANDMARKS = 8000
+DEFAULT_FEMUR_REGISTRATION_ITERATIONS = 50
 DEFAULT_PMMA_THICKNESS_MM = 10.0
 DEFAULT_PMMA_INTRUSION_MM = 6.0
 DEFAULT_FEMUR_INPUT_MARGIN_MM = DEFAULT_PMMA_THICKNESS_MM + DEFAULT_PMMA_INTRUSION_MM
@@ -2383,6 +2387,9 @@ def sidewaysFallFe(args):
     femur_input_margin = args.femur_input_margin
     femur_icp_transform_in = args.femur_icp_transform_in
     femur_icp_transform_out = args.femur_icp_transform_out
+    registration_backend = args.registration_backend
+    registration_landmarks = args.registration_landmarks
+    registration_iterations = args.registration_iterations
     cortical_label = args.cortical_label
     trabecular_label = args.trabecular_label
     mask_smoothing_spacing_threshold = args.mask_smoothing_spacing_threshold
@@ -2433,6 +2440,9 @@ def sidewaysFallFe(args):
         ogo.message("Femur ICP Transform In: %s" % femur_icp_transform_in)
     if femur_icp_transform_out:
         ogo.message("Femur ICP Transform Out: %s" % femur_icp_transform_out)
+    ogo.message("Femur Registration Backend: %s" % registration_backend)
+    ogo.message("Femur Registration Landmarks: %d" % registration_landmarks)
+    ogo.message("Femur Registration Iterations: %d" % registration_iterations)
     if femur_cut_mode == "bbox_ratio":
         ogo.message("Femur BBox Ratio [reference, constrained, free]: %s" % str(femur_bbox_ratio))
         ogo.message("Femur BBox Crop From [reference, constrained, free]: %s" % str(femur_bbox_crop_from))
@@ -2678,7 +2688,7 @@ def sidewaysFallFe(args):
         ogo.message("Aligning input with reference model...")
         sample_surface_points = surface_points_from_vtk_mask(
             registration_mask,
-            max_points=8000,
+            max_points=registration_landmarks,
             sample_mode="stride",
             sample_offset=0,
         )
@@ -2701,7 +2711,7 @@ def sidewaysFallFe(args):
         ref_poly, reference_scale = scale_reference_point_cloud_to_sample(
             ref_poly,
             sample_surface_points,
-            max_points=8000,
+            max_points=registration_landmarks,
             reference_sample_mode="linspace",
             min_scale=DEFAULT_FEMUR_REFERENCE_MIN_SCALE,
             max_scale=DEFAULT_FEMUR_REFERENCE_MAX_SCALE,
@@ -2710,22 +2720,36 @@ def sidewaysFallFe(args):
         ogo.message("Sample femur axis lengths: %s" % str(reference_scale["sample_axis_lengths"]))
         ogo.message("Femur reference scale factors: %s" % str(reference_scale["scale_factors"]))
 
-        icp_transform = estimate_rigid_icp(
-            moving_points=polydata_points(ref_poly),
-            fixed_points=sample_surface_points,
-            iterations=50,
-            tolerance=1.0e-4,
-            start_by_matching_centroids_only=True,
-            convergence="delta",
-            distance_mode="mean",
-        )
+        reference_surface_points = polydata_points(ref_poly)
+        if registration_backend == "vtk":
+            icp_transform = estimate_rigid_icp_vtk(
+                moving_points=reference_surface_points,
+                fixed_points=sample_surface_points,
+                landmarks=registration_landmarks,
+                iterations=registration_iterations,
+                maximum_mean_distance=0.05,
+                distance_mode="rms",
+                start_by_matching_centroids=True,
+            )
+        elif registration_backend == "numpy":
+            icp_transform = estimate_rigid_icp(
+                moving_points=reference_surface_points,
+                fixed_points=sample_surface_points,
+                iterations=registration_iterations,
+                tolerance=1.0e-4,
+                start_by_matching_centroids_only=True,
+                convergence="delta",
+                distance_mode="mean",
+            )
+        else:
+            raise ValueError("registration_backend must be 'vtk' or 'numpy'.")
         icp = point_transform_to_vtk_matrix(
             icp_transform["rotation"],
             icp_transform["translation"],
         )
         ogo.message(
-            "ICP reference-to-sample iterations=%d mean_distance=%0.4f"
-            % (icp_transform["iterations"], icp_transform["mean_distance"])
+            "ICP (%s backend) reference-to-sample iterations=%d mean_distance=%0.4f"
+            % (registration_backend, icp_transform["iterations"], icp_transform["mean_distance"])
         )
         if femur_icp_transform_out:
             try:
@@ -3594,6 +3618,12 @@ This script sets up the sideways fall FE model on the hip from the
                         help="Optional femur ICP transform JSON to reuse instead of estimating ICP. Intended for fixed-transform length sweeps. (default: %(default)s)")
     parser.add_argument("--femur_icp_transform_out", type=str, default=None,
                         help="Optional path to write the estimated femur ICP transform JSON. (default: %(default)s)")
+    parser.add_argument("--registration_backend", choices=("vtk", "numpy"), default=DEFAULT_FEMUR_REGISTRATION_BACKEND,
+                        help="Femur reference alignment backend. vtk uses vtkIterativeClosestPointTransform; numpy uses the deterministic point-cloud helper. (default: %(default)s)")
+    parser.add_argument("--registration_landmarks", type=int, default=DEFAULT_FEMUR_REGISTRATION_LANDMARKS,
+                        help="Maximum femur ICP landmarks/sampled points. For vtk this maps to SetMaximumNumberOfLandmarks; for numpy this caps sampled surface points. (default: %(default)s)")
+    parser.add_argument("--registration_iterations", type=int, default=DEFAULT_FEMUR_REGISTRATION_ITERATIONS,
+                        help="Maximum femur ICP iterations. (default: %(default)s)")
     parser.add_argument("--compartment_mask", type=str, default=None,
                         help="Optional trabecular/cortical compartment mask aligned with the bone mask. Defaults: cortical=1, trabecular=2.")
     parser.add_argument("--pistoia_mask", type=str, default=None,

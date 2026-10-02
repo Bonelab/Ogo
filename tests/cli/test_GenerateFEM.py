@@ -45,11 +45,19 @@ BENCHMARK_NONLINEAR_ARGS = [
 SPINE_DEFAULT_QC_ARGS = ["--quality_control", "False"]
 SPINE_DEFAULT_REGISTRATION_ARGS = [
     "--registration_backend",
-    "vtk",
+    "numpy",
     "--registration_landmarks",
-    "250",
+    "8000",
     "--registration_iterations",
-    "75",
+    "50",
+]
+FEMUR_DEFAULT_REGISTRATION_ARGS = [
+    "--registration_backend",
+    "numpy",
+    "--registration_landmarks",
+    "8000",
+    "--registration_iterations",
+    "50",
 ]
 
 
@@ -137,8 +145,24 @@ def test_hip_defaults_to_both_sides(monkeypatch, tmp_path, solve_calls):
     GenerateFEM.main(["hip", "density.nii.gz", "hip_mask.nii.gz", "--output_path", "models"])
 
     assert calls == [
-        ["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "1", "--output_path", "models"],
-        ["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "2", "--output_path", "models"],
+        [
+            "density.nii.gz",
+            "hip_mask.nii.gz",
+            "--femur_side",
+            "1",
+            "--output_path",
+            "models",
+            *FEMUR_DEFAULT_REGISTRATION_ARGS,
+        ],
+        [
+            "density.nii.gz",
+            "hip_mask.nii.gz",
+            "--femur_side",
+            "2",
+            "--output_path",
+            "models",
+            *FEMUR_DEFAULT_REGISTRATION_ARGS,
+        ],
     ]
     assert solve_calls == [
         (Path("models/density_LF.n88model"), "hip", calls[0]),
@@ -178,7 +202,7 @@ def test_hip_can_run_one_side(monkeypatch, solve_calls):
 
     GenerateFEM.main(["hip", "density.nii.gz", "hip_mask.nii.gz", "--side", "right"])
 
-    assert calls == [["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "2"]]
+    assert calls == [["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "2", *FEMUR_DEFAULT_REGISTRATION_ARGS]]
     assert solve_calls == [(Path("density_RF.n88model"), "hip", calls[0])]
 
 
@@ -425,6 +449,33 @@ def test_hip_forwards_pistoia_mask_to_builder(monkeypatch, tmp_path, solve_calls
 
     assert "--pistoia_mask" in calls[0]
     assert calls[0][calls[0].index("--pistoia_mask") + 1] == "femoral_neck.nii.gz"
+
+
+def test_hip_forwards_registration_options(monkeypatch, solve_calls):
+    calls = []
+    monkeypatch.setattr(GenerateFEM, "run_femur_command", lambda argv: calls.append(list(argv)))
+
+    GenerateFEM.main(
+        [
+            "hip",
+            "density.nii.gz",
+            "left_femur.nii.gz",
+            "--side",
+            "left",
+            "--registration_backend",
+            "vtk",
+            "--registration_landmarks",
+            "250",
+            "--registration_iterations",
+            "25",
+            "--no-solve",
+        ]
+    )
+
+    assert "--registration_backend" in calls[0]
+    assert calls[0][calls[0].index("--registration_backend") + 1] == "vtk"
+    assert calls[0][calls[0].index("--registration_landmarks") + 1] == "250"
+    assert calls[0][calls[0].index("--registration_iterations") + 1] == "25"
 
 
 def test_hip_pistoia_mask_label_uses_bone_mask_when_mask_omitted(monkeypatch, tmp_path, solve_calls):
@@ -736,9 +787,9 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
     data = json.loads(path.read_text())
 
     assert data["target"] == {"vertebra": "L1", "body_label": 2, "process_label": 3}
-    assert data["alignment"]["registration_backend"] == "vtk"
-    assert data["alignment"]["registration_landmarks"] == 250
-    assert data["alignment"]["registration_iterations"] == 75
+    assert data["alignment"]["registration_backend"] == "numpy"
+    assert data["alignment"]["registration_landmarks"] == 8000
+    assert data["alignment"]["registration_iterations"] == 50
     assert data["geometry"]["model_coordinates"] == "preprocessed_image_physical_space"
     assert data["materials"]["trabecular"]["elastic_E_func"] == "kopperdahl_trab_E"
     assert data["materials"]["cortical"]["material_id_range"] == [129, 256]
@@ -778,6 +829,9 @@ def test_femur_modeling_metadata_records_materials_shaft_and_bcs(tmp_path):
     data = json.loads(path.read_text())
 
     assert data["target"]["side"] == "left"
+    assert data["alignment"]["registration_backend"] == "numpy"
+    assert data["alignment"]["registration_landmarks"] == 8000
+    assert data["alignment"]["registration_iterations"] == 50
     assert data["geometry"]["model_coordinates"] == "preprocessed_image_physical_space"
     assert data["segmentation"]["compartment_labels"] == {"cortical": 1, "trabecular": 2}
     assert data["shaft_standardization"]["lesser_trochanter_distal_offset_mm"] == 50.0
