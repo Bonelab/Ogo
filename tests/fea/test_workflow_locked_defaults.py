@@ -33,6 +33,7 @@ def _locked_workflow_defaults():
                 "registration_iterations": spine.DEFAULT_SPINE_REGISTRATION_ITERATIONS,
                 "registration_min_scale": spine.DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
                 "registration_max_scale": spine.DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
+                "spine_icp_target": spine.DEFAULT_SPINE_ICP_TARGET,
                 "reference_filename": spine.DEFAULT_SPINE_REFERENCE_FILENAME,
                 "contact_size_fraction": list(spine.SPINE_CONTACT_SIZE_FRACTION),
                 "superior_contact_center_fraction": list(
@@ -76,6 +77,9 @@ def _locked_workflow_defaults():
                 "proximal_reference_distance_mm": femur.DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
                 "reference_min_scale": list(femur.DEFAULT_FEMUR_REFERENCE_MIN_SCALE),
                 "reference_max_scale": list(femur.DEFAULT_FEMUR_REFERENCE_MAX_SCALE),
+                "registration_backend": femur.DEFAULT_FEMUR_REGISTRATION_BACKEND,
+                "registration_landmarks": femur.DEFAULT_FEMUR_REGISTRATION_LANDMARKS,
+                "registration_iterations": femur.DEFAULT_FEMUR_REGISTRATION_ITERATIONS,
                 "pmma_thickness_mm": femur.DEFAULT_PMMA_THICKNESS_MM,
                 "pmma_intrusion_mm": femur.DEFAULT_PMMA_INTRUSION_MM,
                 "input_margin_mm": femur.DEFAULT_FEMUR_INPUT_MARGIN_MM,

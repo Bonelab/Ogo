@@ -1,0 +1,136 @@
+"""Standalone HTML review gallery and portable inclusion CSV export."""
+
+import csv
+import hashlib
+import html
+import json
+import os
+import re
+import shutil
+import zipfile
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from urllib.parse import quote
+
+from ogo.fea.review import FIELDS, REASONS, identity, inclusion_row, write_inclusion
+
+
+def _camera_images(path, output):
+    """Split the fixed three-row Ogo render, caching assets beside the gallery."""
+    from PIL import Image
+    with Image.open(path) as image:
+        if image.size != (1400, 2550) or not path.name.endswith(('_qc_3d.png', '_sed_3d.png')):
+            return []
+        stat = path.stat()
+        key = hashlib.sha256(f'{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}'.encode()).hexdigest()[:20]
+        directory = output.parent / (output.stem + '_views')
+        directory.mkdir(exist_ok=True)
+        assets = []
+        for index, view in enumerate(('oblique', 'top', 'bottom')):
+            asset = directory / f'{key}_{view}.png'
+            if not asset.exists():
+                image.crop((0, index * 850, 1400, (index + 1) * 850)).save(asset)
+            assets.append((view, asset))
+        return assets
+
+
+def generate_gallery(rows, output, decisions=None, image_root=None):
+    output = Path(output).absolute()
+    decisions = decisions or {}
+    cards = []
+    escape = lambda value: html.escape(str(value), quote=True)
+    for index, row in enumerate(rows):
+        images = []
+        for stage, key in [('anatomy', 'anatomy_image'), ('sed', 'sed_image')]:
+            path = Path(row.get(key) or '')
+            if image_root is not None and not path.is_absolute():
+                path = Path(image_root) / path
+            if path.is_file():
+                cameras = _camera_images(path, output)
+                for view, asset in [('all', path), *cameras]:
+                    relative = quote(Path(os.path.relpath(asset, output.parent)).as_posix())
+                    source = f'src="{escape(relative)}"'
+                    fallback = ' data-fallback="true"' if not cameras else ''
+                    images.append(f'<img data-stage="{stage}" data-view="{view}"{fallback} {source} loading="lazy" alt="{stage}: {view}" hidden>')
+        measurements = ''.join(f'<tr><th>{escape(key)}</th><td>{escape(value)}</td></tr>'
+                               for key, value in sorted(row.items()) if not key.endswith('_image'))
+        cards.append(f'<article data-index="{index}"><button class="review-open">{escape(row["model_id"])}</button><p class="automatic"></p><p class="decision"></p><button class="quick-decision" data-decision="include" aria-pressed="false">Include</button> <button class="quick-decision" data-decision="exclude" aria-pressed="false">Exclude</button> <button class="review-open">Review</button>{"".join(images)}<details><summary>Measurements</summary><table>{measurements}</table></details></article>')
+    reasons = sorted({reason for row in rows for reason in row['qc_reasons'].split(';') if reason})
+    options = ''.join(f'<option>{escape(reason)}</option>' for reason in reasons)
+    manual_options = ''.join(f'<option value="{reason}">{reason.replace("_", " ")}</option>' for reason in REASONS)
+    seeds = [inclusion_row(row, decisions.get(identity(row))) for row in rows]
+    serialized = json.dumps(rows, sort_keys=True)
+    fingerprint = hashlib.sha256(serialized.encode()).hexdigest()
+    data = json.dumps({'rows': rows, 'seeds': seeds, 'fields': FIELDS, 'reasons': REASONS,
+                       'storageKey': 'ogo-fea-review-v1-' + fingerprint,
+                       'imported': bool(decisions)}).replace('<', '\\u003c')
+    script = Path(__file__).with_name('gallery_review.js').read_text()
+    content = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>FEA QC review</title>
+<style>body{font:14px system-ui;margin:20px;background:#fff;color:#222}header{position:sticky;top:0;background:white;padding:12px 0;z-index:1;display:flex;flex-wrap:wrap;gap:8px;align-items:center}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}article{border:1px solid #ccc;padding:12px;overflow-wrap:anywhere}button,select,input{font:inherit;padding:6px}img{width:100%;height:560px;object-fit:contain;cursor:pointer}article[hidden],img[hidden]{display:none}table{font-size:12px;width:100%;table-layout:fixed}th,td{text-align:left;border-bottom:1px solid #ddd;padding:4px;overflow-wrap:anywhere}.decision{font-weight:600}dialog{width:min(900px,90vw);max-height:90vh;overflow:auto;border:1px solid #aaa}dialog::backdrop{background:#0008}dialog img{height:60vh}dialog label{display:block;margin:12px 0}textarea{display:block;width:95%;min-height:70px}#message{width:100%;margin:0;color:#555}.review-open:first-child{font-weight:600;border:0;background:none;text-align:left}#review-title{font-size:18px}</style></head><body>
+<header><input id="search" aria-label="Subject" placeholder="Subject"><select id="site" aria-label="Anatomy"><option value="">All sites</option><option>hip</option><option>spine</option></select>
+<select id="status" aria-label="Automatic QC"><option value="">All QC statuses</option><option>pass</option><option>review</option><option>fail</option></select>
+<select id="reason" aria-label="QC reason"><option value="">All QC reasons</option>REASONS</select>
+<select id="inclusion" aria-label="Study inclusion"><option value="">All study decisions</option><option>include</option><option>exclude</option><option>pending</option></select>
+<select id="stage" aria-label="Solve stage"><option value="anatomy">Before solve</option><option value="sed">After solve</option></select>
+<select id="camera" aria-label="Camera view"><option value="oblique">Oblique / side</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="all">All views</option></select>
+<input id="reviewer" aria-label="Reviewer" placeholder="Reviewer initials/name"><button id="export">Export inclusion CSV</button><label>Import CSV <input id="import" type="file" accept=".csv,text/csv"></label><p id="message" role="status"></p></header>
+<main>CARDS</main><dialog id="review-dialog"><button id="close">Close</button><h1 id="review-title"></h1><p id="review-auto"></p>
+<select id="review-stage" aria-label="Review solve stage"><option value="anatomy">Before solve</option><option value="sed">After solve</option></select>
+<select id="review-camera" aria-label="Review camera view"><option value="oblique">Oblique / side</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="all">All views</option></select><div id="review-images"></div>
+<label>Reason <select id="manual-reason">MANUAL_OPTIONS</select></label><label>Explanation<textarea id="manual-note"></textarea></label>
+<button id="include">Include</button><button id="exclude">Exclude</button><button id="reset">Reset to automatic</button><div id="review-measurements"></div></dialog>
+<script type="application/json" id="review-data">DATA</script><script>SCRIPT</script></body></html>'''
+    # Replace once so record text cannot become another template token.
+    tokens = {'SCRIPT': script, 'MANUAL_OPTIONS': manual_options, 'REASONS': options,
+              'CARDS': ''.join(cards), 'DATA': data}
+    content = re.sub(r'SCRIPT|MANUAL_OPTIONS|REASONS|CARDS|DATA', lambda match: tokens[match[0]], content)
+    output.write_text(content)
+    return output
+
+
+def export_gallery_zip(rows, output, decisions=None):
+    """Package the full gallery, images, and review CSVs without copying models.
+
+    Image references are relative to the extracted HTML. Missing previews stay
+    missing; the archive contains no dependence on the original image folders.
+    """
+    output = Path(output).absolute()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix='ogo-gallery-', dir=output.parent) as temporary:
+        root = Path(temporary)
+        images = root / 'images'
+        images.mkdir()
+        portable, copied = [], {}
+        for row in rows:
+            record = dict(row)
+            for key in ('anatomy_image', 'sed_image'):
+                source = Path(row.get(key) or '')
+                record[key] = ''
+                if source.is_file():
+                    source = source.resolve()
+                    if source not in copied:
+                        # Stable identity preserves browser autosave across exports.
+                        name = hashlib.sha256(str(source).encode()).hexdigest()[:20] + '_' + source.name
+                        target = images / name
+                        try:
+                            target.symlink_to(source)
+                        except OSError:
+                            shutil.copyfile(source, target)
+                        copied[source] = target.relative_to(root).as_posix()
+                    record[key] = copied[source]
+            portable.append(record)
+        generate_gallery(portable, root / 'gallery.html', decisions, image_root=root)
+        write_inclusion(rows, root / 'study_inclusion.csv', decisions)
+        fields = sorted({key for row in rows for key in row})
+        with (root / 'qc_summary.csv').open('w', newline='') as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+        temporary_zip = root / 'gallery.zip'
+        with zipfile.ZipFile(temporary_zip, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+            for source in sorted(root.rglob('*')):
+                if source.is_file() and source != temporary_zip:
+                    compression = zipfile.ZIP_STORED if source.suffix.lower() in ('.png', '.jpg', '.jpeg') else zipfile.ZIP_DEFLATED
+                    archive.write(source, source.relative_to(root).as_posix(), compress_type=compression)
+        temporary_zip.replace(output)
+    return output

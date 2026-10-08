@@ -5,6 +5,12 @@ def test_default_spine_cap_geometry_matches_maintained_settings():
     assert spine.DEFAULT_SPINE_PMMA_THICKNESS_MM == 10
     assert spine.DEFAULT_SPINE_PMMA_INTRUSION_MM == 6
     assert spine.DEFAULT_SPINE_REGISTRATION_BACKEND == "vtk"
+    assert spine.DEFAULT_SPINE_ICP_TARGET == "body"
+
+
+def test_spine_reference_path_depends_on_icp_target():
+    assert spine.default_spine_reference_path("body").name == "L4_BODY_SPINE_COMPRESSION_REF.vtk"
+    assert spine.default_spine_reference_path("vertebra").name == "L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk"
 
 
 def test_benchmark_presets_match_spinefe_notebook_settings():

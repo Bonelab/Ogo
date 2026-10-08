@@ -12,6 +12,25 @@ GenerateFEM = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(GenerateFEM)
 
 
+def test_generation_thread_limit_applies_to_vtk_and_itk():
+    vtk = pytest.importorskip("vtk")
+    sitk = pytest.importorskip("SimpleITK")
+    old_default = vtk.vtkMultiThreader.GetGlobalDefaultNumberOfThreads()
+    old_maximum = vtk.vtkMultiThreader.GetGlobalMaximumNumberOfThreads()
+    old_itk = sitk.ProcessObject.GetGlobalDefaultNumberOfThreads()
+    try:
+        GenerateFEM.limit_generation_threads(1)
+        assert vtk.vtkMultiThreader.GetGlobalDefaultNumberOfThreads() == 1
+        assert vtk.vtkMultiThreader.GetGlobalMaximumNumberOfThreads() == 1
+        assert sitk.ProcessObject.GetGlobalDefaultNumberOfThreads() == 1
+        with pytest.raises(ValueError, match="positive"):
+            GenerateFEM.limit_generation_threads(0)
+    finally:
+        vtk.vtkMultiThreader.SetGlobalMaximumNumberOfThreads(old_maximum)
+        vtk.vtkMultiThreader.SetGlobalDefaultNumberOfThreads(old_default)
+        sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(old_itk)
+
+
 BENCHMARK_LINEAR_ARGS = [
     "--fe_displacement",
     "-0.2",
@@ -50,7 +69,10 @@ SPINE_DEFAULT_REGISTRATION_ARGS = [
     "250",
     "--registration_iterations",
     "75",
+    "--spine_icp_target",
+    "body",
 ]
+FEMUR_DEFAULT_REGISTRATION_ARGS = []
 
 
 @pytest.fixture
@@ -129,6 +151,31 @@ def test_spine_runs_each_requested_vertebra(monkeypatch, tmp_path, solve_calls):
     ]
 
 
+def test_spine_can_request_full_vertebra_icp_target(monkeypatch, tmp_path, solve_calls):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(GenerateFEM, "run_spine_command", lambda argv: calls.append(list(argv)))
+
+    GenerateFEM.main(
+        [
+            "spine",
+            "density.nii.gz",
+            "spine_mask.nii.gz",
+            "--output_path",
+            "models",
+            "--vertebra",
+            "L1:2:1",
+            "--spine_icp_target",
+            "vertebra",
+            "--reference_path",
+            "L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk",
+        ]
+    )
+
+    assert calls[0][calls[0].index("--spine_icp_target") + 1] == "vertebra"
+    assert calls[0][calls[0].index("--reference_path") + 1] == "L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk"
+
+
 def test_hip_defaults_to_both_sides(monkeypatch, tmp_path, solve_calls):
     monkeypatch.chdir(tmp_path)
     calls = []
@@ -137,8 +184,24 @@ def test_hip_defaults_to_both_sides(monkeypatch, tmp_path, solve_calls):
     GenerateFEM.main(["hip", "density.nii.gz", "hip_mask.nii.gz", "--output_path", "models"])
 
     assert calls == [
-        ["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "1", "--output_path", "models"],
-        ["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "2", "--output_path", "models"],
+        [
+            "density.nii.gz",
+            "hip_mask.nii.gz",
+            "--femur_side",
+            "1",
+            "--output_path",
+            "models",
+            *FEMUR_DEFAULT_REGISTRATION_ARGS,
+        ],
+        [
+            "density.nii.gz",
+            "hip_mask.nii.gz",
+            "--femur_side",
+            "2",
+            "--output_path",
+            "models",
+            *FEMUR_DEFAULT_REGISTRATION_ARGS,
+        ],
     ]
     assert solve_calls == [
         (Path("models/density_LF.n88model"), "hip", calls[0]),
@@ -178,7 +241,7 @@ def test_hip_can_run_one_side(monkeypatch, solve_calls):
 
     GenerateFEM.main(["hip", "density.nii.gz", "hip_mask.nii.gz", "--side", "right"])
 
-    assert calls == [["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "2"]]
+    assert calls == [["density.nii.gz", "hip_mask.nii.gz", "--femur_side", "2", *FEMUR_DEFAULT_REGISTRATION_ARGS]]
     assert solve_calls == [(Path("density_RF.n88model"), "hip", calls[0])]
 
 
@@ -427,6 +490,30 @@ def test_hip_forwards_pistoia_mask_to_builder(monkeypatch, tmp_path, solve_calls
     assert calls[0][calls[0].index("--pistoia_mask") + 1] == "femoral_neck.nii.gz"
 
 
+def test_hip_wrapper_matches_fixed_registration_builder(monkeypatch, tmp_path, solve_calls):
+    from ogo.fea import femur
+
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(femur, "sidewaysFallFe", lambda args: calls.append(args))
+
+    GenerateFEM.main(
+        [
+            "hip",
+            "density.nii.gz",
+            "left_femur.nii.gz",
+            "--side",
+            "left",
+            "--femur_greater_trochanter_distal_length=15",
+            "--no-solve",
+        ]
+    )
+
+    assert calls[0].femur_greater_trochanter_distal_length == 15
+    assert calls[0].femur_shaft_length == 120
+    assert not hasattr(calls[0], "registration_backend")
+
+
 def test_hip_pistoia_mask_label_uses_bone_mask_when_mask_omitted(monkeypatch, tmp_path, solve_calls):
     monkeypatch.chdir(tmp_path)
     calls = []
@@ -570,7 +657,7 @@ def test_solve_model_sets_femur_displacement_from_percent(monkeypatch, tmp_path)
     assert calls[0]["report_profile"] == "femur"
     assert calls[0]["target_displacement"] == 4.0
     assert calls[0]["solve_displacement_percent"] == 4.0
-    assert calls[0]["critical_volume"] == 7.0
+    assert calls[0]["critical_volume"] == 11.2
     assert calls[0]["critical_strain"] == 0.009
 
 
@@ -736,6 +823,7 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
     data = json.loads(path.read_text())
 
     assert data["target"] == {"vertebra": "L1", "body_label": 2, "process_label": 3}
+    assert data["alignment"]["registration_target"] == "body"
     assert data["alignment"]["registration_backend"] == "vtk"
     assert data["alignment"]["registration_landmarks"] == 250
     assert data["alignment"]["registration_iterations"] == 75
@@ -768,8 +856,6 @@ def test_femur_modeling_metadata_records_materials_shaft_and_bcs(tmp_path):
         "6",
         "--pmma_intrusion",
         "6",
-        "--femur_lesser_trochanter_distal_offset",
-        "50",
         "--compartment_mask",
         "trab_cort.nii.gz",
     ]
@@ -778,9 +864,14 @@ def test_femur_modeling_metadata_records_materials_shaft_and_bcs(tmp_path):
     data = json.loads(path.read_text())
 
     assert data["target"]["side"] == "left"
+    assert data["alignment"]["registration_backend"] == "numpy"
+    assert data["alignment"]["registration_landmarks"] == 40000
+    assert data["alignment"]["registration_iterations"] == 50
     assert data["geometry"]["model_coordinates"] == "preprocessed_image_physical_space"
     assert data["segmentation"]["compartment_labels"] == {"cortical": 1, "trabecular": 2}
-    assert data["shaft_standardization"]["lesser_trochanter_distal_offset_mm"] == 50.0
+    assert "lesser_trochanter_distal_offset_mm" not in data["shaft_standardization"]
+    assert "bbox_ratio" not in data["shaft_standardization"]
+    assert "proximal_box_ratio" not in data["shaft_standardization"]
     assert data["materials"]["include_cortical_region"] is True
     assert data["materials"]["cortical"]["material_id_range"] == [129, 256]
     assert data["boundary_conditions"]["fixture_geometry"]["femoral_head"]["relative_to"] == "model_bbox"
@@ -833,6 +924,9 @@ def test_femur_modeling_metadata_records_gt_length_study_mode(tmp_path):
         "flat post-ICP aligned-frame crop face at fixed shaft length below detected GT-disk distal edge"
     )
     assert data["boundary_conditions"]["fixture_geometry"]["distal_shaft"]["support_fraction"] == 0.9
+    assert shaft["coverage_definition"] == (
+        "GT disk distal voxel face minus safe flat face clearing the full transformed native scan end"
+    )
 
 
 def test_femur_modeling_metadata_records_absolute_displacement(tmp_path):

@@ -25,25 +25,24 @@ from ogo.fea.spine import (
     DEFAULT_SPINE_REGISTRATION_BACKEND,
     DEFAULT_SPINE_REGISTRATION_ITERATIONS,
     DEFAULT_SPINE_REGISTRATION_LANDMARKS,
+    DEFAULT_SPINE_ICP_TARGET,
     SPINE_ALIGNMENT_METHOD,
+    SPINE_ICP_TARGETS,
     default_spine_reference_path,
     solve_report_profile as spine_solve_report_profile,
 )
 from ogo.fea.femur import (
-    DEFAULT_FEMUR_BBOX_CROP_FROM,
-    DEFAULT_FEMUR_BBOX_RATIO,
     DEFAULT_FEMUR_CUT_MODE,
     DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM,
     DEFAULT_FEMUR_GREATER_TROCHANTER_INCLUSION_LENGTH_MM,
     DEFAULT_FEMUR_ISO_RESOLUTION_MM,
     DEFAULT_FEMUR_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
-    DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
-    DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
+    DEFAULT_FEMUR_REGISTRATION_BACKEND,
+    DEFAULT_FEMUR_REGISTRATION_ITERATIONS,
+    DEFAULT_FEMUR_REGISTRATION_LANDMARKS,
     DEFAULT_PMMA_INTRUSION_MM,
     DEFAULT_PMMA_THICKNESS_MM,
-    DISTAL_SHAFT_FIXTURE_CENTER_FRACTION,
     POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION,
-    DISTAL_SHAFT_FIXTURE_SIZE_FRACTION,
     FEMORAL_HEAD_FIXTURE_CENTER_FRACTION,
     GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION,
     SIDEWAYS_FALL_FIXTURE_SIZE_FRACTION,
@@ -133,6 +132,8 @@ def spine_registration_args(args: argparse.Namespace) -> List[str]:
         str(args.registration_landmarks),
         "--registration_iterations",
         str(args.registration_iterations),
+        "--spine_icp_target",
+        str(args.spine_icp_target),
     ]
 
 
@@ -486,6 +487,16 @@ def write_modeling_metadata(
         body_label = option_int(generator_argv, "--mask_threshold", 0)
         process_label = option_int(generator_argv, "--process_mask_threshold", 0)
         appendix = option_value(generator_argv, "--appendix")
+        spine_icp_target = option_value(
+            generator_argv,
+            "--spine_icp_target",
+            DEFAULT_SPINE_ICP_TARGET,
+        )
+        spine_reference_path = option_value(
+            generator_argv,
+            "--reference_path",
+            str(default_spine_reference_path(spine_icp_target)),
+        )
         if args.use_absolute_fe_displacement:
             spine_displacement = absolute_displacement_metadata(
                 generator_argv,
@@ -508,11 +519,8 @@ def write_modeling_metadata(
             },
             "alignment": {
                 "method": SPINE_ALIGNMENT_METHOD,
-                "reference_path": option_value(
-                    generator_argv,
-                    "--reference_path",
-                    str(default_spine_reference_path()),
-                ),
+                "registration_target": spine_icp_target,
+                "reference_path": spine_reference_path,
                 "registration_scale": option_value(generator_argv, "--registration_scale", "auto"),
                 "registration_min_scale": option_value(
                     generator_argv,
@@ -676,14 +684,6 @@ def write_modeling_metadata(
         femur_side = option_value(generator_argv, "--femur_side", "1")
         side = "left" if femur_side == "1" else "right" if femur_side == "2" else "unknown"
         compartment_mask = option_path(generator_argv, "--compartment_mask")
-        femur_cut_mode = option_value(generator_argv, "--femur_cut_mode", DEFAULT_FEMUR_CUT_MODE)
-        femur_bbox_ratio = option_n_values(generator_argv, "--femur_bbox_ratio", 3, DEFAULT_FEMUR_BBOX_RATIO)
-        femur_bbox_crop_from = option_n_values(
-            generator_argv,
-            "--femur_bbox_crop_from",
-            3,
-            DEFAULT_FEMUR_BBOX_CROP_FROM,
-        )
         if args.use_absolute_fe_displacement:
             femur_displacement = absolute_displacement_metadata(
                 generator_argv,
@@ -707,6 +707,9 @@ def write_modeling_metadata(
             "alignment": {
                 "method": "ICP to side-specific femur reference from cropped/padded input geometry",
                 "reference_path": option_value(generator_argv, "--reference_path", "bundled side-specific femur reference"),
+                "registration_backend": DEFAULT_FEMUR_REGISTRATION_BACKEND,
+                "registration_landmarks": DEFAULT_FEMUR_REGISTRATION_LANDMARKS,
+                "registration_iterations": DEFAULT_FEMUR_REGISTRATION_ITERATIONS,
             },
             "image_processing": {
                 "iso_resolution_mm": option_float(generator_argv, "--iso_resolution", DEFAULT_FEMUR_ISO_RESOLUTION_MM),
@@ -751,23 +754,14 @@ def write_modeling_metadata(
                 },
             },
             "shaft_standardization": {
-                "cut_mode": femur_cut_mode,
-                "crop_stage": (
-                    "after isotropic resampling and before ICP"
-                    if femur_cut_mode in {"bbox_ratio", "proximal_box_ratio"}
-                    else "fixed rough crop before ICP, final oblique ratio crop after ICP"
-                    if femur_cut_mode == "post_icp_oblique_ratio"
-                    else "fixed rough crop before ICP, final flat ratio crop after ICP"
-                    if femur_cut_mode == "post_icp_flat_ratio"
-                    else "fixed rough crop before ICP for registration, final GT-disk-relative flat crop after ICP on the full scan"
-                    if femur_cut_mode == "greater_trochanter_length"
-                    else "after ICP on the generated model grid"
-                ),
-                "fixed_length_mm": option_float(generator_argv, "--femur_shaft_length", 120.0),
+                "cut_mode": DEFAULT_FEMUR_CUT_MODE,
+                "crop_stage": "fixed rough crop before ICP for registration, final GT-disk-relative flat crop after ICP on the full scan",
+                "coverage_definition": "GT disk distal voxel face minus safe flat face clearing the full transformed native scan end",
+                "geometry_sidecar": str(model_path.with_name(model_path.stem + "_shaft_geometry.json")),
                 "rough_pre_icp_crop": {
-                    "enabled": femur_cut_mode in {"post_icp_flat_ratio", "post_icp_oblique_ratio", "greater_trochanter_length"},
+                    "enabled": True,
                     "retained_length_mm": option_float(generator_argv, "--femur_shaft_length", 120.0),
-                    "registration_only": femur_cut_mode == "greater_trochanter_length",
+                    "registration_only": True,
                 },
                 "greater_trochanter_length": {
                     "retained_length_mm": option_float(
@@ -782,37 +776,7 @@ def write_modeling_metadata(
                     ),
                     "length_origin": "detected greater-trochanter disk distal edge",
                 },
-                "lesser_trochanter_distal_offset_mm": option_float(
-                    generator_argv,
-                    "--femur_lesser_trochanter_distal_offset",
-                    DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
-                ),
-                "bbox_ratio": femur_bbox_ratio,
-                "bbox_crop_from": femur_bbox_crop_from,
-                "proximal_box_ratio": {
-                    "ratio": option_float(generator_argv, "--femur_experimental_crop_ratio", 1.2),
-                    "proximal_reference_distance_mm": option_float(
-                        generator_argv,
-                        "--femur_proximal_reference_distance",
-                        DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
-                    ),
-                    "reference_width": option_value(
-                        generator_argv,
-                        "--femur_proximal_reference_width",
-                        "max_xy",
-                    ),
-                },
-                "cut_plane": (
-                    "post-resample pre-ICP crop face transformed with the femur"
-                    if femur_cut_mode in {"bbox_ratio", "proximal_box_ratio"}
-                    else "post-ICP oblique crop face following transformed rough pre-ICP crop face angle"
-                    if femur_cut_mode == "post_icp_oblique_ratio"
-                    else "flat post-ICP aligned-frame crop face"
-                    if femur_cut_mode == "post_icp_flat_ratio"
-                    else "flat post-ICP aligned-frame crop face at fixed shaft length below detected GT-disk distal edge"
-                    if femur_cut_mode == "greater_trochanter_length"
-                    else "flat model-grid z plane"
-                ),
+                "cut_plane": "flat post-ICP aligned-frame crop face at fixed shaft length below detected GT-disk distal edge",
                 "incomplete_fov_behavior": "fail model generation",
             },
             "materials": {
@@ -885,48 +849,10 @@ def write_modeling_metadata(
                     },
                     "distal_shaft": {
                         "node_set": "Distal_Femur_Nodes",
-                        "support_surface": (
-                            "finite bbox-relative patch projected onto the transformed oblique shaft surface"
-                            if femur_cut_mode == "bbox_ratio"
-                            else "projected patch on the post-ICP oblique distal shaft crop face"
-                            if femur_cut_mode == "post_icp_oblique_ratio"
-                            else "central 90% straight patch on the post-ICP flat distal shaft crop face"
-                            if femur_cut_mode in {"post_icp_flat_ratio", "greater_trochanter_length"}
-                            else "flat distal shaft cut face"
-                        ),
-                        "relative_to": (
-                            "transformed_rough_crop_face"
-                            if femur_cut_mode == "post_icp_oblique_ratio"
-                            else "model_grid"
-                            if femur_cut_mode in {"post_icp_flat_ratio", "greater_trochanter_length"}
-                            else "model_bbox"
-                            if femur_cut_mode == "bbox_ratio"
-                            else None
-                        ),
-                        "center_fraction": (
-                            list(DISTAL_SHAFT_FIXTURE_CENTER_FRACTION)
-                            if femur_cut_mode == "bbox_ratio"
-                            else None
-                        ),
-                        "size_fraction": (
-                            list(DISTAL_SHAFT_FIXTURE_SIZE_FRACTION)
-                            if femur_cut_mode == "bbox_ratio"
-                            else None
-                        ),
-                        "support_fraction": (
-                            POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION
-                            if femur_cut_mode in {"post_icp_flat_ratio", "greater_trochanter_length"}
-                            else None
-                        ),
-                        "normal_source": (
-                            "transformed input bbox-ratio crop face"
-                            if femur_cut_mode == "bbox_ratio"
-                            else "transformed rough pre-ICP crop face shifted to final ratio target"
-                            if femur_cut_mode == "post_icp_oblique_ratio"
-                            else "model-grid distal z direction"
-                            if femur_cut_mode in {"post_icp_flat_ratio", "greater_trochanter_length"}
-                            else "model-grid distal z face"
-                        ),
+                        "support_surface": "central 90% straight patch on the post-ICP flat distal shaft crop face",
+                        "relative_to": "model_grid",
+                        "support_fraction": POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION,
+                        "normal_source": "model-grid distal z direction",
                     },
                 },
                 "constraints": [
@@ -1041,7 +967,7 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Only generate the .n88model; skip FAIM solve and postprocessing.",
     )
-    parser.add_argument("--threads", type=int, default=4, help="FAIM solver thread count.")
+    parser.add_argument("--threads", type=int, default=4, help="Per-job VTK/ITK generation and FAIM solver thread limit.")
     parser.add_argument("--faim_env", default=None, help="Optional conda environment for FAIM/N88 tools.")
     parser.add_argument("--conda_executable", default="conda", help="Conda executable for --faim_env.")
     parser.add_argument("--faim_install_root", default=None, help="Optional FAIM install root.")
@@ -1177,6 +1103,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     spine.add_argument(
+        "--reference_path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional spine ICP reference surface. If omitted, the bundled "
+            "reference matching --spine_icp_target is used."
+        ),
+    )
+    spine.add_argument(
         "--registration_backend",
         choices=("vtk", "numpy"),
         default=DEFAULT_SPINE_REGISTRATION_BACKEND,
@@ -1202,6 +1137,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
         help="Maximum spine ICP iterations. (default: %(default)s)",
     )
+    spine.add_argument(
+        "--spine_icp_target",
+        choices=SPINE_ICP_TARGETS,
+        default=DEFAULT_SPINE_ICP_TARGET,
+        help=(
+            "Segmentation surface used for spine ICP. body uses the vertebral body "
+            "label only; vertebra uses body plus posterior-process labels and "
+            "therefore requires a matching full-vertebra reference surface. "
+            "(default: %(default)s)"
+        ),
+    )
 
     hip = subparsers.add_parser(
         "hip",
@@ -1219,6 +1165,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def limit_generation_threads(threads: int) -> None:
+    """Keep VTK/ITK model generation within the requested per-job CPU budget."""
+    if threads < 1:
+        raise ValueError("threads must be positive.")
+    import SimpleITK as sitk
+    import vtk
+
+    vtk.vtkMultiThreader.SetGlobalMaximumNumberOfThreads(threads)
+    vtk.vtkMultiThreader.SetGlobalDefaultNumberOfThreads(threads)
+    vtk.vtkSMPTools.Initialize(threads)
+    sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(threads)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -1229,6 +1188,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         parser.error("model type is required: choose spine or hip")
 
     if not args.dry_run:
+        limit_generation_threads(args.threads)
         ensure_output_directory(args.output_path)
 
     pistoia_mask_source = pistoia_mask_source_path(args)
@@ -1239,9 +1199,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         pistoia_mask_args.extend(["--pistoia_mask_label", str(label)])
 
     if args.model_type == "spine":
+        reference_args = []
+        if args.reference_path is not None:
+            reference_args.extend(["--reference_path", str(args.reference_path)])
         spine_extra_args = (
             spine_preset_args(args.preset)
             + spine_registration_args(args)
+            + reference_args
             + pistoia_mask_args
             + list(extra_args)
             + [

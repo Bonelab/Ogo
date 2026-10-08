@@ -65,7 +65,7 @@ def test_sideways_fall_icp_path_uses_deterministic_point_cloud_transform():
         if isinstance(node, ast.Attribute) and node.attr == "iterativeClosestPoint"
     ]
 
-    assert "estimate_rigid_icp" in called_names
+    assert "estimate_femur_icp" in called_names
     assert helper_calls == []
 
 

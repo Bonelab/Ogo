@@ -14,6 +14,172 @@ The workflow builders are organized by anatomy:
 - Shared helper modules such as `alignment.py`, `boundary.py`, `materials.py`,
   and `model.py` contain reusable mechanics used by both anatomy workflows.
 
+## Automatic Model QC
+
+Both anatomy workflows save one three-view anatomy panel (`*_qc_3d.png`)
+after model generation. The FAIM adapter saves a corresponding solved SED
+panel (`*_sed_3d.png`) after successful processing of a hip or spine model.
+The views use `ogo.cli.Visualize.vis3d`: white background, opaque bone and
+gold PMMA supports, with constrained surface-adjacent voxel layers in red.
+Individual views are framed independently. Numerical BC checks remain in CSV;
+the former automatic slice PNG is no longer generated.
+
+Hips rejected for insufficient shaft coverage also receive the anatomy panel
+of their available aligned bone and supports. They retain `too_short` in the
+shaft-geometry JSON, have no artificial distal BC, and are not solved. These
+images do not imply that the requested shaft length was retained.
+
+SED uses a linear Jet scale, shared across the three views, from zero to the
+99th percentile of bone-element SED. A bone-masked Gaussian (sigma 0.8 mm)
+and light surface smoothing improve display only; FE arrays and results are
+unchanged. Each PNG has a JSON sidecar recording display settings. Spine
+generation retains `*_qc_body_mask.nii.gz` in model coordinates for consistent
+body/process colouring after solving. Temporary individual renders are removed.
+
+Rendering needs a working graphics backend (X display, EGL/OSMesa, or native
+macOS VTK). Graphics failures produce a warning rather than invalidate a
+numerical model. Rendering is implemented in `ogo/fea/qc_render.py`.
+
+### Measurement-Based Audit And Gallery
+
+Generation writes `*_qc_metrics.csv` while the model is still in memory,
+including hips rejected as `too_short`. These CSVs are independent of rendering:
+an unavailable graphics backend does not prevent geometric measurement.
+The file contains one row per model; missing measurements are blank, not zero.
+When SED is loaded for the solved preview, finite/nonnegative SED checks are
+added to the same row without replacing the generation measurements.
+
+```bash
+ogoValidateFEA derivatives/fea --output derivatives/fea/qc --gallery
+```
+
+The command reuses generation measurement CSVs without opening `.n88model` files.
+For older models without a CSV, it reads the model once, reconstructs available
+measurements, and saves a sidecar with `measurement_source=legacy_backfill`.
+Provide `--site hip` or `--site spine` if the loading axis cannot identify anatomy.
+Recovered boundary sets are recorded and exist only in memory; models are not
+rewritten. Hip coverage is recovered from `*_shaft_geometry.json`; its saved
+crop plane also disambiguates distal nodes from combined GT/shaft constraints.
+Spine anatomy is recovered from registered `*_qc_body_mask.nii.gz` and optional
+`*_qc_process_mask.nii.gz`. When process is absent, it is measured as model bone
+minus registered body, with that derivation explicitly recorded. Masks must
+match the FE voxel lattice and have at least 95% overlap with model bone.
+Native-space segmentations are not accepted without prior registration.
+
+For files stored elsewhere, supply `--evidence evidence.csv`:
+
+```csv
+site,model_id,body_mask,process_mask,shaft_geometry
+spine,sub-001_L1,registered/sub-001_body.nii.gz,,
+hip,sub-001_LF,,,geometry/sub-001_shaft_geometry.json
+```
+
+Paths are relative to this CSV (absolute paths are also supported). Do not list
+a Pistoia mask as `body_mask` unless its provenance confirms it is the registered
+vertebral body: the filename alone does not identify the anatomical region.
+Recovered evidence sources and derivations are recorded in the measurement CSV.
+Legacy backfill is cached using its version and input paths, sizes, and modification
+times. Adding or changing evidence automatically refreshes a legacy CSV once;
+unchanged unresolved models are not repeatedly reopened. Use `--workers 4` for
+bounded process-parallel backfill; auditing cached CSVs remains lightweight.
+
+Original scan coverage and other unrecoverable quantities remain missing and
+require review. An unreadable model
+is retained as a review row with its reconstruction error, not silently dropped.
+The command writes
+`qc_summary.csv`; `--gallery` additionally writes a standalone `gallery.html`.
+Without a refreshed editable installation, use `python -m ogo.cli.ValidateFEA`.
+The gallery supports anatomy, QC status, reason, subject search, and anatomy/SED
+view selection, with expandable measurement tables. A separate camera selector
+shows oblique/side, top, bottom, or all views in both thumbnails and the review
+dialog. The fixed three-row Ogo renders are split once into cached PNGs in
+`gallery_views/`; unrecognized legacy layouts remain full montages. Image files
+remain external; retain their relative location and the view-assets folder when
+copying the gallery and models together.
+
+For sharing, export one portable ZIP instead:
+
+```bash
+ogoValidateFEA derivatives/fea --output derivatives/fea/qc --gallery-zip --workers 4
+```
+
+Extract `gallery.zip` and open `gallery.html`. It includes `images/`,
+`gallery_views/`, `qc_summary.csv`, and the initial `study_inclusion.csv`.
+No original model directory or server is needed to review it. Model files are
+not included; original model paths remain in the CSV as provenance. Both solve
+stages and all available camera views are retained. Missing images remain
+missing. Large cohorts use lazy-loaded image files rather than embedded HTML.
+After review, export the updated inclusion CSV from the gallery; browser
+decisions cannot rewrite the CSV inside the original ZIP.
+The export popup directs users to browser downloads and explicitly states that
+the project CSV is unchanged. Import the downloaded CSV to resume its decisions.
+
+Include and Exclude on each gallery card record a quick decision with reason
+`manual_review`, reviewer, and UTC timestamp. Use Review for a specific reason
+or explanation. The hip side view looks toward the distal cut to expose its
+boundary while retaining the shaft profile, before and after solving.
+
+Hip distal coverage QC uses the recipe's central 90%-width support patch, not
+the entire irregular bone cross-section. New measurements must show complete
+coverage of that intended patch. Full-face area and coverage remain in the CSV
+for inspection. Older CSVs without patch measurements use a minimum full-face
+coverage of 89%; legacy backfill refreshes them with the explicit patch check.
+Flat-cut, shaft-length, and X/Z fixation checks remain separate.
+
+Click a model name, image, or Review to open its measurements and views. Include
+and Exclude override the study decision only; Reset to automatic clears that
+override. Choose a reason and optionally add an explanation. The default reason
+is `manual_review`. Reviewer name/initials and UTC review time are recorded;
+missing reviewer names are explicitly recorded as `unspecified`.
+
+The gallery exports `study_inclusion.csv` with automatic QC, manual decisions,
+reasons, notes, and final inclusion. Automatic passes default to inclusion,
+failures to exclusion, and review cases to pending. A manually included too-short
+model remains ineligible for solving. Browser autosave is a convenience scoped
+to the audited dataset, not the durable study record: export the CSV before
+closing. Import CSV resumes review in the gallery. To regenerate a gallery with
+the same review decisions, use:
+
+```bash
+ogoValidateFEA derivatives/fea --output derivatives/fea/qc --gallery \
+  --reviews study_inclusion.csv
+```
+
+The CLI also writes an initial `study_inclusion.csv`. Browser exports reflect
+subsequent clicks and do not overwrite the server-side file automatically.
+Duplicate site/model-ID pairs are rejected; audit separate length runs/cohorts
+separately. Unknown imported identities are rejected rather than ignored.
+
+Measurements include bone/disk volumes and face-connected components, disk axial
+contact footprint area/fraction and connectivity, disk axial thickness percentiles,
+boundary-node counts/extents/centroids, loading direction, and hip available,
+requested, and measured shaft lengths and distal BC coverage.
+For hip, `shaft_bc_node_count` is the distal node-set size; separate
+`shaft_bc_fixed_x_node_count` and `shaft_bc_fixed_z_node_count` count those
+same nodes actually fixed at zero displacement along each required axis.
+Incomplete fixation is a failure, independently of distal face coverage.
+Spine records
+aligned body/process dimensions, volumes, components, and centroid offsets.
+Registration rotation is recorded, but a large rotation alone does not fail QC.
+Disk numbers follow spatial component order, not guaranteed anatomical names.
+Contact area counts projected axial shared faces, not the whole endplate fraction.
+
+Policy version 1 fails construction violations: insufficient length, missing BC,
+incorrect disk count, noncompressive loading, nonplanar axial/distal BC,
+incorrect shaft length, incomplete distal section/BC, zero axial disk contact,
+or invalid available SED. Disconnected bone/contact footprints, process-vector
+orientation concerns, and missing required measurements trigger `review`.
+`pass` means the implemented construction tests passed, not that every possible
+anatomical error has been excluded. No strength-based thresholds are used.
+
+Registration surface distances, true support penetration/trim-depth distributions,
+and solver force balance are not yet included. These need validated measurement
+definitions before adding thresholds. Generation measurements are reused;
+cached legacy measurements refresh when the backfill version or supplied
+evidence changes. Legacy backfill does not generate missing preview images.
+Failures before an FE mesh exists require the job manifest/log for participant flow.
+Implementation: `ogo/fea/validation.py`; CLI: `ogo/cli/ValidateFEA.py`.
+
 ## Inputs
 
 All FEA workflows expect a density-calibrated CT image and an aligned
@@ -73,12 +239,16 @@ For spine, the maintained path is:
    Pistoia mask, and any lower-level overrides.
 2. `spine.py::main` thresholds the requested body/process labels, crops around
    the vertebra, checks posterior-process orientation, and runs scaled ICP to
-   the bundled L4 body reference from `default_spine_reference_path`. The
-   default backend is VTK ICP through `alignment.py::estimate_rigid_icp_vtk`,
-   matching the original spine registration behavior. The deterministic NumPy
-   point-cloud ICP helper remains available as `--registration_backend numpy`
-   and is also used for alternate PCA-start rescue attempts when process-vector
-   QC flags an implausible orientation.
+   the selected reference surface from `default_spine_reference_path`. The
+   maintained default `--spine_icp_target body` uses only the vertebral body
+   label and the bundled `L4_BODY_SPINE_COMPRESSION_REF.vtk` surface. The
+   optional `--spine_icp_target vertebra` uses the body plus posterior-process
+   labels and requires a matching full-vertebra reference surface. The default
+   backend is VTK ICP through `alignment.py::estimate_rigid_icp_vtk`, matching
+   the original spine registration behavior. The deterministic NumPy point-cloud
+   ICP helper remains available as `--registration_backend numpy` and is also
+   used for alternate PCA-start rescue attempts when process-vector QC flags an
+   implausible orientation.
 3. `spine.py` applies the transform and resamples the density image with cubic
    interpolation and labels/masks with nearest-neighbor interpolation.
 4. `boundary.py::generate_bone_cap_mask` and related helpers generate superior
@@ -98,16 +268,19 @@ For hip, the maintained short-femur path is:
 2. `femur.py::main` selects the side-specific femur mask and aligns it to the
    bundled left or mirrored-right reference. The fixed rough crop for ICP
    stability is controlled by `DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM`.
-3. In `greater_trochanter_length` mode, the rough crop is used only for the ICP
+3. The rough crop is used only for the ICP
    estimate. The final model is then regenerated from the transformed full scan.
-4. `femur.py::crop_vtk_images_to_greater_trochanter_length` applies the final
-   post-ICP flat shaft crop. The requested distal length is measured after the
-   generated GT support, not from the femoral head and not from the raw GT
-   landmark.
-5. `femur.py::proximal_sideways_fall_fixture_plane` and
+4. `femur.py::proximal_sideways_fall_fixture_plane` and
    `boundary.py::generate_projected_material_disk_vtk` create the femoral-head
-   and greater-trochanter PMMA supports. The distal crop face becomes the distal
-   shaft support.
+   and greater-trochanter PMMA supports on the full aligned femur.
+5. `femur.py::crop_vtk_images_to_greater_trochanter_length` measures the actual
+   generated GT disk's distal voxel face and applies the final flat shaft crop
+   the requested length distal to it. Before accepting the length, the usable
+   distal face must clear the entire transformed native scan end, removing
+   oblique-tail coverage. The fixture box is not a substitute for the disk edge.
+   Proximal supports stay unchanged, and the external crop face becomes the
+   distal shaft support. `_shaft_geometry.json` records the available coverage
+   and the final crop coordinates. Insufficient coverage stops model generation.
 6. `materials.py::build_femur_material_table` assigns bone and PMMA material
    definitions. The simple whole-femur path uses one trabecular-style bone
    region unless a compartment mask is supplied.
@@ -115,13 +288,13 @@ For hip, the maintained short-femur path is:
    defaulting to `4%` displacement.
 
 The most important short-femur convention is the final shaft-length definition.
-In `greater_trochanter_length` mode the requested value is the distance between
+The requested value is the distance between
 the final GT support and the final distal shaft boundary condition. The audit in
-`ogo/cli/CheckFEModelBC.py::audit_femur_sideways` reports the robust model-space
+`ogo/cli/CheckFEModelBC.py::audit_femur_sideways` reports the model-space
 measurement as:
 
 ```text
-p5(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
+min(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
 ```
 
 This is deliberately a boundary-condition measurement. It verifies the
@@ -470,7 +643,7 @@ Available spine presets:
 | `none` | Pass only explicit lower-level options. |
 
 Spine registration can be switched without editing code. The maintained default
-keeps the original VTK ICP behavior:
+keeps the original VTK ICP behavior and uses the vertebral-body surface for ICP:
 
 ```bash
 ogoFEA spine image.nii.gz spine_labels.nii.gz \
@@ -479,6 +652,21 @@ ogoFEA spine image.nii.gz spine_labels.nii.gz \
   --registration_landmarks 250 \
   --registration_iterations 75
 ```
+
+For cases where the box-like vertebral body gives ambiguous rotations, ICP can
+instead use the whole vertebra surface. This needs a reference surface generated
+from the same aligned L4 reference, including body and posterior processes:
+
+```bash
+ogoFEA spine image.nii.gz spine_labels.nii.gz \
+  --vertebra L1:20:48 \
+  --spine_icp_target vertebra \
+  --reference_path /path/to/L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk
+```
+
+If `--reference_path` is omitted with `--spine_icp_target vertebra`, Ogo looks
+for the bundled `ogo/dat/L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk` file and
+fails clearly if it is not installed.
 
 For sensitivity checks, the deterministic point-cloud ICP path can be selected:
 
@@ -496,22 +684,29 @@ The femur workflow builds one sideways-fall model per side:
 
 1. Read the calibrated image and whole-femur mask.
 2. Pre-rotate the side to a stable starting orientation.
-3. ICP-align to the left femur reference or the mirrored right reference.
+3. ICP-align to the left femur reference or the mirrored right reference. The
+   maintained hip default uses evenly distributed surfaces (up to 40,000 points
+   per surface), four axial starting rotations, and bidirectional mean surface
+   distance to select a rigid NumPy ICP fit. Superior-inverting candidates are
+   rejected. The reference may be scaled to estimate registration; the native
+   bone is transformed rigidly and its physical dimensions are not scaled.
+   This fixed hip registration recipe has no backend-selection option.
 4. Apply transform and isotropic resampling through the shared VTK reslice
    helper. The default output spacing is `1.0 x 1.0 x 1.0 mm`.
 5. Smooth the transformed femur mask with one binary close/open pass only when
    at least one input spacing dimension is coarser than 2 mm. If a compartment
    mask is supplied, the derived cortical binary mask follows the same rule.
-6. Standardize the distal shaft with a flat post-ICP model-grid cut. In
-   `greater_trochanter_length` mode, the fixed rough crop is used only to make
-   ICP stable; the final model is then generated from the transformed full scan.
-   The requested shaft length is measured after the generated
-   greater-trochanter support, not from the femoral-head support and not from
-   the raw GT landmark alone.
-7. Generate PMMA fixtures for the femoral head and greater trochanter. The
+6. Generate PMMA fixtures for the femoral head and greater trochanter. The
    femoral-head fixture is placed on the high-y side and the greater-trochanter
    fixture is placed on the low-y side. Both fixtures are anchored to the
    proximal model footprint so they do not overwrite bone voxels.
+7. Standardize the distal shaft with a flat post-ICP model-grid cut. The
+   rough 120-mm crop is used only for ICP and the
+   final model uses the transformed full scan. The requested shaft length starts
+   at the actual generated GT disk's distal face. Crop all model-grid images
+   together, preserving the proximal fixtures and their coordinates.
+   The default retained shaft is 10 mm. Scans with less available coverage are
+   recorded as too short; they are not solved as shorter substitutes.
 8. Convert density to material IDs and construct the N88 model.
 9. Apply sideways-fall boundary conditions.
 
@@ -534,29 +729,104 @@ is a label inside the same segmentation used as the femur mask, pass
 `--pistoia_mask_label LABEL` and omit `--pistoia_mask`; Ogo will use the main
 segmentation as the ROI source and keep only that label.
 
-For the maintained short-femur cohort model, use:
+The maintained 10-mm reporting configuration is:
 
 ```bash
 ogoFEA hip image.nii.gz femur_mask.nii.gz \
   --side left \
-  --femur_cut_mode greater_trochanter_length \
-  --femur_greater_trochanter_distal_length 20 \
+  --femur_greater_trochanter_distal_length 10 \
   --femur_shaft_length 120 \
   --run_pistoia \
-  --critical_volume 10 \
+  --critical_volume 11.2 \
   --critical_strain 0.009
 ```
+
+There is one maintained crop recipe. The command no longer exposes aspect-ratio,
+lesser-trochanter or oblique-midpoint alternatives. `--femur_cut_mode` remains a
+hidden compatibility argument accepting only `greater_trochanter_length`;
+old unsupported modes fail rather than silently using a different definition.
+
+The 11.2% full-bone criterion is specific to the adopted 10-mm shaft protocol;
+it is not automatically valid for other shaft lengths. Use `--no-solve` for
+geometry inspection. Length-specific calibration does not change the material
+law or critical strain.
 
 The generated model can be audited with `ogoFEA check-bc`. For hip sideways
 fall, the post-GT-support shaft length is measured from final boundary-condition
 node sets as:
 
 ```text
-p5(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
+min(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
 ```
 
-The low GT percentile and distal-shaft median make this measurement robust to a
-small number of edge voxels or support-surface bleed-through nodes.
+The GT minimum is the distal edge; a percentile inside the disk would shift the
+length origin. The distal median represents the flat external support plane.
+
+### Geometry Records And 3D QC
+
+Every generated hip model has three inspectable sidecars:
+
+| File suffix | Contents |
+| --- | --- |
+| `_shaft_geometry.json` | Full available shaft before cropping, requested length, retained voxel-face length, verified length from the saved N88 BC nodes, GT/cut coordinates, registration diagnostics and export paths. |
+| `_surface.vtp` | External FE mesh surface in physical coordinates. `ModelRegion`: 0 bone, 1 GT support, 2 FH loading support. Material IDs are preserved. |
+| `_3d.png` | Four opaque mesh views: blue bone, gold GT support, red FH loading support, green distal constraint nodes. |
+
+`_icp.json` records the selected transform and all starting-fit scores. Explicit
+`--femur_icp_transform_out` overrides its path. A supplied transform remains
+useful for fixed-registration length sweeps, but cohort regeneration should
+estimate a fresh transform rather than reuse an unreviewed historical fit.
+
+`available_shaft_length_mm` is measured on the transformed full-scan model
+after generating the actual connected GT support and before the final crop.
+It measures **usable complete-section coverage**, not the distance to the
+lowest corner of an angled scan end. Before any resampling, rough crop or
+padding, `shaft_geometry.capture_distal_scan_face` records the physical voxel
+corners of the first occupied distal femur slice. The inverse rigid ICP carries
+this original full-scan face into the model frame. The most proximal point
+(maximum aligned Z), plus a voxel-scale resampling clearance, sets the minimum
+safe flat plane; it is snapped proximally to the model's voxel-face grid.
+Background image padding and the separate 120-mm registration crop do not
+define the usable scan end.
+
+The clearance is half the first resampling voxel's extent projected onto
+aligned Z, plus half a final Z voxel. It bounds the two nearest-neighbor mask
+resamplings and is recorded in the sidecar; there is no fitted distance or
+percentile threshold. The final cut is the requested shaft length distal to the
+unchanged GT disk. If that cut cannot clear the original scan end, generation
+stops as `too_short`; it never substitutes a shorter shaft. No extra physical
+pre-trim changes the proximal supports or the ICP input.
+
+Version 3 geometry records distinguish `raw_available_shaft_length_mm`,
+`safe_distal_face_z_mm`, `oblique_trim_loss_mm`, and usable
+`available_shaft_length_mm`. `distal_scan_boundary` records the original and
+aligned limits and clearance. `complete_distal_section_verified` becomes true
+only when the saved distal BC plane also clears that safe limit. This check
+does not establish segmentation correctness or replace anatomical QC.
+`measured_shaft_length_mm` is checked after rereading the saved N88 file.
+For insufficient coverage, the JSON is still written with `status: too_short`
+and a null final length. Registration failures are unmeasured, not assigned a
+zero length. Coverage plots must use these records, state their denominator,
+and distinguish missing measurements from genuinely short scans. Successful
+geometry checks do not by themselves establish anatomical alignment quality.
+
+Implementation: `hip_registration.estimate_femur_icp` selects the rigid fit;
+`shaft_geometry.measure_available_shaft` defines coverage;
+`femur.crop_vtk_images_to_greater_trochanter_length` cuts all model-grid images;
+`shaft_geometry.verify_model_shaft` verifies the saved BC nodes; and
+`model_export.export_femur_model` writes the mesh and four-view image.
+These helpers do not change the material law, loading endpoint or regional
+Pistoia definitions. Whole-bone hip Pistoia defaults to 10% at strain 0.009.
+
+Use `--no-solve` to generate models and QC for inspection before solving.
+`--threads` limits VTK/ITK generation as well as the FAIM solver. For an
+I/O-heavy cohort generation pass, independent `--no-solve --threads 1` jobs
+can use the CPU budget without multiplying each job's image-filter threads.
+PNG rendering needs an X display or an EGL/OSMesa-enabled headless VTK build;
+without one, the N88 model and VTP are preserved and the export record marks
+PNG QC as unavailable. The surface export itself does not require a display.
+On Groot the existing
+`ogoloco-n88` environment provides headless VTK and the modeling dependencies.
 
 ## Materials
 

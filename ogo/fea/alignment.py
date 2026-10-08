@@ -50,10 +50,8 @@ def sample_points(points, *, max_points=None, mode="linspace", offset=0):
         step = max(1, int(np.ceil(coordinates.shape[0] / int(max_points))))
         start = int(offset) % step
         indices = np.arange(start, coordinates.shape[0], step, dtype=int)
-        if indices.size < int(max_points):
-            fallback = np.linspace(0, coordinates.shape[0] - 1, int(max_points), dtype=int)
-            indices = np.unique(np.concatenate([indices, fallback]))
-        indices = indices[: int(max_points)]
+        # A stride may yield fewer than the cap. Filling, sorting, then truncating
+        # biases the sample toward the beginning of a spatially ordered surface.
     else:
         indices = np.linspace(0, coordinates.shape[0] - 1, int(max_points), dtype=int)
     return coordinates[indices]
@@ -128,6 +126,7 @@ def estimate_rigid_icp(
     convergence="delta",
     distance_mode="mean",
     initial_transform=None,
+    nearest_workers=None,
 ):
     """Estimate a rigid transform from ``moving_points`` to ``fixed_points``."""
     import numpy as np
@@ -153,7 +152,10 @@ def estimate_rigid_icp(
     distance_token = str(distance_mode).strip().lower()
     for used_iterations in range(1, max(1, int(iterations)) + 1):
         transformed = moving @ rotation.T + translation
-        matched = fixed[_nearest_indices(transformed, fixed)]
+        if nearest_workers is None:
+            matched = fixed[_nearest_indices(transformed, fixed)]
+        else:
+            matched = fixed[_nearest_indices(transformed, fixed, workers=nearest_workers)]
         step_rotation, step_translation = _kabsch(transformed, matched)
         rotation = step_rotation @ rotation
         translation = step_rotation @ translation + step_translation
@@ -393,12 +395,12 @@ def _principal_axes(points):
     return axes
 
 
-def _nearest_indices(query, target):
+def _nearest_indices(query, target, *, workers=-1):
     try:
         from scipy.spatial import cKDTree
     except ImportError:
         return _nearest_indices_numpy(query, target)
-    return cKDTree(target).query(query, workers=-1)[1]
+    return cKDTree(target).query(query, workers=workers)[1]
 
 
 def _nearest_indices_numpy(query, target):

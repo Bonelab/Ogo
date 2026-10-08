@@ -940,6 +940,19 @@ def run_faim_pipeline(
     )
     if not dry_run:
         log_file.write_text(log_text)
+        profile = str(report_profile or "").strip().lower()
+        if profile in ("spine", "femur"):
+            from ogo.fea.qc_render import try_export_model_qc
+            from ogo.fea.validation import write_measurements
+
+            write_measurements(model_file, {
+                "site": "hip" if profile == "femur" else "spine",
+                "solver_processing_complete": True,
+            })
+
+            qc_path = try_export_model_qc(model_file, "hip" if profile == "femur" else "spine", sed=True)
+            if qc_path is None:
+                warnings.append("Post-solve 3D SED QC unavailable; see rendering warning.")
         write_results_csv(
             output_file=results_csv,
             model_file=model_file,

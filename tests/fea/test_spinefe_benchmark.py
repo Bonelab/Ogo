@@ -272,7 +272,8 @@ def test_spine_registration_uses_preprocessed_isotropic_body():
     assert "SPINE_PREPROCESSING_CROP_MARGIN_MM" in source
     assert "resample_vtk_image_to_spacing" in source
     assert "registration_body = threshold(" in source
-    assert "get_icp_with_scaling(\n        registration_body," in source
+    assert "registration_target = registration_body" in source
+    assert "get_icp_with_scaling(\n        registration_target," in source
     assert source.index("resample_vtk_image_to_spacing") < source.index(
         "registration_body = threshold("
     )

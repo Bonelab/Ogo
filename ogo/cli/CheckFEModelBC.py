@@ -145,15 +145,15 @@ def audit_femur_sideways(node_sets, constraints, tolerance):
         })
 
     if gt and distal:
-        gt_distal_z = gt["z_percentiles"]["p05"]
+        gt_distal_z = gt["bounds"]["z_min"]
         distal_z = distal["z_percentiles"]["p50"]
         shaft_length = gt_distal_z - distal_z
         checks.append({
             "name": "post-GT-support shaft length is positive",
             "passed": shaft_length > max(float(tolerance), 1.0),
             "detail": (
-                "gt_z_p05_minus_distal_z_median="
-                f"{shaft_length:.6g} mm; gt_z_p05={gt_distal_z:.6g}; "
+                "gt_z_min_minus_distal_z_median="
+                f"{shaft_length:.6g} mm; gt_z_min={gt_distal_z:.6g}; "
                 f"distal_z_median={distal_z:.6g}"
             ),
         })

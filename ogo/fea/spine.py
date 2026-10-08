@@ -6,11 +6,14 @@ Default spine workflow:
    posterior-process labels are explicit and traceable.
 2. Crop the vertebral body, posterior process, calibrated image, and combined
    vertebra mask to the same bounding box.
-3. ICP-align the vertebral body to the bundled L4 compression reference. By
-   default the reference is PCA-scaled within 0.8,0.8,0.75 to 1.2,1.2,1.3 before
-   VTK rigid ICP; users can override the scale/reference explicitly. A
-   deterministic NumPy point-cloud ICP backend is kept for debugging and
-   process-orientation rescue attempts.
+3. ICP-align the requested registration target to a bundled L4 compression
+   reference surface. The maintained body-only target uses the vertebral body;
+   the optional full-vertebra target uses body plus posterior-process labels
+   when the matching reference surface is available. By default the reference
+   is PCA-scaled within 0.8,0.8,0.75 to 1.2,1.2,1.3 before VTK rigid ICP; users
+   can override the scale/reference explicitly. A deterministic NumPy
+   point-cloud ICP backend is kept for debugging and process-orientation rescue
+   attempts.
 4. Apply the ICP transform and set the final output spacing to
    1.0 x 1.0 x 1.0 mm in one shared VTK reslice helper. Image data use cubic
    interpolation; body/process labels use nearest-neighbor interpolation.
@@ -29,6 +32,7 @@ Default spine workflow:
    default.
 """
 
+import os
 from pathlib import Path
 
 
@@ -63,12 +67,16 @@ DEFAULT_SPINE_REGISTRATION_BACKEND = "vtk"
 DEFAULT_SPINE_REGISTRATION_LANDMARKS = 250
 DEFAULT_SPINE_REGISTRATION_ITERATIONS = 75
 DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC = True
-DEFAULT_SPINE_REFERENCE_FILENAME = "L4_BODY_SPINE_COMPRESSION_REF.vtk"
+SPINE_ICP_TARGETS = ("body", "vertebra")
+DEFAULT_SPINE_ICP_TARGET = "body"
+DEFAULT_SPINE_BODY_REFERENCE_FILENAME = "L4_BODY_SPINE_COMPRESSION_REF.vtk"
+DEFAULT_SPINE_VERTEBRA_REFERENCE_FILENAME = "L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk"
+DEFAULT_SPINE_REFERENCE_FILENAME = DEFAULT_SPINE_BODY_REFERENCE_FILENAME
 SPINE_CONTACT_SIZE_FRACTION = (1.6, 1.6)
 SPINE_SUPERIOR_CONTACT_CENTER_FRACTION = (0.5, 0.5, 1.05)
 SPINE_INFERIOR_CONTACT_CENTER_FRACTION = (0.5, 0.5, -0.05)
 
-SPINE_ALIGNMENT_METHOD = "scaled ICP to reference vertebral body"
+SPINE_ALIGNMENT_METHOD = "scaled ICP to spine reference surface"
 
 BENCHMARK_LINEAR_FE_DISPLACEMENT_MM = -0.2
 BENCHMARK_NONLINEAR_FE_DISPLACEMENT_MM = -2.0
@@ -98,9 +106,16 @@ def solve_report_profile(preset=None):
     }
 
 
-def default_spine_reference_path():
-    """Return the bundled reference body used for spine ICP alignment."""
-    return Path(__file__).resolve().parents[1] / "dat" / DEFAULT_SPINE_REFERENCE_FILENAME
+def default_spine_reference_path(icp_target=DEFAULT_SPINE_ICP_TARGET):
+    """Return the bundled reference surface used for spine ICP alignment."""
+    icp_target = str(icp_target).strip().lower()
+    if icp_target == "body":
+        filename = DEFAULT_SPINE_BODY_REFERENCE_FILENAME
+    elif icp_target == "vertebra":
+        filename = DEFAULT_SPINE_VERTEBRA_REFERENCE_FILENAME
+    else:
+        raise ValueError("spine_icp_target must be 'body' or 'vertebra'.")
+    return Path(__file__).resolve().parents[1] / "dat" / filename
 
 
 def pistoia_mask_output_path(output_file):
@@ -1391,6 +1406,9 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     registration_backend = kwargs.get("registration_backend", DEFAULT_SPINE_REGISTRATION_BACKEND)
     registration_landmarks = kwargs.get("registration_landmarks", DEFAULT_SPINE_REGISTRATION_LANDMARKS)
     registration_iterations = kwargs.get("registration_iterations", DEFAULT_SPINE_REGISTRATION_ITERATIONS)
+    spine_icp_target = str(kwargs.get("spine_icp_target", DEFAULT_SPINE_ICP_TARGET)).strip().lower()
+    if spine_icp_target not in SPINE_ICP_TARGETS:
+        raise ValueError("spine_icp_target must be 'body' or 'vertebra'.")
     registration_retry_on_process_qc = kwargs.get(
         "registration_retry_on_process_qc",
         DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
@@ -1486,11 +1504,18 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     registration_body = threshold(preprocessed_labels, body_label)
     isolated_vertebra = registration_body
     isolated_process = threshold(preprocessed_labels, process_label)
+    registration_target = registration_body
+    if spine_icp_target == "vertebra":
+        registration_target = combine_mask(registration_body.GetOutput(), isolated_process.GetOutput())
 
     # Marching Cubes and Registration
-    ogo.message(f"Starting ICP registration to reference...: {reference_path} ")
+    if not os.path.exists(reference_path):
+        raise FileNotFoundError(
+            f"Spine ICP reference does not exist for target '{spine_icp_target}': {reference_path}"
+        )
+    ogo.message(f"Starting ICP registration to {spine_icp_target} reference...: {reference_path} ")
     icp = get_icp_with_scaling(
-        registration_body,
+        registration_target,
         reference_path,
         process=isolated_process,
         scale_factors=registration_scale,
@@ -1829,18 +1854,27 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
 
     # Quality control and output. If quality control is activated output only provided if it passes
     if quality_control:
-            image_path = n88model_output_path.replace(".n88model", ".png")
             dataframe_path = n88model_output_path.replace(".n88model", "_BCcheck.csv")
 
             ogo.message(f"Starting QC...")
             test = check_image(boundary_masks, dataframe_path)
-            visualize_slice(image_with_pads, image_path)
 
     ogo.message(f"Writing n88model file: {n88model_output_path}")
+    from ogo.fea.validation import measure_model, write_measurements
+
+    write_measurements(n88model_output_path, measure_model(
+        model, "spine", body_image=padded_mask1, process_image=padded_mask2,
+        registration_rotation=sample_to_reference_rotation))
     writer = vtkbone.vtkboneN88ModelWriter()
     writer.SetInputData(model)
     writer.SetFileName(n88model_output_path)
     writer.Update()
+
+    # Retain the aligned body ROI so post-solve QC uses the identical anatomy.
+    body_qc_path = n88model_output_path.replace(".n88model", "_qc_body_mask.nii.gz")
+    write_vtk_image_with_sitk_geometry(padded_mask1, body_qc_path)
+    from ogo.fea.qc_render import try_export_model_qc
+    try_export_model_qc(n88model_output_path, "spine", body_mask=body_qc_path, model=model)
 
 
 
@@ -1932,6 +1966,10 @@ def main():
                         help="Maximum spine ICP landmarks/sampled points. For vtk this maps to SetMaximumNumberOfLandmarks; for numpy this caps sampled surface points. (default: %(default)s)")
     parser.add_argument("--registration_iterations", type=int, default=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
                         help="Maximum spine ICP iterations. (default: %(default)s)")
+    parser.add_argument("--spine_icp_target", choices=SPINE_ICP_TARGETS, default=DEFAULT_SPINE_ICP_TARGET,
+                        help=("Segmentation surface used for spine ICP. body uses only the vertebral body label; "
+                              "vertebra uses body plus posterior-process labels and requires a matching reference "
+                              "surface. (default: %(default)s)"))
     parser.add_argument("--top_node_set_id", type=int, default=DEFAULT_SPINE_TOP_NODE_SET_ID,
                         help="ID for the top node set. (default: %(default)s)")
     parser.add_argument("--bottom_node_set_id", type=int, default=DEFAULT_SPINE_BOTTOM_NODE_SET_ID,
@@ -1996,7 +2034,7 @@ def main():
     # Set default reference path if not provided
     reference_path = args.reference_path
     if reference_path is None:
-        reference_path = str(default_spine_reference_path())
+        reference_path = str(default_spine_reference_path(args.spine_icp_target))
 
     # Extract all kwargs
     kwargs = vars(args).copy()  # Convert parsed arguments to a dictionary
