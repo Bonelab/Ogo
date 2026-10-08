@@ -11,9 +11,9 @@ Default spine workflow:
    the optional full-vertebra target uses body plus posterior-process labels
    when the matching reference surface is available. By default the reference
    is PCA-scaled within 0.8,0.8,0.75 to 1.2,1.2,1.3 before deterministic NumPy
-   rigid ICP (8,000 surface points, 50 iterations). Process-orientation QC
-   triggers alternate initialization attempts when needed. Reference scaling
-   does not scale the physical dimensions of the solved bone.
+   rigid ICP (8,000 surface points, 50 iterations), initialized by centroids
+   without PCA axis swaps. Anatomical orientation checks reject invalid fits.
+   Reference scaling does not scale the physical dimensions of the solved bone.
 4. Apply the ICP transform and set the final output spacing to
    1.0 x 1.0 x 1.0 mm in one shared VTK reslice helper. Image data use cubic
    interpolation; body/process labels use nearest-neighbor interpolation.
@@ -67,7 +67,6 @@ DEFAULT_SPINE_REGISTRATION_MAX_SCALE = "1.2,1.2,1.3"
 DEFAULT_SPINE_REGISTRATION_BACKEND = "numpy"
 DEFAULT_SPINE_REGISTRATION_LANDMARKS = 8000
 DEFAULT_SPINE_REGISTRATION_ITERATIONS = 50
-DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC = True
 SPINE_ICP_TARGETS = ("body", "vertebra")
 DEFAULT_SPINE_ICP_TARGET = "body"
 DEFAULT_SPINE_BODY_REFERENCE_FILENAME = "L4_BODY_SPINE_COMPRESSION_REF.vtk"
@@ -77,7 +76,7 @@ SPINE_CONTACT_SIZE_FRACTION = (1.6, 1.6)
 SPINE_SUPERIOR_CONTACT_CENTER_FRACTION = (0.5, 0.5, 1.05)
 SPINE_INFERIOR_CONTACT_CENTER_FRACTION = (0.5, 0.5, -0.05)
 
-SPINE_ALIGNMENT_METHOD = "scaled ICP to spine reference surface"
+SPINE_ALIGNMENT_METHOD = "centroid-initialized scaled ICP to spine reference surface"
 
 BENCHMARK_LINEAR_FE_DISPLACEMENT_MM = -0.2
 BENCHMARK_NONLINEAR_FE_DISPLACEMENT_MM = -2.0
@@ -735,67 +734,25 @@ def perform_marching_cubes(body_output):
     return mcubes
 
 
-def _principal_axes_from_points(points):
-    centered = np.asarray(points, dtype=float) - np.asarray(points, dtype=float).mean(axis=0)
-    _, _, vh = np.linalg.svd(centered, full_matrices=False)
-    axes = vh.T
-    if np.linalg.det(axes) < 0:
-        axes[:, -1] *= -1
-    return axes
+def check_spine_registration_orientation(rotation, body_centroid=None, process_centroid=None):
+    """Reject axis swaps relative to native physical anatomical directions.
 
-
-def _proper_signed_axis_permutation_matrices():
-    matrices = []
-    for permutation in [
-        (0, 1, 2),
-        (0, 2, 1),
-        (1, 0, 2),
-        (1, 2, 0),
-        (2, 0, 1),
-        (2, 1, 0),
-    ]:
-        for signs in [
-            (-1, -1, -1),
-            (-1, -1, 1),
-            (-1, 1, -1),
-            (-1, 1, 1),
-            (1, -1, -1),
-            (1, -1, 1),
-            (1, 1, -1),
-            (1, 1, 1),
-        ]:
-            matrix = np.zeros((3, 3), dtype=float)
-            for row, col in enumerate(permutation):
-                matrix[row, col] = signs[row]
-            if np.linalg.det(matrix) > 0:
-                matrices.append(matrix)
-    return matrices
-
-
-def _initial_transform_from_rotation(moving_points, fixed_points, rotation):
-    moving_center = np.asarray(moving_points, dtype=float).mean(axis=0)
-    fixed_center = np.asarray(fixed_points, dtype=float).mean(axis=0)
-    return {
-        "rotation": np.asarray(rotation, dtype=float),
-        "translation": fixed_center - np.asarray(rotation, dtype=float) @ moving_center,
-    }
-
-
-def _spine_pca_initial_transforms(reference_points, sample_points):
-    moving_axes = _principal_axes_from_points(reference_points)
-    fixed_axes = _principal_axes_from_points(sample_points)
-    candidates = []
-    seen = set()
-    for axis_rotation in _proper_signed_axis_permutation_matrices():
-        rotation = fixed_axes @ axis_rotation @ moving_axes.T
-        if np.linalg.det(rotation) < 0:
-            continue
-        key = tuple(np.round(rotation, 8).ravel())
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(_initial_transform_from_rotation(reference_points, sample_points, rotation))
-    return candidates
+    Inputs must have a superior-inferior physical z axis, as in the maintained
+    CT workflow. A 60-degree guard allows clinical tilt but rejects sideways
+    and inverted fits. It is a rejection rule, not an alternative alignment.
+    """
+    rotation = np.asarray(rotation, dtype=float)
+    if rotation.shape != (3, 3) or not np.all(np.isfinite(rotation)):
+        raise ValueError("spine registration orientation requires a finite 3x3 rotation")
+    if rotation[2, 2] < 0.5:
+        raise ValueError("spine registration orientation failed: superior-inferior axis swap")
+    if body_centroid is not None and process_centroid is not None:
+        offset = np.asarray(process_centroid) - np.asarray(body_centroid)
+        length = np.linalg.norm(offset)
+        if length > 1.e-6:
+            posterior_cosine = float(np.dot(offset, offset @ rotation) / length ** 2)
+            if posterior_cosine < 0.5:
+                raise ValueError("spine registration orientation failed: posterior direction swap")
 
 
 def _icp_transform_to_vtk(transform):
@@ -826,9 +783,8 @@ def get_icp_with_scaling(
     reference_path,
     process=None,
     scale_factors=None,
-    min_scale=(0.8, 0.8, 0.75),
-    max_scale=(1.2, 1.2, 1.3),
-    retry_on_process_qc=DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
+    min_scale=DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
+    max_scale=DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
     backend=DEFAULT_SPINE_REGISTRATION_BACKEND,
     landmarks=DEFAULT_SPINE_REGISTRATION_LANDMARKS,
     iterations=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
@@ -881,14 +837,15 @@ def get_icp_with_scaling(
             fixed_points=sample_surface_points,
             iterations=iterations,
             tolerance=1.0e-4,
-            start_by_matching_centroids_only=False,
+            start_by_matching_centroids_only=True,
             convergence="delta",
             distance_mode="mean",
         )
     else:
         raise ValueError("registration_backend must be 'vtk' or 'numpy'.")
 
-    if process is not None and retry_on_process_qc:
+    check_spine_registration_orientation(transform["rotation"])
+    if process is not None:
         body_centroid = _mask_centroid_physical(body.GetOutput())
         process_centroid = _mask_centroid_physical(process.GetOutput())
         default_process_qc = _icp_process_orientation_metrics(
@@ -901,57 +858,9 @@ def get_icp_with_scaling(
             f"axial_offset={default_process_qc['axial_offset_mm']:.2f} mm, "
             f"transverse_offset={default_process_qc['transverse_offset_mm']:.2f} mm"
         )
-        if default_process_qc["status"] != "ok":
-            ogo.message(
-                "Default ICP failed process-vector QC; trying alternate PCA starts "
-                "with the deterministic point-cloud backend..."
-            )
-            retry_candidates = []
-            for initial in _spine_pca_initial_transforms(scaled_reference_points, sample_surface_points):
-                candidate = estimate_rigid_icp(
-                    moving_points=scaled_reference_points,
-                    fixed_points=sample_surface_points,
-                    iterations=iterations,
-                    tolerance=1.0e-4,
-                    start_by_matching_centroids_only=False,
-                    convergence="delta",
-                    distance_mode="mean",
-                    initial_transform=initial,
-                )
-                process_qc = _icp_process_orientation_metrics(
-                    candidate,
-                    body_centroid,
-                    process_centroid,
-                )
-                retry_candidates.append((candidate, process_qc))
-            valid = [
-                (candidate, process_qc)
-                for candidate, process_qc in retry_candidates
-                if process_qc["status"] == "ok"
-            ]
-            if valid:
-                transform, chosen_qc = min(valid, key=lambda item: item[0]["mean_distance"])
-                ogo.message(
-                    "Selected alternate ICP start with process-vector QC: "
-                    f"axial_offset={chosen_qc['axial_offset_mm']:.2f} mm, "
-                    f"transverse_offset={chosen_qc['transverse_offset_mm']:.2f} mm, "
-                    f"mean_distance={transform['mean_distance']:.4f}"
-                )
-            else:
-                best_candidate, best_qc = min(
-                    retry_candidates,
-                    key=lambda item: (
-                        item[1]["axial_offset_mm"] / max(item[1]["transverse_offset_mm"], 1.0e-6),
-                        item[0]["mean_distance"],
-                    ),
-                )
-                ogo.message(
-                    "No alternate ICP start passed process-vector QC; "
-                    "using least-bad candidate for downstream QC failure: "
-                    f"axial_offset={best_qc['axial_offset_mm']:.2f} mm, "
-                    f"transverse_offset={best_qc['transverse_offset_mm']:.2f} mm"
-                )
-                transform = best_candidate
+        check_spine_registration_orientation(transform["rotation"], body_centroid, process_centroid)
+        # Mask-shape QC runs after resampling and morphology; the rigid
+        # transform checks above prevent axis flips before either operation.
 
     vtk_transform = _icp_transform_to_vtk(transform)
     ogo.message(
@@ -1443,10 +1352,6 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     spine_icp_target = str(kwargs.get("spine_icp_target", DEFAULT_SPINE_ICP_TARGET)).strip().lower()
     if spine_icp_target not in SPINE_ICP_TARGETS:
         raise ValueError("spine_icp_target must be 'body' or 'vertebra'.")
-    registration_retry_on_process_qc = kwargs.get(
-        "registration_retry_on_process_qc",
-        DEFAULT_SPINE_REGISTRATION_RETRY_ON_PROCESS_QC,
-    )
     mask_smoothing_spacing_threshold = kwargs.get(
         "mask_smoothing_spacing_threshold",
         DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
@@ -1555,7 +1460,6 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         scale_factors=registration_scale,
         min_scale=registration_min_scale,
         max_scale=registration_max_scale,
-        retry_on_process_qc=registration_retry_on_process_qc,
         backend=registration_backend,
         landmarks=registration_landmarks,
         iterations=registration_iterations,

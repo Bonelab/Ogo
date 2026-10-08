@@ -644,6 +644,18 @@ Available spine presets:
 Spine registration can be switched without editing code. The maintained default
 uses dense deterministic NumPy ICP on the vertebral-body surface:
 
+Initialization matches centroids while retaining native physical anatomical
+directions. PCA is used to estimate reference size, not to swap registration
+axes. The rigid fit is rejected if the superior-inferior axis or body-to-process
+direction changes by more than 60 degrees, or if posterior-process QC fails
+on the final resampled and cleaned masks. This initialization applies to both
+body-only and full-vertebra registration targets.
+There are no axis-permutation retries or least-bad fallback models. Images must
+have a superior-inferior physical z axis; NIfTI array ordering alone is not an
+orientation check. The same checks apply to the optional VTK backend.
+Boundary-contact QC remains separate: a correctly aligned model with a missing
+support must not be solved.
+
 ```bash
 ogoFEA spine image.nii.gz spine_labels.nii.gz \
   --vertebra L1:20:48 \

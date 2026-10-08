@@ -198,7 +198,7 @@ def audit_spine_compression(node_sets, constraints, tolerance):
 
     top = node_sets.get("body_top")
     bottom = node_sets.get("body_bottom")
-    if top and bottom:
+    if top and bottom and top.get("count", 0) > 0 and bottom.get("count", 0) > 0:
         z_gap = bottom["centroid"]["z"] - top["centroid"]["z"]
         applied = _single_value(constraints, "top_displacement")
         axis = _single_axis(constraints, "top_displacement")

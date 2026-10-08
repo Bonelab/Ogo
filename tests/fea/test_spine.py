@@ -1,4 +1,65 @@
 from ogo.fea import spine
+import numpy as np
+import pytest
+from types import SimpleNamespace
+
+
+def _mock_registration_inputs(monkeypatch):
+    points = np.array([[0, 0, 0], [40, 0, 0], [0, 35, 0], [0, 0, 30]], dtype=float)
+    monkeypatch.setattr(spine, "surface_points_from_vtk_mask", lambda *a, **k: points)
+    monkeypatch.setattr(spine.ogo, "readPolyData", lambda *a: None)
+    monkeypatch.setattr(spine, "polydata_points", lambda *a: points)
+    monkeypatch.setattr(spine, "sample_points", lambda *a, **k: points)
+    return SimpleNamespace(GetOutput=lambda: None)
+
+
+def test_spine_icp_preserves_native_orientation_at_initialization(monkeypatch):
+    body = _mock_registration_inputs(monkeypatch)
+    calls = []
+
+    def estimate(**kwargs):
+        calls.append(kwargs)
+        return dict(rotation=np.eye(3), translation=np.zeros(3), iterations=1, mean_distance=0)
+
+    monkeypatch.setattr(spine, "estimate_rigid_icp", estimate)
+    spine.get_icp_with_scaling(body, "reference.vtk")
+    assert len(calls) == 1
+    assert calls[0]["start_by_matching_centroids_only"] is True
+
+
+def test_spine_icp_rejects_invalid_process_without_axis_swapped_retries(monkeypatch):
+    body = _mock_registration_inputs(monkeypatch)
+    calls = []
+
+    def estimate(**kwargs):
+        calls.append(kwargs)
+        return dict(rotation=np.diag([-1., -1., 1.]), translation=np.zeros(3), iterations=1, mean_distance=0)
+
+    monkeypatch.setattr(spine, "estimate_rigid_icp", estimate)
+    centroids = iter([np.zeros(3), np.array([0., 30., 0.])])
+    monkeypatch.setattr(spine, "_mask_centroid_physical", lambda *a: next(centroids))
+    monkeypatch.setattr(spine, "_icp_process_orientation_metrics", lambda *a: dict(
+        status="failed", axial_offset_mm=30, transverse_offset_mm=5))
+    with pytest.raises(ValueError, match="orientation"):
+        spine.get_icp_with_scaling(body, "reference.vtk", process=body, scale_factors=1)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("rotation", [
+    np.diag([1., -1., -1.]),
+    np.diag([-1., -1., 1.]),
+    np.array([[1., 0., 0.], [0., 0., -1.], [0., 1., 0.]]),
+])
+def test_spine_registration_rejects_anatomical_axis_flips(rotation):
+    with pytest.raises(ValueError, match="orientation"):
+        spine.check_spine_registration_orientation(rotation, [0, 0, 0], [0, 30, 0])
+
+
+def test_spine_registration_accepts_small_anatomical_rotation():
+    angle = np.deg2rad(32)
+    rotation = np.array([[1., 0., 0.], [0., np.cos(angle), -np.sin(angle)],
+                         [0., np.sin(angle), np.cos(angle)]])
+    spine.check_spine_registration_orientation(rotation, [0, 0, 0], [0, 30, 0])
 
 
 def test_default_spine_cap_geometry_matches_maintained_settings():

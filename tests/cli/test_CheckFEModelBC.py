@@ -35,3 +35,11 @@ def test_spine_bc_audit_requires_all_inferior_fixture_axes():
     assert by_name["bottom_fixed_x fixes x"]["passed"] is True
     assert by_name["bottom_fixed_y fixes y"]["passed"] is True
     assert by_name["bottom_fixed_z fixes z"]["passed"] is True
+
+
+def test_spine_bc_audit_reports_empty_support_without_crashing():
+    empty = {"count": 0, "centroid": {"x": None, "y": None, "z": None},
+             "bounds": {"z_min": None, "z_max": None}}
+    checks = audit_spine_compression(
+        {"body_top": _flat_set(10), "body_bottom": empty}, {}, tolerance=1.e-5)
+    assert any(c['name'] == 'body_bottom exists' and not c['passed'] for c in checks)
