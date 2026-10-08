@@ -224,7 +224,7 @@ The anatomy-specific implementation is split below the CLI:
 
 | Anatomy | Main file | What belongs there |
 | --- | --- | --- |
-| Spine compression | `ogo/fea/spine.py` | Vertebra labels, body/process QC, VTK spine ICP, 1 mm resampling, stable PMMA cap generation, axial compression defaults. |
+| Spine compression | `ogo/fea/spine.py` | Vertebra labels, body/process QC, dense NumPy spine ICP, 1 mm resampling, stable PMMA cap generation, axial compression defaults. |
 | Hip sideways fall | `ogo/fea/femur.py` | Side handling, femur reference alignment, rough pre-ICP crop, post-ICP GT-length crop, femoral-head/GT/distal supports, sideways-fall defaults. |
 | Shared material tables | `ogo/fea/materials.py` | Bone material ID ranges, PMMA material, shared femur/spine material-table construction. |
 | Material laws | `ogo/fea/material_laws.py` | Density-to-modulus and yield-strength functions such as `default_E` and `kopperdahl_trab_E`. |
@@ -244,11 +244,10 @@ For spine, the maintained path is:
    label and the bundled `L4_BODY_SPINE_COMPRESSION_REF.vtk` surface. The
    optional `--spine_icp_target vertebra` uses the body plus posterior-process
    labels and requires a matching full-vertebra reference surface. The default
-   backend is VTK ICP through `alignment.py::estimate_rigid_icp_vtk`, matching
-   the original spine registration behavior. The deterministic NumPy point-cloud
-   ICP helper remains available as `--registration_backend numpy` and is also
-   used for alternate PCA-start rescue attempts when process-vector QC flags an
-   implausible orientation.
+   backend is deterministic NumPy ICP with 8,000 surface points and 50
+   iterations. Alternate PCA-start rescue attempts are evaluated when
+   process-vector QC flags an implausible orientation. VTK ICP remains an
+   optional sensitivity check, not the maintained default.
 3. `spine.py` applies the transform and resamples the density image with cubic
    interpolation and labels/masks with nearest-neighbor interpolation.
 4. `boundary.py::generate_bone_cap_mask` and related helpers generate superior
@@ -643,14 +642,14 @@ Available spine presets:
 | `none` | Pass only explicit lower-level options. |
 
 Spine registration can be switched without editing code. The maintained default
-keeps the original VTK ICP behavior and uses the vertebral-body surface for ICP:
+uses dense deterministic NumPy ICP on the vertebral-body surface:
 
 ```bash
 ogoFEA spine image.nii.gz spine_labels.nii.gz \
   --vertebra L1:20:48 \
-  --registration_backend vtk \
-  --registration_landmarks 250 \
-  --registration_iterations 75
+  --registration_backend numpy \
+  --registration_landmarks 8000 \
+  --registration_iterations 50
 ```
 
 For cases where the box-like vertebral body gives ambiguous rotations, ICP can
@@ -668,17 +667,24 @@ If `--reference_path` is omitted with `--spine_icp_target vertebra`, Ogo looks
 for the bundled `ogo/dat/L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk` file and
 fails clearly if it is not installed.
 
-For sensitivity checks, the deterministic point-cloud ICP path can be selected:
+VTK ICP remains available for sensitivity checks, but it is not the maintained
+default for the spine workflow:
 
 ```bash
 ogoFEA spine image.nii.gz spine_labels.nii.gz \
   --vertebra L1:20:48 \
-  --registration_backend numpy \
+  --registration_backend vtk \
   --registration_landmarks 8000 \
   --registration_iterations 50
 ```
 
 ## Femur Model
+
+Full-bone and regional Pistoia criteria can differ: use `--critical_volume` for
+the full bone and `--masked_critical_volume` for the supplied regional mask.
+For example, the L1 study uses `--critical_volume 12 --masked_critical_volume 35`.
+If the regional criterion is omitted, it inherits the full-bone value. The
+results CSV records both criteria and both failure loads separately.
 
 The femur workflow builds one sideways-fall model per side:
 
@@ -946,7 +952,7 @@ Change PMMA dimensions:
 ```bash
 ogoFEA hip image.nii.gz femur_mask.nii.gz \
   --side left \
-  --pmma_thick 6 \
+  --pmma_thick 10 \
   --pmma_intrusion 6
 ```
 
@@ -965,6 +971,17 @@ Intrusion does not overwrite vertebral-body voxels; it limits how far from the
 superior/inferior body surface the cap is allowed to search for supporting
 anatomy before generating the flat PMMA disk.
 
+Stable-contact selection is enabled for the spine default. The locked recipe
+ignores the superficial 10% of the projected contact columns
+(`--stable_surface_trim_fraction 0.10`) and uses that deeper footprint only
+when it is at least 3 mm behind the first-contact surface
+(`--stable_surface_min_shift 3`). This catches osteophyte/ridge contacts while
+leaving normal shallow surface variation alone. The generated disk still uses
+the requested `--pmma_thick` and `--pmma_intrusion`; stable contact does not
+replace or silently reduce intrusion. The disk mask is repaired with in-plane
+gap closing, constrained not to overwrite anatomy, and reduced to the largest
+connected support component.
+
 After vtkbone identifies visible cap nodes, spine compression filters each cap
 node set to the dominant coordinate plane along the load axis. This removes
 small rim/contact-side nodes from the jelly-bean disk surface while keeping the
@@ -976,6 +993,11 @@ ogoFEA spine image.nii.gz labels.nii.gz \
   --pmma_thick 10 \
   --pmma_intrusion 6
 ```
+
+The stable-contact values are code-level defaults in
+`DEFAULT_SPINE_STABLE_CONTACT_*` and are locked by
+`tests/fea/test_workflow_locked_defaults.py`. Routine spine FEA should use the
+defaults rather than carrying per-run contact tuning flags.
 
 Run model generation only, inspect the `.n88model`, then solve later:
 

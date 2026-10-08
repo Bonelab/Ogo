@@ -409,6 +409,7 @@ def solve_model(
         n88tabulate_command=args.n88tabulate_command,
         n88copymodel_command=args.n88copymodel_command,
         critical_volume=critical_volume_percent(args, model_type),
+        masked_critical_volume=getattr(args, "masked_critical_volume", None),
         critical_strain=critical_strain(args, model_type),
         exclude=args.exclude,
         run_pistoia=run_pistoia,
@@ -469,6 +470,13 @@ def write_modeling_metadata(
         },
         "solve_and_reporting": {
             "solve_requested": not args.no_solve,
+            "critical_volume_pct": critical_volume_percent(args, model_type),
+            "masked_critical_volume_pct": (
+                critical_volume_percent(args, model_type)
+                if getattr(args, "masked_critical_volume", None) is None
+                else args.masked_critical_volume
+            ),
+            "critical_strain": critical_strain(args, model_type),
             "target_displacement_percent": target_displacement_percent(args, model_type),
             "target_displacement_definition": "percent strain converted from model geometry for spine; percent of femur length for femur",
             "run_pistoia": args.run_pistoia or args.require_pistoia or pistoia_mask_source_path(args) is not None,
@@ -985,6 +993,12 @@ def _add_common_image_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         help="Pistoia critical volume percentage. Defaults are model-profile specific.",
+    )
+    parser.add_argument(
+        "--masked_critical_volume",
+        type=float,
+        default=None,
+        help="Regional Pistoia critical volume percentage; defaults to --critical_volume.",
     )
     parser.add_argument(
         "--critical_strain",

@@ -35,6 +35,14 @@ def _locked_workflow_defaults():
                 "registration_max_scale": spine.DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
                 "spine_icp_target": spine.DEFAULT_SPINE_ICP_TARGET,
                 "reference_filename": spine.DEFAULT_SPINE_REFERENCE_FILENAME,
+                "stable_surface_fraction": spine.DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
+                "stable_surface_trim_fraction": spine.DEFAULT_SPINE_STABLE_CONTACT_TRIM_FRACTION,
+                "stable_surface_min_area_fraction": spine.DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
+                "stable_surface_max_depth_mm": spine.DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
+                "stable_surface_min_shift_mm": spine.DEFAULT_SPINE_STABLE_CONTACT_MIN_SHIFT_MM,
+                "stable_surface_close_gaps_3d": spine.DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
+                "stable_surface_close_gaps_max_gap": spine.DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
+                "stable_surface_keep_largest_component": spine.DEFAULT_SPINE_STABLE_CONTACT_KEEP_LARGEST_COMPONENT,
                 "contact_size_fraction": list(spine.SPINE_CONTACT_SIZE_FRACTION),
                 "superior_contact_center_fraction": list(
                     spine.SPINE_SUPERIOR_CONTACT_CENTER_FRACTION

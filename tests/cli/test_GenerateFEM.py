@@ -64,11 +64,11 @@ BENCHMARK_NONLINEAR_ARGS = [
 SPINE_DEFAULT_QC_ARGS = ["--quality_control", "False"]
 SPINE_DEFAULT_REGISTRATION_ARGS = [
     "--registration_backend",
-    "vtk",
+    "numpy",
     "--registration_landmarks",
-    "250",
+    "8000",
     "--registration_iterations",
-    "75",
+    "50",
     "--spine_icp_target",
     "body",
 ]
@@ -824,9 +824,9 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
 
     assert data["target"] == {"vertebra": "L1", "body_label": 2, "process_label": 3}
     assert data["alignment"]["registration_target"] == "body"
-    assert data["alignment"]["registration_backend"] == "vtk"
-    assert data["alignment"]["registration_landmarks"] == 250
-    assert data["alignment"]["registration_iterations"] == 75
+    assert data["alignment"]["registration_backend"] == "numpy"
+    assert data["alignment"]["registration_landmarks"] == 8000
+    assert data["alignment"]["registration_iterations"] == 50
     assert data["geometry"]["model_coordinates"] == "preprocessed_image_physical_space"
     assert data["materials"]["trabecular"]["elastic_E_func"] == "kopperdahl_trab_E"
     assert data["materials"]["cortical"]["material_id_range"] == [129, 256]

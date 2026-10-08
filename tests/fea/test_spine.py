@@ -4,7 +4,9 @@ from ogo.fea import spine
 def test_default_spine_cap_geometry_matches_maintained_settings():
     assert spine.DEFAULT_SPINE_PMMA_THICKNESS_MM == 10
     assert spine.DEFAULT_SPINE_PMMA_INTRUSION_MM == 6
-    assert spine.DEFAULT_SPINE_REGISTRATION_BACKEND == "vtk"
+    assert spine.DEFAULT_SPINE_REGISTRATION_BACKEND == "numpy"
+    assert spine.DEFAULT_SPINE_REGISTRATION_LANDMARKS == 8000
+    assert spine.DEFAULT_SPINE_REGISTRATION_ITERATIONS == 50
     assert spine.DEFAULT_SPINE_ICP_TARGET == "body"
 
 

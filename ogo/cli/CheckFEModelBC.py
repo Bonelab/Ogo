@@ -26,6 +26,15 @@ def _node_coordinates(root, node_numbers):
 
 
 def _bounds(points):
+    if len(points) == 0:
+        return {
+            "x_min": None,
+            "x_max": None,
+            "y_min": None,
+            "y_max": None,
+            "z_min": None,
+            "z_max": None,
+        }
     mins = points.min(axis=0)
     maxs = points.max(axis=0)
     return {
@@ -39,11 +48,15 @@ def _bounds(points):
 
 
 def _centroid(points):
+    if len(points) == 0:
+        return {"x": None, "y": None, "z": None}
     center = points.mean(axis=0)
     return {"x": float(center[0]), "y": float(center[1]), "z": float(center[2])}
 
 
 def _z_percentiles(points):
+    if len(points) == 0:
+        return {"p05": None, "p50": None, "p95": None}
     z = np.asarray(points[:, 2], dtype=float)
     return {
         "p05": float(np.percentile(z, 5)),

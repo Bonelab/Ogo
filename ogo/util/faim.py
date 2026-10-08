@@ -687,6 +687,7 @@ def run_faim_pipeline(
     n88tabulate_command=None,
     n88copymodel_command=None,
     critical_volume=2.0,
+    masked_critical_volume=None,
     critical_strain=0.007,
     exclude=5000,
     run_pistoia=True,
@@ -699,7 +700,11 @@ def run_faim_pipeline(
     require_pistoia=False,
     dry_run=False,
 ):
-    """Solve one N88 model and collect standard FAIM/Pistoia output files."""
+    """Solve one N88 model and collect standard FAIM/Pistoia output files.
+
+    The masked critical volume defaults to the full-bone criterion when omitted.
+    Both outputs are retained when a regional mask is supplied.
+    """
     model_file = Path(model_file)
     output_prefix = Path(output_prefix) if output_prefix is not None else model_file.with_suffix("")
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -861,7 +866,10 @@ def run_faim_pipeline(
                     mask_file=pistoia_mask_file,
                     output_file=masked_pistoia_file,
                     n88pistoia_command=pistoia,
-                    critical_volume=critical_volume,
+                    critical_volume=(
+                        critical_volume if masked_critical_volume is None
+                        else masked_critical_volume
+                    ),
                     critical_strain=critical_strain,
                     exclude_material_id=exclude,
                     conda_env=conda_env,

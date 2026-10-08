@@ -512,6 +512,36 @@ def test_projected_material_disk_closes_short_3d_gaps_after_extrusion():
     assert not np.any(disk & active)
 
 
+def test_projected_material_disk_can_keep_largest_connected_component():
+    ndimage = pytest.importorskip("scipy.ndimage")
+
+    active = np.zeros((18, 14, 18), dtype=bool)
+    active[4:10, 5:9, 4:10] = True
+    active[13:15, 5:9, 13:15] = True
+
+    disk = generate_projected_material_disk_mask(
+        active,
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        center=(8, 0, 8),
+        normal=(0, 1, 0),
+        u_axis=(1, 0, 0),
+        v_axis=(0, 0, 1),
+        size=(16, 16),
+        shape="square",
+        thickness=6,
+        intrusion=2,
+        anatomy_constrained=True,
+        keep_largest_component=True,
+    )
+
+    labels, count = ndimage.label(disk, structure=np.ones((3, 3, 3), dtype=bool))
+    assert count == 1
+    assert np.any(disk[4:10])
+    assert not np.any(disk[13:15])
+    assert not np.any(disk & active)
+
+
 def test_projected_stable_surface_contact_ignores_small_osteophyte():
     active = np.zeros((14, 14, 14), dtype=bool)
     active[4:10, 5:9, 4:10] = True
@@ -537,6 +567,126 @@ def test_projected_stable_surface_contact_ignores_small_osteophyte():
     assert contact["stable_depth"] == pytest.approx(3.0)
     assert contact["first_area"] == 1
     assert contact["stable_area"] >= 30
+    assert contact["used_stable_surface"] is True
+
+
+def test_projected_stable_surface_contact_ignores_shallow_shift():
+    active = np.zeros((14, 14, 14), dtype=bool)
+    active[4:10, 5:9, 4:10] = True
+    active[7, 4, 7] = True
+
+    contact = projected_stable_surface_contact(
+        active,
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        center=(7, 0, 7),
+        normal=(0, 1, 0),
+        u_axis=(1, 0, 0),
+        v_axis=(0, 0, 1),
+        size=(10, 10),
+        shape="square",
+        stable_surface_fraction=0.55,
+        stable_surface_min_area_fraction=0.12,
+        stable_surface_max_depth=8,
+        stable_surface_min_shift=2,
+    )
+
+    assert contact["first_distance"] == pytest.approx(4.0)
+    assert contact["stable_distance"] == pytest.approx(4.0)
+    assert contact["stable_depth"] == pytest.approx(0.0)
+    assert contact["used_stable_surface"] is False
+
+
+def test_projected_stable_surface_contact_can_trim_superficial_area():
+    active = np.zeros((14, 14, 14), dtype=bool)
+    active[4:10, 5:9, 4:10] = True
+    active[7, 2:5, 7] = True
+
+    contact = projected_stable_surface_contact(
+        active,
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        center=(7, 0, 7),
+        normal=(0, 1, 0),
+        u_axis=(1, 0, 0),
+        v_axis=(0, 0, 1),
+        size=(10, 10),
+        shape="square",
+        stable_surface_trim_fraction=0.10,
+        stable_surface_max_depth=8,
+        stable_surface_min_shift=2,
+    )
+
+    assert contact["first_distance"] == pytest.approx(2.0)
+    assert contact["stable_distance"] == pytest.approx(5.0)
+    assert contact["stable_depth"] == pytest.approx(3.0)
+    assert contact["used_stable_surface"] is True
+
+
+def test_projected_material_disk_trimmed_stable_surface_excludes_protrusion_column():
+    active = np.zeros((14, 14, 14), dtype=bool)
+    active[4:10, 5:9, 4:10] = True
+    active[7, 2:5, 7] = True
+
+    disk = generate_projected_material_disk_mask(
+        active,
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        center=(7, 0, 7),
+        normal=(0, 1, 0),
+        u_axis=(1, 0, 0),
+        v_axis=(0, 0, 1),
+        size=(10, 10),
+        shape="square",
+        thickness=6,
+        intrusion=2,
+        anatomy_constrained=True,
+        stable_surface=True,
+        stable_surface_fraction=0,
+        stable_surface_trim_fraction=0.10,
+        stable_surface_max_depth=8,
+        stable_surface_min_shift=2,
+        close_gaps_3d=True,
+    )
+
+    assert not np.any(disk & active)
+    assert not np.any(disk[7, 2:5, 7])
+    assert np.any(disk[7, :, 7])
+    assert np.any(disk[5, :, 5])
+
+
+
+def test_projected_material_disk_trim_keeps_bumps_below_min_shift():
+    active = np.zeros((16, 16, 16), dtype=bool)
+    active[4:12, 7:11, 4:12] = True
+    active[5, 2:7, 5] = True  # true protrusion, 5 mm before stable surface
+    active[8, 5:7, 8] = True  # shallow bump, 2 mm before stable surface
+
+    disk = generate_projected_material_disk_mask(
+        active,
+        spacing=(1, 1, 1),
+        origin=(0, 0, 0),
+        center=(8, 0, 8),
+        normal=(0, 1, 0),
+        u_axis=(1, 0, 0),
+        v_axis=(0, 0, 1),
+        size=(12, 12),
+        shape="square",
+        thickness=8,
+        intrusion=3,
+        anatomy_constrained=True,
+        stable_surface=True,
+        stable_surface_fraction=0,
+        stable_surface_trim_fraction=0.05,
+        stable_surface_max_depth=10,
+        stable_surface_min_shift=4,
+        close_gaps_3d=True,
+        close_gaps_3d_max_gap=4,
+    )
+
+    assert not np.any(disk & active)
+    assert not np.any(disk[5, 2:7, 5])
+    assert np.any(disk[8, :, 8])
 
 
 def test_projected_material_disk_vtk_preserves_geometry_and_output_value():

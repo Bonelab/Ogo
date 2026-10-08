@@ -714,6 +714,8 @@ def test_run_faim_pipeline_runs_masked_pistoia_when_mask_supplied(tmp_path, caps
         pistoia_vars=["pis_fy_fail", "pis_stiffy"],
         failure_axis="y",
         pistoia_mask_file=mask,
+        critical_volume=12.0,
+        masked_critical_volume=35.0,
         dry_run=True,
         compress=False,
     )
@@ -722,3 +724,5 @@ def test_run_faim_pipeline_runs_masked_pistoia_when_mask_supplied(tmp_path, caps
     assert "model_pistoia.txt" in out
     assert "model_masked_pistoia.txt" in out
     assert "model_masked_pistoia.csv" in out
+    assert "--critical_volume 12.0" in out
+    assert "--critical_volume 35.0" in out
