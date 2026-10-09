@@ -44,11 +44,14 @@ def test_ci_conda_install_is_non_interactive():
         )
 
 
-def test_ci_uses_mamba_for_dependency_resolution():
-    """Cold CI environments should use the faster conda-compatible solver."""
+def test_ci_uses_conda_with_required_test_dependencies():
+    """Keep the upstream conda setup, pytest and the setuptools compatibility pin."""
     repo_root = Path(__file__).resolve().parents[1]
     workflow = repo_root / ".github" / "workflows" / "main.yml"
     text = workflow.read_text(encoding="utf-8")
 
-    assert "mamba-version:" in text
-    assert re.search(r"^\s*mamba install\b", text, flags=re.MULTILINE)
+    assert "mamba-version:" not in text
+    install_line = re.search(r"^\s*conda install\b.*$", text, flags=re.MULTILINE)
+    assert install_line is not None
+    assert "pytest" in install_line.group()
+    assert '"setuptools<65.6"' in install_line.group()
