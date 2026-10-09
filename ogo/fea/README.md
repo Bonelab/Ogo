@@ -92,13 +92,22 @@ is retained as a review row with its reconstruction error, not silently dropped.
 The command writes
 `qc_summary.csv`; `--gallery` additionally writes a standalone `gallery.html`.
 Without a refreshed editable installation, use `python -m ogo.cli.ValidateFEA`.
-The gallery supports anatomy, QC status, reason, subject search, and anatomy/SED
+The gallery supports anatomy, QC status, subject search, and anatomy/SED
 view selection, with expandable measurement tables. A separate camera selector
 shows oblique/side, top, bottom, or all views in both thumbnails and the review
 dialog. The fixed three-row Ogo renders are split once into cached WebP images in
 `gallery_views/`; unrecognized legacy layouts remain full montages. Image files
 remain external; retain their relative location and the view-assets folder when
 copying the gallery and models together.
+
+The initial page shows 50 models; select 100, 250, or 500 per page. Only that page
+is rendered. Cached 420-pixel WebP thumbnails are loaded ahead of scrolling;
+opening Review uses the original-resolution view. Measurement tables are built
+only when expanded. Export always includes the entire cohort, not just the page.
+The Exclude flags dropdown has checkboxes: checking a flag hides matching cases
+without changing their QC or study decisions. "Not manually reviewed" refers to
+cases without an explicit manual include/exclude decision. Include/exclude saves
+preserve your scroll position. Filtering can remove a card from the current page.
 
 Sort by patient ID, number of QC flags, or stiffness, reaction force and full or
 regional failure load (lowest/highest first). Force sorting uses absolute
@@ -112,12 +121,17 @@ ogoValidateFEA derivatives/fea --output derivatives/fea/qc --gallery-zip --worke
 ```
 
 Extract `gallery.zip` and open `gallery.html`. It includes `images/`,
-`gallery_views/`, `qc_summary.csv`, and the initial `study_inclusion.csv`.
+`gallery_views/`, `gallery_thumbnails/`, `qc_summary.csv`, and the initial `study_inclusion.csv`.
 No original model directory or server is needed to review it. Model files are
 not included; original model paths remain in the CSV as provenance. Legacy PNGs
 are converted to compact WebP images inside the ZIP without modifying their
 originals. Both solve stages and all available camera views are retained. Missing images remain
 missing. Large cohorts use lazy-loaded image files rather than embedded HTML.
+
+For study-specific full-size L1 resegmentation and recovery of excluded or
+incomplete cases, see [the cohort recovery example](../../examples/fea/cohort_recovery/README.md).
+It preserves prior results and builds a fresh review gallery; it does not
+automatically reinstate rerun cases.
 After review, export the updated inclusion CSV from the gallery; browser
 decisions cannot rewrite the CSV inside the original ZIP.
 The export popup directs users to browser downloads and explicitly states that

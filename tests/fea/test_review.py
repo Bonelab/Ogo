@@ -9,6 +9,51 @@ import pytest
 from ogo.fea.review import inclusion_row, load_decisions
 
 
+def gallery_data(content):
+    import re
+    return json.loads(re.search(r'id="review-data">(.*?)</script>', content, re.S)[1])
+
+
+def test_gallery_pages_filters_and_compact_data(tmp_path):
+    from ogo.fea.gallery import generate_gallery
+    rows = [{'site': 'spine', 'model_id': f'case{i}', 'qc_status': 'pass', 'qc_reasons': ''}
+            for i in range(501)]
+    content = generate_gallery(rows, tmp_path / 'gallery.html').read_text()
+    data = gallery_data(content)
+    restored = [dict(zip(data['rowColumns'][group], values)) for group, values in data['rowValues']]
+    assert restored == rows
+    assert len(data['seeds']) == 501
+    assert '<main></main>' in content
+    assert 'id="page-size"' in content
+    assert 'value="500"' in content
+    assert 'data-qc-reason="manual_review_pending"' in content
+    assert 'data-qc-reason="too_short"' in content
+    assert "rootMargin: '1200px 0px'" in content
+
+
+def test_gallery_pagination_and_flags_do_not_change_decisions():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is required')
+    from ogo.fea import gallery
+    script = Path(gallery.__file__).with_name('gallery_review.js')
+    code = '''const assert = require('node:assert/strict');
+const {pageIndices, excludedByFlags, inclusionRecord} = require(SCRIPT);
+const ids = Array.from({length:501}, (_, i) => i);
+assert.equal(pageIndices(ids,0,50).length,50);
+assert.equal(pageIndices(ids,0,500).length,500);
+assert.deepEqual(pageIndices(ids,1,500),[500]);
+const row = {site:'hip',model_id:'case',qc_status:'fail',qc_reasons:'too_short'};
+const decision = {manual_decision:'include'};
+const before = inclusionRecord(row,decision);
+assert.equal(excludedByFlags(row,decision,new Set(['too_short'])),true);
+assert.equal(excludedByFlags(row,decision,new Set(['manual_review_pending'])),false);
+assert.equal(excludedByFlags(row,{},new Set(['manual_review_pending'])),true);
+assert.deepEqual(inclusionRecord(row,decision),before);
+'''.replace('SCRIPT', json.dumps(str(script)))
+    subprocess.run([node, '-e', code], check=True)
+
+
 def test_review_decision_restores_scroll_after_refresh():
     node = shutil.which('node')
     if not node:
@@ -170,7 +215,7 @@ def test_gallery_individual_views_keep_panel_order_and_cache(tmp_path):
     assert 'id="review-camera"' in content
     assert 'id="review-stage"' in content
     for view, color in zip(('oblique', 'top', 'bottom'), ((255, 0, 0), (0, 128, 0), (0, 0, 255))):
-        assert f'data-view="{view}"' in content
+        assert any(item['view'] == view for item in gallery_data(content)['images'][0])
         asset = next((tmp_path / 'gallery_views').glob(f'*_{view}.webp'))
         with Image.open(asset) as cropped:
             assert cropped.size == (1400, 850)
@@ -188,7 +233,7 @@ def test_gallery_unknown_montage_is_not_split(tmp_path):
     row = {'site': 'spine', 'model_id': 'legacy', 'qc_status': 'review',
            'qc_reasons': '', 'anatomy_image': str(image)}
     content = generate_gallery([row], tmp_path / 'gallery.html').read_text()
-    assert 'data-fallback="true"' in content
+    assert gallery_data(content)['images'][0][0]['fallback'] == 'true'
     assert not (tmp_path / 'gallery_views').exists()
 
 
@@ -208,10 +253,11 @@ def test_gallery_zip_is_portable_and_has_review_records(tmp_path):
         assert not any(name.endswith('.png') for name in archive.namelist())
         assert archive.testzip() is None
         content = archive.read('gallery.html').decode()
-        assert 'src="images/' in content
+        assert gallery_data(content)['images'][0][0]['src'].startswith('images/')
         assert str(tmp_path) not in content
         assert 'data:image' not in content
         archive.extractall(tmp_path / 'unpacked')
-    import re
-    for source in re.findall(r'src="([^"]+)"', content):
-        assert (tmp_path / 'unpacked' / source).is_file()
+    for group in gallery_data(content)['images']:
+        for asset in group:
+            for key in ('src', 'thumbnail'):
+                assert (tmp_path / 'unpacked' / asset[key]).is_file()

@@ -68,7 +68,8 @@ def test_csv_and_gallery_escape_subject_names(tmp_path):
     output = tmp_path / 'gallery.html'
     generate_gallery([evaluate(row)], output)
     content = output.read_text()
-    assert '&lt;script&gt;bad&lt;/script&gt;' in content
+    assert '\\u003cscript>bad\\u003c/script>' in content
+    assert '<script>bad</script>' not in content
     assert 'too_short' in content
     assert 'loading="lazy"' not in content  # No fabricated image for a missing preview.
 

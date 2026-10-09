@@ -53,7 +53,7 @@ def generate_gallery(rows, output, decisions=None, image_root=None):
             for key in outcome_keys:
                 row.setdefault(key, records[0].get(key, ''))
     decisions = decisions or {}
-    cards = []
+    image_groups = []
     escape = lambda value: html.escape(str(value), quote=True)
     for index, row in enumerate(rows):
         images = []
@@ -65,14 +65,24 @@ def generate_gallery(rows, output, decisions=None, image_root=None):
                 cameras = _camera_images(path, output)
                 for view, asset in [('all', path), *cameras]:
                     relative = quote(Path(os.path.relpath(asset, output.parent)).as_posix())
-                    source = f'src="{escape(relative)}"'
-                    fallback = ' data-fallback="true"' if not cameras else ''
-                    images.append(f'<img data-stage="{stage}" data-view="{view}"{fallback} {source} loading="lazy" alt="{stage}: {view}" hidden>')
-        measurements = ''.join(f'<tr><th>{escape(key)}</th><td>{escape(value)}</td></tr>'
-                               for key, value in sorted(row.items()) if not key.endswith('_image'))
-        cards.append(f'<article data-index="{index}"><button class="review-open">{escape(row["model_id"])}</button><p class="automatic"></p><p class="decision"></p><button class="quick-decision" data-decision="include" aria-pressed="false">Include</button> <button class="quick-decision" data-decision="exclude" aria-pressed="false">Exclude</button> <button class="review-open">Review</button>{"".join(images)}<details><summary>Measurements</summary><table>{measurements}</table></details></article>')
+                    from PIL import Image
+                    directory = output.parent / (output.stem + '_thumbnails')
+                    directory.mkdir(exist_ok=True)
+                    stat = asset.stat()
+                    key = hashlib.sha256(f'{asset.resolve()}:{stat.st_size}:{stat.st_mtime_ns}'.encode()).hexdigest()[:20]
+                    thumbnail = directory / f'{key}.webp'
+                    if not thumbnail.exists():
+                        with Image.open(asset) as image:
+                            image.thumbnail((420, 560))
+                            image.convert('RGB').save(thumbnail, 'WEBP', quality=75, method=2)
+                    images.append({'stage': stage, 'view': view, 'src': relative,
+                                   'thumbnail': quote(Path(os.path.relpath(thumbnail, output.parent)).as_posix()),
+                                   'fallback': 'true' if not cameras else ''})
+        image_groups.append(images)
     reasons = sorted({reason for row in rows for reason in row['qc_reasons'].split(';') if reason})
-    options = ''.join(f'<option>{escape(reason)}</option>' for reason in reasons)
+    reasons = ['manual_review_pending', 'too_short'] + [r for r in reasons if r not in ('manual_review_pending', 'too_short')]
+    labels = {'manual_review_pending': 'Not manually reviewed', 'too_short': 'Too short'}
+    options = ''.join(f'<label><input type="checkbox" data-qc-reason="{escape(reason)}"> {escape(labels.get(reason, reason.replace("_", " ")))}</label>' for reason in reasons)
     manual_options = ''.join(f'<option value="{reason}">{reason.replace("_", " ")}</option>' for reason in REASONS)
     sort_options = '<option value="patient">Patient ID</option><option value="flags">Most QC flags first</option>'
     for key, name in [('stiffness_N_per_mm', 'Stiffness'), ('reaction_force_N', 'Reaction force'),
@@ -83,7 +93,15 @@ def generate_gallery(rows, output, decisions=None, image_root=None):
     seeds = [inclusion_row(row, decisions.get(identity(row))) for row in rows]
     serialized = json.dumps(rows, sort_keys=True)
     fingerprint = hashlib.sha256(serialized.encode()).hexdigest()
-    data = json.dumps({'rows': rows, 'seeds': seeds, 'fields': FIELDS, 'reasons': REASONS,
+    columns, column_ids, values = [], {}, []
+    for row in rows:
+        keys = tuple(row)
+        if keys not in column_ids:
+            column_ids[keys] = len(columns)
+            columns.append(keys)
+        values.append([column_ids[keys], list(row.values())])
+    data = json.dumps({'rowColumns': columns, 'rowValues': values, 'images': image_groups,
+                       'seeds': seeds, 'fields': FIELDS, 'reasons': REASONS,
                        'storageKey': 'ogo-fea-review-v1-' + fingerprint,
                        'imported': bool(decisions)}).replace('<', '\\u003c')
     script = Path(__file__).with_name('gallery_review.js').read_text()
@@ -92,12 +110,13 @@ def generate_gallery(rows, output, decisions=None, image_root=None):
 <header><input id="search" aria-label="Subject" placeholder="Subject"><select id="site" aria-label="Anatomy"><option value="">All sites</option><option>hip</option><option>spine</option></select>
 <select id="status" aria-label="Automatic QC"><option value="">All QC statuses</option><option>pass</option><option>review</option><option>fail</option></select>
 <select id="sort" aria-label="Sort models">SORT_OPTIONS</select>
-<select id="reason" aria-label="QC reason"><option value="">All QC reasons</option>REASONS</select>
+<details id="reason-picker"><summary id="reason-summary">Exclude flags</summary><div class="flag-menu"><button id="clear-flags" type="button">Clear</button>REASONS</div></details>
 <select id="inclusion" aria-label="Study inclusion"><option value="">All study decisions</option><option>include</option><option>exclude</option><option>pending</option></select>
 <select id="stage" aria-label="Solve stage"><option value="anatomy">Before solve</option><option value="sed">After solve</option></select>
 <select id="camera" aria-label="Camera view"><option value="oblique">Oblique / side</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="all">All views</option></select>
-<input id="reviewer" aria-label="Reviewer" placeholder="Reviewer initials/name"><button id="export">Export inclusion CSV</button><label>Import CSV <input id="import" type="file" accept=".csv,text/csv"></label><p id="message" role="status"></p></header>
-<main>CARDS</main><dialog id="review-dialog"><button id="close">Close</button><h1 id="review-title"></h1><p id="review-auto"></p>
+<input id="reviewer" aria-label="Reviewer" placeholder="Reviewer initials/name"><button id="export">Export inclusion CSV</button><label>Import CSV <input id="import" type="file" accept=".csv,text/csv"></label><p id="message" role="status"></p>
+<nav aria-label="Pages"><label>Per page <select id="page-size"><option value="50" selected>50</option><option value="100">100</option><option value="250">250</option><option value="500">500</option></select></label> <button id="previous-page" title="Previous page">&#8592;</button> <span id="page-status"></span> <button id="next-page" title="Next page">&#8594;</button></nav></header>
+<main></main><dialog id="review-dialog"><button id="close">Close</button><h1 id="review-title"></h1><p id="review-auto"></p>
 <select id="review-stage" aria-label="Review solve stage"><option value="anatomy">Before solve</option><option value="sed">After solve</option></select>
 <select id="review-camera" aria-label="Review camera view"><option value="oblique">Oblique / side</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="all">All views</option></select><div id="review-images"></div>
 <label>Reason <select id="manual-reason">MANUAL_OPTIONS</select></label><label>Explanation<textarea id="manual-note"></textarea></label>
@@ -105,8 +124,10 @@ def generate_gallery(rows, output, decisions=None, image_root=None):
 <script type="application/json" id="review-data">DATA</script><script>SCRIPT</script></body></html>'''
     # Replace once so record text cannot become another template token.
     tokens = {'SCRIPT': script, 'MANUAL_OPTIONS': manual_options, 'REASONS': options, 'SORT_OPTIONS': sort_options,
-              'CARDS': ''.join(cards), 'DATA': data}
-    content = re.sub(r'SCRIPT|MANUAL_OPTIONS|REASONS|SORT_OPTIONS|CARDS|DATA', lambda match: tokens[match[0]], content)
+              'DATA': data}
+    content = re.sub(r'SCRIPT|MANUAL_OPTIONS|REASONS|SORT_OPTIONS|DATA', lambda match: tokens[match[0]], content)
+    menu_style = '#reason-picker{position:relative}#reason-picker summary{cursor:pointer;border:1px solid #999;padding:6px}#reason-picker .flag-menu{position:absolute;top:100%;left:0;width:320px;max-width:85vw;max-height:55vh;overflow:auto;background:white;border:1px solid #aaa;padding:10px;z-index:3}#reason-picker label{display:flex;gap:6px;padding:5px 0}'
+    content = content.replace('</style>', menu_style + '</style>', 1)
     output.write_text(content)
     return output
 
