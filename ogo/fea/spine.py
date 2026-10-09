@@ -4,7 +4,9 @@ Default spine workflow:
 1. Read the calibrated density image and labelled vertebra mask. The high-level
    wrapper uses ``--vertebra LEVEL:BODY_LABEL:PROCESS_LABEL`` so body and
    posterior-process labels are explicit and traceable.
-2. Crop the vertebral body, posterior process, calibrated image, and combined
+2. Retain the largest face-connected body-label component, leaving the process
+   and other labels unchanged. Record the removed volume for segmentation QC.
+   Crop the vertebral body, posterior process, calibrated image, and combined
    vertebra mask to the same bounding box.
 3. ICP-align the requested registration target to a bundled L4 compression
    reference surface. The maintained body-only target uses the vertebral body;
@@ -1298,6 +1300,38 @@ def export_nifti_outputs(
 ###################################################################### VERTEBRA PIPELINE
 
 
+def clean_body_component(mask_image, body_label):
+    """Remove detached body fragments before registration and cap placement.
+
+    Face connectivity matches the voxel FE mesh. This does not repair errors
+    connected to the main body or alter the posterior-process segmentation.
+    Return a new label image and measurements of the cleanup for audit.
+    """
+    from scipy.ndimage import label
+    from ogo.util.vtk_image import numpy_to_vtk_image, vtk_image_to_numpy
+
+    data = vtk_image_to_numpy(mask_image, copy=True)
+    components, count = label(data == body_label)
+    if not count:
+        raise ValueError(f'No voxels found for body label {body_label}')
+    sizes = np.bincount(components.ravel())
+    sizes[0] = 0
+    retained = int(sizes.argmax())
+    removed = (components != 0) & (components != retained)
+    removed_count = int(removed.sum())
+    original_count = int(sizes.sum())
+    data[removed] = 0
+    volume = float(np.prod(mask_image.GetSpacing()))
+    metrics = {
+        'input_body_component_count': int(count),
+        'body_cleanup_removed_voxels': removed_count,
+        'body_cleanup_removed_volume_mm3': removed_count * volume,
+        'body_cleanup_removed_fraction': removed_count / original_count,
+        'body_cleanup_original_volume_mm3': original_count * volume,
+    }
+    return numpy_to_vtk_image(data, mask_image), metrics
+
+
 def process_vertebra(input_mask, input_image, n88model_output_path, body_label, process_label, reference_path, **kwargs):
 
     pmma_mat_id = kwargs.get("pmma_mat_id", 5000)
@@ -1388,10 +1422,17 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     check_vertebra_presence(mask_reader, body_label)
     check_vertebra_presence(mask_reader, process_label)
 
+    mask_image, body_cleanup = clean_body_component(mask_reader.GetOutput(), body_label)
+    ogo.message(
+        'Body-label cleanup: %d components; removed %d voxels (%.2f%%); process label unchanged'
+        % (body_cleanup['input_body_component_count'], body_cleanup['body_cleanup_removed_voxels'],
+           100 * body_cleanup['body_cleanup_removed_fraction'])
+    )
+
     # Threshold images to extract body, process and full vertebra
     ogo.message(f"Thresholding...")
-    body = threshold(mask_reader.GetOutput(), body_label)
-    process = threshold(mask_reader.GetOutput(), process_label)
+    body = threshold(mask_image, body_label)
+    process = threshold(mask_image, process_label)
     fullvertebra = combine_mask(body.GetOutput(), process.GetOutput())
 
     # Crop everything to same BB
@@ -1401,7 +1442,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         body.GetOutput(),
         process.GetOutput(),
         image_reader.GetOutput(),
-        mask_reader.GetOutput(),
+        mask_image,
         margin_mm=SPINE_PREPROCESSING_CROP_MARGIN_MM,
         extra_label_outputs=[]
         if pistoia_mask_reader is None
@@ -1810,9 +1851,11 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     ogo.message(f"Writing n88model file: {n88model_output_path}")
     from ogo.fea.validation import measure_model, write_measurements
 
-    write_measurements(n88model_output_path, measure_model(
+    measurements = measure_model(
         model, "spine", body_image=padded_mask1, process_image=padded_mask2,
-        registration_rotation=sample_to_reference_rotation))
+        registration_rotation=sample_to_reference_rotation)
+    measurements.update(body_cleanup)
+    write_measurements(n88model_output_path, measurements)
     writer = vtkbone.vtkboneN88ModelWriter()
     writer.SetInputData(model)
     writer.SetFileName(n88model_output_path)

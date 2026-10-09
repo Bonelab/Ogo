@@ -237,7 +237,15 @@ For spine, the maintained path is:
 1. `GenerateFEM.py::build_spine_command` forwards the calibrated image,
    segmentation, target `LEVEL:BODY_LABEL:PROCESS_LABEL`, preset, optional
    Pistoia mask, and any lower-level overrides.
-2. `spine.py::main` thresholds the requested body/process labels, crops around
+2. `spine.py::clean_body_component` keeps the largest face-connected component
+   of the requested body label before registration and support construction.
+   Other labels, including the posterior process, are unchanged. The QC CSV
+   records the original component count, removed voxels, removed volume, and
+   removed body fraction. Removal of more than 5% triggers
+   `substantial_body_cleanup` for manual review, not automatic exclusion. This
+   conservative triage threshold is not a validated anatomical cutoff. Cleanup
+   cannot repair wrongly labelled anatomy connected to the main body.
+   `spine.py::main` then thresholds the body/process labels, crops around
    the vertebra, checks posterior-process orientation, and runs scaled ICP to
    the selected reference surface from `default_spine_reference_path`. The
    maintained default `--spine_icp_target body` uses only the vertebral body
@@ -607,7 +615,8 @@ separate right reference file.
 
 The spine workflow builds one compression model per `--vertebra` target:
 
-1. Threshold the labelled mask into vertebral body and posterior process.
+1. Keep the largest face-connected body-label component, record the removed
+   volume, then threshold the labelled mask into body and posterior process.
 2. Crop the image and masks to the vertebra.
 3. Align the body to the scaled L4 vertebral-body reference using ICP.
 4. Apply transform and isotropic resampling through the shared VTK reslice

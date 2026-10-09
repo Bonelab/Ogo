@@ -305,6 +305,11 @@ def evaluate(measurements):
     if axial is not None and transverse is not None and axial > 0.75 * transverse + 2:
         review.append('process_orientation')
     if row.get('site') == 'spine':
+        # Review triage only: substantial cleanup can indicate a second vertebra
+        # or a disconnected anatomical region, not necessarily a failed model.
+        removed = number('body_cleanup_removed_fraction')
+        if removed is not None and removed > 0.05:
+            review.append('substantial_body_cleanup')
         for name in ('body_top', 'body_bottom'):
             span = number(name + '_span_mm')
             if span is None:
