@@ -23,7 +23,7 @@ import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 from ogo.cli.Visualize import vis3d
-from ogo.fea.qc_images import save_review_image
+from ogo.fea.qc_images import REVIEW_PANEL_SIZE, save_qc_panel
 
 
 def smooth_bone_sed(values, indices, bone, spacing):
@@ -344,12 +344,13 @@ def export_model_qc(model_path, site, body_mask=None, sed=False,
         temporary = Path(temporary)
         rendered = panel(model_path, temporary, site, body_mask, sed, model, ineligible)
         with Image.open(rendered) as image:
-            save_review_image(image, output)
+            save_qc_panel(image, output)
         views = [json.loads((temporary / (model_path.stem + "_preview_" + view
                  + ("_sed" if sed else "") + ".json")).read_text())
                  for view in ("oblique", "top", "bottom")]
         output.with_suffix(".json").write_text(json.dumps(
-            {"site": site, "views": views, "image_format": "WEBP", "image_quality": 85}, indent=2))
+            {"site": site, "views": views, "image_format": "WEBP", "image_quality": 85,
+             "image_size_pixels": list(REVIEW_PANEL_SIZE), "review_only": True}, indent=2))
     if model_path.with_name(model_path.stem + '_qc_metrics.csv').exists():
         from ogo.fea.validation import write_measurements
         write_measurements(model_path, {'sed_image' if sed else 'anatomy_image': str(output)})

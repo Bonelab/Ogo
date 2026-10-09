@@ -32,8 +32,9 @@ images do not imply that the requested shaft length was retained.
 SED uses a linear Jet scale, shared across the three views, from zero to the
 99th percentile of bone-element SED. A bone-masked Gaussian (sigma 0.8 mm)
 and light surface smoothing improve display only; FE arrays and results are
-unchanged. Review images use WebP (quality 85) at 1400 x 2550 pixels; individual
-gallery views are 1400 x 850 pixels. These compact lossy images are for QC, not
+unchanged. Review images use WebP (quality 85) at 600 x 1092 pixels; individual
+gallery views are 600 x 364 pixels. Legacy 1400 x 2550 panels remain supported.
+These compact lossy images are for QC, not
 quantitative analysis or publication. Each image has a JSON sidecar recording
 display settings and compression. Existing PNG previews remain supported. Spine
 generation retains `*_qc_body_mask.nii.gz` in model coordinates for consistent

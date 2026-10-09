@@ -13,14 +13,14 @@ from tempfile import TemporaryDirectory
 from urllib.parse import quote
 
 from ogo.fea.review import FIELDS, REASONS, identity, inclusion_row, write_inclusion
-from ogo.fea.qc_images import save_review_image
+from ogo.fea.qc_images import REVIEW_PANEL_SIZE, save_qc_panel, save_review_image
 
 
 def _camera_images(path, output):
     """Split the fixed three-row Ogo render, caching assets beside the gallery."""
     from PIL import Image
     with Image.open(path) as image:
-        if image.size != (1400, 2550) or not path.stem.endswith(('_qc_3d', '_sed_3d')):
+        if image.size not in ((1400, 2550), REVIEW_PANEL_SIZE) or not path.stem.endswith(('_qc_3d', '_sed_3d')):
             return []
         stat = path.stat()
         key = hashlib.sha256(f'{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}'.encode()).hexdigest()[:20]
@@ -30,7 +30,8 @@ def _camera_images(path, output):
         for index, view in enumerate(('oblique', 'top', 'bottom')):
             asset = directory / f'{key}_{view}.webp'
             if not asset.exists():
-                save_review_image(image.crop((0, index * 850, 1400, (index + 1) * 850)), asset)
+                height = image.height // 3
+                save_review_image(image.crop((0, index * height, image.width, (index + 1) * height)), asset)
             assets.append((view, asset))
         return assets
 
@@ -156,11 +157,11 @@ def export_gallery_zip(rows, output, decisions=None):
                         # Stable identity preserves browser autosave across exports.
                         name = hashlib.sha256(str(source).encode()).hexdigest()[:20] + '_' + source.name
                         target = images / name
-                        if source.suffix.lower() == '.png':
+                        if source.suffix.lower() in ('.png', '.webp'):
                             from PIL import Image
                             target = target.with_suffix('.webp')
                             with Image.open(source) as image:
-                                save_review_image(image, target)
+                                save_qc_panel(image, target)
                         else:
                             try:
                                 target.symlink_to(source)
