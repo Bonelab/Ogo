@@ -82,7 +82,13 @@ function sortIndices(indices, rows, mode) {
   });
 }
 
-if (typeof module !== 'undefined') module.exports = {inclusionRecord, encodeCSV, parseCSV, validateReviews, imageVisible, sortIndices};
+function preserveScroll(action, viewport = window) {
+  const x = viewport.scrollX, y = viewport.scrollY;
+  action();
+  viewport.scrollTo({left: x, top: y, behavior: 'instant'});
+}
+
+if (typeof module !== 'undefined') module.exports = {inclusionRecord, encodeCSV, parseCSV, validateReviews, imageVisible, sortIndices, preserveScroll};
 
 if (typeof document !== 'undefined') {
   const data = JSON.parse(document.getElementById('review-data').textContent);
@@ -107,8 +113,11 @@ if (typeof document !== 'undefined') {
     let visible = 0;
     const cards = [...document.querySelectorAll('article')];
     const byIndex = new Map(cards.map(card => [Number(card.dataset.index), card]));
-    for (const index of sortIndices([...byIndex.keys()], rows, $('sort').value)) {
-      document.querySelector('main').append(byIndex.get(index));
+    const main = document.querySelector('main');
+    const ordered = sortIndices([...byIndex.keys()], rows, $('sort').value);
+    for (const [position, index] of ordered.entries()) {
+      const card = byIndex.get(index);
+      if (main.children[position] !== card) main.insertBefore(card, main.children[position] || null);
     }
     for (const card of document.querySelectorAll('article')) {
       const row = rows[Number(card.dataset.index)], record = inclusionRecord(row, decisions.get(decisionKey(row)));
@@ -153,7 +162,8 @@ if (typeof document !== 'undefined') {
       manual_note: $('manual-note').value, reviewer: $('reviewer').value.trim() || 'unspecified',
       review_timestamp: new Date().toISOString()};
     decisions.set(decisionKey(selected), inclusionRecord(selected, decision));
-    persist(); refresh(); $('review-dialog').close();
+    persist();
+    preserveScroll(() => { $('review-dialog').close(); refresh(); });
   }
   for (const card of document.querySelectorAll('article')) {
     for (const target of card.querySelectorAll('.review-open,img')) target.addEventListener('click', () => openReview(Number(card.dataset.index)));
@@ -163,7 +173,7 @@ if (typeof document !== 'undefined') {
         manual_note: '', reviewer: $('reviewer').value.trim() || 'unspecified',
         review_timestamp: new Date().toISOString()};
       decisions.set(decisionKey(row), inclusionRecord(row, decision));
-      persist(); refresh();
+      persist(); preserveScroll(refresh);
     });
   }
   for (const id of ['search', 'site', 'status', 'reason', 'inclusion', 'stage', 'camera', 'sort']) $(id).addEventListener('input', refresh);

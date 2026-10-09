@@ -9,6 +9,26 @@ import pytest
 from ogo.fea.review import inclusion_row, load_decisions
 
 
+def test_review_decision_restores_scroll_after_refresh():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is required')
+    from ogo.fea import gallery
+    script = Path(gallery.__file__).with_name('gallery_review.js')
+    code = '''const assert = require('node:assert/strict');
+const {preserveScroll} = require(SCRIPT);
+const viewport = {scrollX: 15, scrollY: 2400,
+ scrollTo(options) { this.scrollX = options.left; this.scrollY = options.top; }};
+preserveScroll(() => { viewport.scrollY = 0; }, viewport);
+assert.equal(viewport.scrollX, 15);
+assert.equal(viewport.scrollY, 2400);
+'''.replace('SCRIPT', json.dumps(str(script)))
+    subprocess.run([node, '-e', code], check=True)
+    source = script.read_text()
+    assert 'persist(); preserveScroll(refresh);' in source
+    assert "preserveScroll(() => { $('review-dialog').close(); refresh(); });" in source
+
+
 def test_gallery_sorting_is_numeric_and_puts_missing_results_last(tmp_path):
     from ogo.fea import gallery
     node = shutil.which('node')
