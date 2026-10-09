@@ -37,6 +37,21 @@ def _camera_images(path, output):
 
 def generate_gallery(rows, output, decisions=None, image_root=None):
     output = Path(output).absolute()
+    rows = [dict(row) for row in rows]
+    outcome_keys = ('stiffness_N_per_mm', 'reaction_force_N', 'pistoia_failure_load_N',
+                    'masked_pistoia_failure_load_N')
+    for row in rows:
+        if not row.get('model_path') or row.get('generation_status') in ('too_short', 'construction_failed'):
+            continue
+        model = Path(row['model_path'])
+        result = model.with_name(model.stem + '_results.csv')
+        if result.is_file():
+            with result.open(newline='') as stream:
+                records = list(csv.DictReader(stream))
+            if len(records) != 1:
+                raise ValueError(f'Expected one model-result row: {result}')
+            for key in outcome_keys:
+                row.setdefault(key, records[0].get(key, ''))
     decisions = decisions or {}
     cards = []
     escape = lambda value: html.escape(str(value), quote=True)
@@ -59,6 +74,12 @@ def generate_gallery(rows, output, decisions=None, image_root=None):
     reasons = sorted({reason for row in rows for reason in row['qc_reasons'].split(';') if reason})
     options = ''.join(f'<option>{escape(reason)}</option>' for reason in reasons)
     manual_options = ''.join(f'<option value="{reason}">{reason.replace("_", " ")}</option>' for reason in REASONS)
+    sort_options = '<option value="patient">Patient ID</option><option value="flags">Most QC flags first</option>'
+    for key, name in [('stiffness_N_per_mm', 'Stiffness'), ('reaction_force_N', 'Reaction force'),
+                      ('pistoia_failure_load_N', 'Full-bone failure load'),
+                      ('masked_pistoia_failure_load_N', 'Regional failure load')]:
+        for direction, label in [('asc', 'lowest first'), ('desc', 'highest first')]:
+            sort_options += f'<option value="{key}:{direction}">{name}: {label}</option>'
     seeds = [inclusion_row(row, decisions.get(identity(row))) for row in rows]
     serialized = json.dumps(rows, sort_keys=True)
     fingerprint = hashlib.sha256(serialized.encode()).hexdigest()
@@ -70,6 +91,7 @@ def generate_gallery(rows, output, decisions=None, image_root=None):
 <style>body{font:14px system-ui;margin:20px;background:#fff;color:#222}header{position:sticky;top:0;background:white;padding:12px 0;z-index:1;display:flex;flex-wrap:wrap;gap:8px;align-items:center}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}article{border:1px solid #ccc;padding:12px;overflow-wrap:anywhere}button,select,input{font:inherit;padding:6px}img{width:100%;height:560px;object-fit:contain;cursor:pointer}article[hidden],img[hidden]{display:none}table{font-size:12px;width:100%;table-layout:fixed}th,td{text-align:left;border-bottom:1px solid #ddd;padding:4px;overflow-wrap:anywhere}.decision{font-weight:600}dialog{width:min(900px,90vw);max-height:90vh;overflow:auto;border:1px solid #aaa}dialog::backdrop{background:#0008}dialog img{height:60vh}dialog label{display:block;margin:12px 0}textarea{display:block;width:95%;min-height:70px}#message{width:100%;margin:0;color:#555}.review-open:first-child{font-weight:600;border:0;background:none;text-align:left}#review-title{font-size:18px}</style></head><body>
 <header><input id="search" aria-label="Subject" placeholder="Subject"><select id="site" aria-label="Anatomy"><option value="">All sites</option><option>hip</option><option>spine</option></select>
 <select id="status" aria-label="Automatic QC"><option value="">All QC statuses</option><option>pass</option><option>review</option><option>fail</option></select>
+<select id="sort" aria-label="Sort models">SORT_OPTIONS</select>
 <select id="reason" aria-label="QC reason"><option value="">All QC reasons</option>REASONS</select>
 <select id="inclusion" aria-label="Study inclusion"><option value="">All study decisions</option><option>include</option><option>exclude</option><option>pending</option></select>
 <select id="stage" aria-label="Solve stage"><option value="anatomy">Before solve</option><option value="sed">After solve</option></select>
@@ -82,9 +104,9 @@ def generate_gallery(rows, output, decisions=None, image_root=None):
 <button id="include">Include</button><button id="exclude">Exclude</button><button id="reset">Reset to automatic</button><div id="review-measurements"></div></dialog>
 <script type="application/json" id="review-data">DATA</script><script>SCRIPT</script></body></html>'''
     # Replace once so record text cannot become another template token.
-    tokens = {'SCRIPT': script, 'MANUAL_OPTIONS': manual_options, 'REASONS': options,
+    tokens = {'SCRIPT': script, 'MANUAL_OPTIONS': manual_options, 'REASONS': options, 'SORT_OPTIONS': sort_options,
               'CARDS': ''.join(cards), 'DATA': data}
-    content = re.sub(r'SCRIPT|MANUAL_OPTIONS|REASONS|CARDS|DATA', lambda match: tokens[match[0]], content)
+    content = re.sub(r'SCRIPT|MANUAL_OPTIONS|REASONS|SORT_OPTIONS|CARDS|DATA', lambda match: tokens[match[0]], content)
     output.write_text(content)
     return output
 

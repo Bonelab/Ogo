@@ -100,6 +100,11 @@ dialog. The fixed three-row Ogo renders are split once into cached WebP images i
 remain external; retain their relative location and the view-assets folder when
 copying the gallery and models together.
 
+Sort by patient ID, number of QC flags, or stiffness, reaction force and full or
+regional failure load (lowest/highest first). Force sorting uses absolute
+magnitudes; missing outcomes are last. Sorting never changes inclusion. Manual
+exclusions are labelled "Manually excluded" independently of automatic QC.
+
 For sharing, export one portable ZIP instead:
 
 ```bash
@@ -810,6 +815,9 @@ estimate a fresh transform rather than reuse an unreviewed historical fit.
 
 `available_shaft_length_mm` is measured on the transformed full-scan model
 after generating the actual connected GT support and before the final crop.
+Each proximal support retains its own largest 26-connected PMMA component
+before the disks are combined. This removes disconnected shaft islands without
+discarding either main disk; connected unwanted extensions still require QC.
 It measures **usable complete-section coverage**, not the distance to the
 lowest corner of an angled scan end. Before any resampling, rough crop or
 padding, `shaft_geometry.capture_distal_scan_face` records the physical voxel

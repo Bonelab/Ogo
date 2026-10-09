@@ -120,3 +120,18 @@ def test_sideways_fall_fits_contact_canvas_before_generating_pmma():
 
     assert "projected_material_disk_required_bounds" in called_names
     assert "fit_vtk_images_to_physical_bounds" in called_names
+
+
+def test_each_proximal_disk_keeps_its_own_largest_component():
+    pytest.importorskip("vtk")
+    pytest.importorskip("vtkbone")
+    from ogo.fea import femur
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(femur.sidewaysFallFe)))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name)
+             and node.func.id == "generate_projected_material_disk_vtk"]
+    assert len(calls) == 2
+    for call in calls:
+        options = {keyword.arg: keyword.value for keyword in call.keywords}
+        assert ast.literal_eval(options["keep_largest_component"]) is True

@@ -9,6 +9,28 @@ import pytest
 from ogo.fea.review import inclusion_row, load_decisions
 
 
+def test_gallery_sorting_is_numeric_and_puts_missing_results_last(tmp_path):
+    from ogo.fea import gallery
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is required')
+    script = Path(gallery.__file__).with_name('gallery_review.js')
+    code = '''const assert = require('node:assert/strict');
+const {sortIndices} = require(SCRIPT);
+const rows = [{model_id:'case2',qc_reasons:'a;b',reaction_force_N:-100},
+ {model_id:'case10',qc_reasons:'a',reaction_force_N:''},
+ {model_id:'case1',qc_reasons:'a;a',reaction_force_N:-50}];
+assert.deepEqual(sortIndices([0,1,2],rows,'patient'),[2,0,1]);
+assert.deepEqual(sortIndices([0,1,2],rows,'flags'),[0,2,1]);
+assert.deepEqual(sortIndices([0,1,2],rows,'reaction_force_N:asc'),[2,0,1]);
+assert.deepEqual(sortIndices([0,1,2],rows,'reaction_force_N:desc'),[0,2,1]);
+'''.replace('SCRIPT', json.dumps(str(script)))
+    subprocess.run([node, '-e', code], check=True)
+    output = gallery.generate_gallery([{'site':'spine', 'model_id':'case',
+        'qc_status':'pass', 'qc_reasons':''}], tmp_path / 'gallery.html')
+    assert 'id="sort"' in output.read_text()
+
+
 def test_gallery_has_quick_decisions_on_each_card(tmp_path):
     from ogo.fea.gallery import generate_gallery
     output = tmp_path / 'gallery.html'

@@ -2942,6 +2942,7 @@ def sidewaysFallFe(args):
         thickness=pmma_thick,
         intrusion=pmma_intrusion,
         anatomy_constrained=True,
+        keep_largest_component=True,
         output_value=pmma_mat_id,
     )
     greaterTrochanterPMMA = generate_projected_material_disk_vtk(
@@ -2957,6 +2958,7 @@ def sidewaysFallFe(args):
         thickness=pmma_thick,
         intrusion=pmma_intrusion,
         anatomy_constrained=True,
+        keep_largest_component=True,
         output_value=pmma_mat_id,
     )
 

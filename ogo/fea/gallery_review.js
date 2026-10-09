@@ -65,7 +65,24 @@ function imageVisible(image, stage, camera) {
   return image.stage === stage && (image.view === camera || image.fallback === 'true');
 }
 
-if (typeof module !== 'undefined') module.exports = {inclusionRecord, encodeCSV, parseCSV, validateReviews, imageVisible};
+function sortIndices(indices, rows, mode) {
+  const patient = (a, b) => rows[a].model_id.localeCompare(rows[b].model_id, undefined, {numeric: true});
+  const count = row => new Set((row.qc_reasons || '').split(';').filter(Boolean)).size;
+  return [...indices].sort((a, b) => {
+    if (mode === 'patient') return patient(a, b);
+    if (mode === 'flags') return count(rows[b]) - count(rows[a]) || patient(a, b);
+    const [key, order] = mode.split(':');
+    const value = row => {
+      const raw = row[key];
+      return raw === '' || raw == null || !Number.isFinite(Number(raw)) ? null : Math.abs(Number(raw));
+    };
+    const x = value(rows[a]), y = value(rows[b]);
+    if (x === null || y === null) return x === y ? patient(a, b) : x === null ? 1 : -1;
+    return (order === 'desc' ? y - x : x - y) || patient(a, b);
+  });
+}
+
+if (typeof module !== 'undefined') module.exports = {inclusionRecord, encodeCSV, parseCSV, validateReviews, imageVisible, sortIndices};
 
 if (typeof document !== 'undefined') {
   const data = JSON.parse(document.getElementById('review-data').textContent);
@@ -88,10 +105,15 @@ if (typeof document !== 'undefined') {
   }
   function refresh() {
     let visible = 0;
+    const cards = [...document.querySelectorAll('article')];
+    const byIndex = new Map(cards.map(card => [Number(card.dataset.index), card]));
+    for (const index of sortIndices([...byIndex.keys()], rows, $('sort').value)) {
+      document.querySelector('main').append(byIndex.get(index));
+    }
     for (const card of document.querySelectorAll('article')) {
       const row = rows[Number(card.dataset.index)], record = inclusionRecord(row, decisions.get(decisionKey(row)));
       card.querySelector('.automatic').textContent = 'Automatic: ' + row.qc_status + (row.qc_reasons ? ': ' + row.qc_reasons : '');
-      card.querySelector('.decision').textContent = 'Study: ' + record.final_inclusion + (record.manual_decision !== 'automatic' ? ' (manual)' : '');
+      card.querySelector('.decision').textContent = record.manual_decision === 'exclude' ? 'Manually excluded' : 'Study: ' + record.final_inclusion + (record.manual_decision !== 'automatic' ? ' (manual)' : '');
       for (const button of card.querySelectorAll('.quick-decision')) {
         button.setAttribute('aria-pressed', String(record.manual_decision === button.dataset.decision));
         button.style.fontWeight = record.manual_decision === button.dataset.decision ? '700' : '400';
@@ -144,7 +166,7 @@ if (typeof document !== 'undefined') {
       persist(); refresh();
     });
   }
-  for (const id of ['search', 'site', 'status', 'reason', 'inclusion', 'stage', 'camera']) $(id).addEventListener('input', refresh);
+  for (const id of ['search', 'site', 'status', 'reason', 'inclusion', 'stage', 'camera', 'sort']) $(id).addEventListener('input', refresh);
   for (const id of ['stage', 'camera']) $('review-' + id).addEventListener('change', () => {
     $(id).value = $('review-' + id).value;
     refresh();
