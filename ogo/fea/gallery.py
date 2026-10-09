@@ -37,6 +37,7 @@ def _camera_images(path, output):
 
 
 def generate_gallery(rows, output, decisions=None, image_root=None):
+    """Write a paginated review gallery from measurements and saved decisions."""
     output = Path(output).absolute()
     rows = [dict(row) for row in rows]
     outcome_keys = ('stiffness_N_per_mm', 'reaction_force_N', 'pistoia_failure_load_N',

@@ -1,41 +1,8 @@
-"""Femur-specific defaults and helpers for sideways-fall FE generation.
+"""Sideways-fall femur models: registration, GT-based shaft crop and supports.
 
-Shared point-cloud and boundary-contact primitives live in ``alignment`` and
-``boundary``. They are re-exported here so older femur workflow imports keep
-working while this module stays focused on femur defaults and femur-only
-geometry.
-
-Default femur workflow:
-1. Read the calibrated density image and whole-femur mask. The public wrapper
-   chooses left/right from ``--side`` and the lower-level script uses
-   ``femur_side=1`` for left and ``2`` for right.
-2. Run ICP to the bundled side-specific femur reference from the cropped and
-   padded input geometry, then build an explicit reference-frame output grid
-   from the transformed femur surface. Density is resampled with B-spline
-   interpolation; bone, crop-face, and compartment labels use nearest-neighbor
-   interpolation on the same grid.
-3. Smooth the transformed femur mask with one binary close/open pass only when
-   at least one input spacing dimension is coarser than 2 mm. If a compartment
-   mask is supplied, the derived cortical binary mask follows the same rule.
-4. Stabilize registration with a fixed 120 mm proximal rough crop after
-   isotropic resampling. After ICP, apply the final flat distal crop on the
-   transformed full scan so the shaft extends the requested length distal to the edge
-   of the greater-trochanter PMMA support. This final crop face becomes the
-   distal support surface.
-5. Generate two geometric PMMA fixtures from proximal contact planes:
-   a femoral-head loading fixture on the high-y side and a greater-trochanter
-   contact fixture on the low-y side. Defaults are 10 mm PMMA thickness and
-   6 mm intrusion through that fixed thickness. The fixture footprints are
-   anchored at the proximal femur so they cannot contact the distal shaft crop
-   face, and the fixture masks themselves do not overwrite bone voxels.
-6. Apply sideways-fall boundary conditions: prescribed displacement at the
-   femoral-head PMMA cap toward the greater trochanter, loading-direction
-   constraint at the greater-trochanter PMMA cap, and distal shaft constraints
-   to remove rigid-body motion.
-7. Build materials with the same shared bone/PMMA material-table helper used by
-   the spine workflow. If no compartment mask is supplied, femur bone is one
-   trabecular-style region. If supplied, cortical=1 and trabecular=2 by default.
-"""
+Density uses cubic interpolation and labels use nearest-neighbor. Shared
+geometry helpers live in alignment and boundary; the ogoFEA wrapper solves
+and reports results. See docs/fea/implementation.md for the code map."""
 
 from pathlib import Path
 
@@ -2333,6 +2300,7 @@ from ogo.util.echo_arguments import echo_arguments
 
 
 def remove_extension(filename):
+    """Remove all filename suffixes, including compound NIfTI extensions."""
     while True:
         filename, ext = os.path.splitext(filename)
         if not ext:
@@ -2343,6 +2311,7 @@ def remove_extension(filename):
 ##
 # Start script
 def sidewaysFallFe(args):
+    """Build a sideways-fall model and its shaft geometry and QC sidecars."""
     ogo.message("Start of Script...")
 
     ##
@@ -3229,7 +3198,7 @@ def sidewaysFallFe(args):
 
 
 def main():
-     # Setup description
+    """Parse anatomy-builder arguments and generate a sideways-fall femur model."""
     description='''
 This script sets up the sideways fall FE model on the hip from the
         density (K2HPO4) calibrated image. This script sets up the model for either a left or

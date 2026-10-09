@@ -40,6 +40,7 @@ def load_evidence(path):
 
 
 def evidence_paths(path, evidence=None):
+    """Resolve registered-mask and geometry sidecars, allowing explicit overrides."""
     path = Path(path)
     return {key: Path((evidence or {}).get(key) or path.with_name(path.stem + suffix))
             for key, suffix in SUFFIXES.items()}
@@ -57,6 +58,7 @@ def evidence_signature(path, evidence=None):
 
 
 def needs_backfill(path, row, evidence=None):
+    """Check whether legacy measurements are missing or their evidence changed."""
     if not row:
         return True
     if not row.get('measurement_source', '').startswith('legacy_backfill'):
@@ -111,6 +113,7 @@ def registered_anatomy(grid, spacing, origin, body_path, process_path=None):
 
 
 def backfill_measurements(path, site=None, evidence=None):
+    """Recover QC measurements from a saved model without modifying its geometry."""
     import vtkbone
     from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtkIdTypeArray
 

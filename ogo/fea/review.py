@@ -11,10 +11,12 @@ FIELDS = ('model_id', 'site', 'model_path', 'automatic_qc_status', 'automatic_qc
 
 
 def identity(row):
+    """Return the site and model ID used to match review decisions."""
     return (row['site'], row['model_id'])
 
 
 def inclusion_row(measurement, decision=None):
+    """Combine automatic QC with a manual decision, retaining both for provenance."""
     decision = decision or {}
     manual = decision.get('manual_decision') or 'automatic'
     if manual not in ('automatic', 'include', 'exclude'):
@@ -50,6 +52,7 @@ def load_decisions(path):
 
 
 def write_inclusion(rows, path, decisions=None):
+    """Write study decisions separately from the model measurement CSV."""
     decisions = decisions or {}
     with open(path, 'w', newline='') as stream:
         writer = csv.DictWriter(stream, fieldnames=FIELDS)

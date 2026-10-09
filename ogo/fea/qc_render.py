@@ -46,6 +46,7 @@ def smooth_bone_sed(values, indices, bone, spacing):
 
 def preview(model_path, output_dir, site, body_mask=None, view="oblique", sed=False,
             model_override=None, ineligible=False):
+    """Render one model view with anatomy or SED colours and coloured supports."""
     start = perf_counter()
     if model_override is None:
         reader = vtkbone.vtkboneN88ModelReader()

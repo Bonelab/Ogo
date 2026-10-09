@@ -1,1057 +1,150 @@
-# Ogo FEA Workflow
+# Hip and spine FEA
 
-This directory contains the maintained model-building code used by
-`ogoFEA`. The user-facing entry point is the CLI in
-`ogo/cli/GenerateFEM.py`; the lower-level spine and femur modules in this
-directory should stay implementation details.
+`ogoFEA` generates, checks and solves N88 models from calibrated QCT and
+segmentations. Start with the [installation and L1 example](../../docs/fea/vertebra_fea_quickstart.md).
+For implementation details, see the [code map](../../docs/fea/implementation.md).
 
-The workflow builders are organized by anatomy:
+## Run a model
 
-- `spine.py` owns spine-compression defaults, preprocessing, model building,
-  and the lower-level spine command parser.
-- `femur.py` owns hip sideways-fall defaults, preprocessing, model building,
-  and the lower-level femur command parser.
-- Shared helper modules such as `alignment.py`, `boundary.py`, `materials.py`,
-  and `model.py` contain reusable mechanics used by both anatomy workflows.
-
-## Automatic Model QC
-
-Both anatomy workflows save one three-view anatomy panel (`*_qc_3d.webp`)
-after model generation. The FAIM adapter saves a corresponding solved SED
-panel (`*_sed_3d.webp`) after successful processing of a hip or spine model.
-The views use `ogo.cli.Visualize.vis3d`: white background, opaque bone and
-gold PMMA supports, with constrained surface-adjacent voxel layers in red.
-Individual views are framed independently. Numerical BC checks remain in CSV;
-the former automatic slice PNG is no longer generated.
-
-Hips rejected for insufficient shaft coverage also receive the anatomy panel
-of their available aligned bone and supports. They retain `too_short` in the
-shaft-geometry JSON, have no artificial distal BC, and are not solved. These
-images do not imply that the requested shaft length was retained.
-
-SED uses a linear Jet scale, shared across the three views, from zero to the
-99th percentile of bone-element SED. A bone-masked Gaussian (sigma 0.8 mm)
-and light surface smoothing improve display only; FE arrays and results are
-unchanged. Review images use WebP (quality 85) at 600 x 1092 pixels; individual
-gallery views are 600 x 364 pixels. Legacy 1400 x 2550 panels remain supported.
-These compact lossy images are for QC, not
-quantitative analysis or publication. Each image has a JSON sidecar recording
-display settings and compression. Existing PNG previews remain supported. Spine
-generation retains `*_qc_body_mask.nii.gz` in model coordinates for consistent
-body/process colouring after solving. Temporary individual renders are removed.
-
-Rendering needs a working graphics backend (X display, EGL/OSMesa, or native
-macOS VTK). Graphics failures produce a warning rather than invalidate a
-numerical model. Rendering is implemented in `ogo/fea/qc_render.py`.
-
-### Measurement-Based Audit And Gallery
-
-Generation writes `*_qc_metrics.csv` while the model is still in memory,
-including hips rejected as `too_short`. These CSVs are independent of rendering:
-an unavailable graphics backend does not prevent geometric measurement.
-The file contains one row per model; missing measurements are blank, not zero.
-When SED is loaded for the solved preview, finite/nonnegative SED checks are
-added to the same row without replacing the generation measurements.
+Inputs are NIfTI images in the same physical space. QCT density must be in
+mg/cm3 K2HPO4-equivalent units, not HU. Spine labels identify the body and
+posterior process separately; a hip mask contains the selected whole femur.
+Label numbers are dataset-specific.
 
 ```bash
-ogoValidateFEA derivatives/fea --output derivatives/fea/qc --gallery
+# L1: body label 20, process label 48; also evaluate body-only Pistoia.
+ogoFEA spine qct.nii.gz labels.nii.gz --vertebra L1:20:48 \
+  --pistoia_mask_label 20 --critical_volume 12 --masked_critical_volume 35 \
+  --critical_strain 0.007 --threads 4 --output_path derivatives/fea
+
+# Left femur with a separate femoral-neck mask.
+ogoFEA hip qct.nii.gz left_femur.nii.gz --side left \
+  --pistoia_mask femoral_neck.nii.gz --critical_volume 11.2 \
+  --masked_critical_volume 35 --critical_strain 0.009 \
+  --threads 4 --output_path derivatives/fea
 ```
 
-The command reuses generation measurement CSVs without opening `.n88model` files.
-For older models without a CSV, it reads the model once, reconstructs available
-measurements, and saves a sidecar with `measurement_source=legacy_backfill`.
-Provide `--site hip` or `--site spine` if the loading axis cannot identify anatomy.
-Recovered boundary sets are recorded and exist only in memory; models are not
-rewritten. Hip coverage is recovered from `*_shaft_geometry.json`; its saved
-crop plane also disambiguates distal nodes from combined GT/shaft constraints.
-Spine anatomy is recovered from registered `*_qc_body_mask.nii.gz` and optional
-`*_qc_process_mask.nii.gz`. When process is absent, it is measured as model bone
-minus registered body, with that derivation explicitly recorded. Masks must
-match the FE voxel lattice and have at least 95% overlap with model bone.
-Native-space segmentations are not accepted without prior registration.
+A regional mask enables both full-bone and masked Pistoia. Without a mask,
+add `--run_pistoia` for full-bone results. `--require_pistoia` makes a failed
+Pistoia calculation fatal. `--pistoia_mask_label` without a separate mask
+selects labels from the input segmentation; repeat it for multiple labels.
+Without label selection, all nonzero mask voxels are included.
 
-For files stored elsewhere, supply `--evidence evidence.csv`:
+Useful options:
 
-```csv
-site,model_id,body_mask,process_mask,shaft_geometry
-spine,sub-001_L1,registered/sub-001_body.nii.gz,,
-hip,sub-001_LF,,,geometry/sub-001_shaft_geometry.json
-```
+- `--no-solve`: generate the model and QC without FAIM.
+- `--dry-run`: print generator/solver commands without writing models.
+- `--vertebra`: repeat for additional levels; format `LEVEL:BODY:PROCESS`.
+- `--side`: `left`, `right` or `both` (default both); choose explicitly.
+- `--threads`: per-job generation and solver threads, not parallel cases.
 
-Paths are relative to this CSV (absolute paths are also supported). Do not list
-a Pistoia mask as `body_mask` unless its provenance confirms it is the registered
-vertebral body: the filename alone does not identify the anatomical region.
-Recovered evidence sources and derivations are recorded in the measurement CSV.
-Legacy backfill is cached using its version and input paths, sizes, and modification
-times. Adding or changing evidence automatically refreshes a legacy CSV once;
-unchanged unresolved models are not repeatedly reopened. Use `--workers 4` for
-bounded process-parallel backfill; auditing cached CSVs remains lightweight.
+Use `ogoFEA spine --help` or `ogoFEA hip --help` for wrapper options.
+Additional options are forwarded to the anatomy builder; its help is available
+with `python -m ogo.fea.spine --help` or `python -m ogo.fea.femur --help`.
 
-Original scan coverage and other unrecoverable quantities remain missing and
-require review. An unreadable model
-is retained as a review row with its reconstruction error, not silently dropped.
-The command writes
-`qc_summary.csv`; `--gallery` additionally writes a standalone `gallery.html`.
-Without a refreshed editable installation, use `python -m ogo.cli.ValidateFEA`.
-The gallery supports anatomy, QC status, subject search, and anatomy/SED
-view selection, with expandable measurement tables. A separate camera selector
-shows oblique/side, top, bottom, or all views in both thumbnails and the review
-dialog. The fixed three-row Ogo renders are split once into cached WebP images in
-`gallery_views/`; unrecognized legacy layouts remain full montages. Image files
-remain external; retain their relative location and the view-assets folder when
-copying the gallery and models together.
+## Solver setup
 
-The initial page shows 50 models; select 100, 250, or 500 per page. Only that page
-is rendered. Cached 420-pixel WebP thumbnails are loaded ahead of scrolling;
-opening Review uses the original-resolution view. Measurement tables are built
-only when expanded. Export always includes the entire cohort, not just the page.
-The Exclude flags dropdown has checkboxes: checking a flag hides matching cases
-without changing their QC or study decisions. "Not manually reviewed" refers to
-cases without an explicit manual include/exclude decision. Include/exclude saves
-preserve your scroll position. Filtering can remove a card from the current page.
+FAIM/N88 tools must be on `PATH`, or supplied through `--faim_bin_dir DIR`,
+`--faim_install_root DIR` or `--faim_env ENV`. Individual command overrides
+are also available. Ogo does not search the filesystem for installations.
+Use `--faim_license_dir DIR` when the license is not already configured.
+On ARC, `source /work/boyd_lab/conda_init/ogo_fea.sh` configures the shared
+environment; run generation and solving on a compute node.
 
-Sort by patient ID, number of QC flags, or stiffness, reaction force and full or
-regional failure load (lowest/highest first). Force sorting uses absolute
-magnitudes; missing outcomes are last. Sorting never changes inclusion. Manual
-exclusions are labelled "Manually excluded" independently of automatic QC.
+## Model conventions
 
-For sharing, export one portable ZIP instead:
+Both workflows use 1-mm voxels, cubic density interpolation and nearest-neighbor
+labels. Reference scaling estimates registration; the solved subject geometry
+is transformed rigidly, not scaled.
 
-```bash
-ogoValidateFEA derivatives/fea --output derivatives/fea/qc --gallery-zip --workers 4
-```
-
-Extract `gallery.zip` and open `gallery.html`. It includes `images/`,
-`gallery_views/`, `gallery_thumbnails/`, `qc_summary.csv`, and the initial `study_inclusion.csv`.
-No original model directory or server is needed to review it. Model files are
-not included; original model paths remain in the CSV as provenance. Legacy PNGs
-are converted to compact WebP images inside the ZIP without modifying their
-originals. Both solve stages and all available camera views are retained. Missing images remain
-missing. Large cohorts use lazy-loaded image files rather than embedded HTML.
-
-For study-specific full-size L1 resegmentation and recovery of excluded or
-incomplete cases, see [the cohort recovery example](../../examples/fea/cohort_recovery/README.md).
-It preserves prior results and builds a fresh review gallery; it does not
-automatically reinstate rerun cases.
-After review, export the updated inclusion CSV from the gallery; browser
-decisions cannot rewrite the CSV inside the original ZIP.
-The export popup directs users to browser downloads and explicitly states that
-the project CSV is unchanged. Import the downloaded CSV to resume its decisions.
-
-Include and Exclude on each gallery card record a quick decision with reason
-`manual_review`, reviewer, and UTC timestamp. Use Review for a specific reason
-or explanation. The hip side view looks toward the distal cut to expose its
-boundary while retaining the shaft profile, before and after solving.
-
-Hip distal coverage QC uses the recipe's central 90%-width support patch, not
-the entire irregular bone cross-section. New measurements must show complete
-coverage of that intended patch. Full-face area and coverage remain in the CSV
-for inspection. Older CSVs without patch measurements use a minimum full-face
-coverage of 89%; legacy backfill refreshes them with the explicit patch check.
-Flat-cut, shaft-length, and X/Z fixation checks remain separate.
-
-Click a model name, image, or Review to open its measurements and views. Include
-and Exclude override the study decision only; Reset to automatic clears that
-override. Choose a reason and optionally add an explanation. The default reason
-is `manual_review`. Reviewer name/initials and UTC review time are recorded;
-missing reviewer names are explicitly recorded as `unspecified`.
-
-The gallery exports `study_inclusion.csv` with automatic QC, manual decisions,
-reasons, notes, and final inclusion. Automatic passes default to inclusion,
-failures to exclusion, and review cases to pending. A manually included too-short
-model remains ineligible for solving. Browser autosave is a convenience scoped
-to the audited dataset, not the durable study record: export the CSV before
-closing. Import CSV resumes review in the gallery. To regenerate a gallery with
-the same review decisions, use:
-
-```bash
-ogoValidateFEA derivatives/fea --output derivatives/fea/qc --gallery \
-  --reviews study_inclusion.csv
-```
-
-The CLI also writes an initial `study_inclusion.csv`. Browser exports reflect
-subsequent clicks and do not overwrite the server-side file automatically.
-Duplicate site/model-ID pairs are rejected; audit separate length runs/cohorts
-separately. Unknown imported identities are rejected rather than ignored.
-
-Measurements include bone/disk volumes and face-connected components, disk axial
-contact footprint area/fraction and connectivity, disk axial thickness percentiles,
-boundary-node counts/extents/centroids, loading direction, and hip available,
-requested, and measured shaft lengths and distal BC coverage.
-For hip, `shaft_bc_node_count` is the distal node-set size; separate
-`shaft_bc_fixed_x_node_count` and `shaft_bc_fixed_z_node_count` count those
-same nodes actually fixed at zero displacement along each required axis.
-Incomplete fixation is a failure, independently of distal face coverage.
-Spine records
-aligned body/process dimensions, volumes, components, and centroid offsets.
-Registration rotation is recorded, but a large rotation alone does not fail QC.
-Disk numbers follow spatial component order, not guaranteed anatomical names.
-Contact area counts projected axial shared faces, not the whole endplate fraction.
-
-Policy version 1 fails construction violations: insufficient length, missing BC,
-incorrect disk count, noncompressive loading, nonplanar axial/distal BC,
-incorrect shaft length, incomplete distal section/BC, zero axial disk contact,
-or invalid available SED. Disconnected bone/contact footprints, process-vector
-orientation concerns, and missing required measurements trigger `review`.
-`pass` means the implemented construction tests passed, not that every possible
-anatomical error has been excluded. No strength-based thresholds are used.
-
-Registration surface distances, true support penetration/trim-depth distributions,
-and solver force balance are not yet included. These need validated measurement
-definitions before adding thresholds. Generation measurements are reused;
-cached legacy measurements refresh when the backfill version or supplied
-evidence changes. Legacy backfill does not generate missing preview images.
-Failures before an FE mesh exists require the job manifest/log for participant flow.
-Implementation: `ogo/fea/validation.py`; CLI: `ogo/cli/ValidateFEA.py`.
-
-## Inputs
-
-All FEA workflows expect a density-calibrated CT image and an aligned
-segmentation image.
-
-The calibrated image should be a scalar image in K2HPO4-equivalent density
-units, with the same image space as the segmentation. During model generation,
-the image is cropped, aligned to the model reference frame, resampled to
-isotropic spacing, thresholded at -31 mg/cc, and converted to material IDs.
-
-The segmentation depends on the model type:
-
-| Model | Required mask | Label convention |
+| Setting | Hip sideways fall | Spine compression |
 | --- | --- | --- |
-| Spine compression | Labelled vertebra mask | Provide the vertebral body label and posterior process label for each target as `LEVEL:BODY_LABEL:PROCESS_LABEL`. |
-| Hip sideways fall | Whole-femur mask | Nonzero voxels are the femur by default. The wrapper chooses left/right from `--side`. |
-| Hip with trab/cort compartments | Whole-femur mask plus `--compartment_mask` | Compartment mask defaults are cortical `1`, trabecular `2`; override with `--cortical_label` and `--trabecular_label` if needed. |
+| Registration | NumPy ICP, 40,000 points, four axial starts | Centroid-initialized NumPy ICP, 8,000 points, 50 iterations |
+| Target | Side-specific femur surface | L4 body surface |
+| PMMA thickness / intrusion | 10 / 6 mm | 10 / 6 mm |
+| Bone / PMMA Poisson ratio | 0.3 / 0.3 | 0.3 / 0.3 |
+| PMMA modulus | 2500 MPa | 2500 MPa |
+| Reporting endpoint | 4% of model span along loading axis | 0.68% of top-to-bottom BC-centroid distance |
+| Full-bone Pistoia default | 11.2% volume, EES 0.009 | 2% volume, EES 0.007 |
 
-The spine mask must contain both the body and posterior process labels. The
-femur workflow currently requires a side-specific run because alignment uses a
-side-specific femur reference frame.
+The spine command above explicitly uses 12%, rather than the generic 2%
+fallback. Regional critical volume inherits the full-bone value unless set
+with `--masked_critical_volume`; it is not automatically 35%.
+Critical volume is a percentage; critical strain is a dimensionless fraction.
+These are analysis choices, not universally validated failure thresholds.
 
-## Implementation Walkthrough
+Hip registration uses a 120-mm proximal rough crop, then returns to the
+transformed full scan. Proximal supports are built before the flat distal crop.
+The default shaft is 10 mm distal to the generated GT support edge, after
+clearing the transformed incomplete scan end. Final length is verified from
+GT and distal BC nodes. Insufficient coverage is recorded as `too_short` and
+is not solved. `--femur_greater_trochanter_distal_length` changes this length;
+the 11.2% criterion is specific to the 10-mm protocol, not other lengths.
 
-The high-level command is `ogoFEA`, implemented in `ogo/cli/GenerateFEM.py`.
-That file is intentionally the best starting point for a new developer because
-it owns the user-facing arguments, the lower-level anatomy command construction,
-the solve/reporting path, and the `_modeling.json` provenance record.
+Spine keeps the largest face-connected body component without changing process
+labels. Registration rejects implausible axial/process rotations rather than
+returning a least-bad fit. Caps use axial body contact, small-tip trimming,
+gap closing and largest-component retention without overwriting bone. Default
+trim fraction is 0.10, minimum shift 3 mm. See `boundary.py` and the
+`DEFAULT_SPINE_STABLE_CONTACT_*` constants for the exact construction.
+Optional `--registration_backend vtk` and `--spine_icp_target vertebra` are
+available; whole-vertebra ICP requires a matching aligned reference surface.
 
-Use this map when tracing a run:
+For linear materials, the hip converts QCT to ash density
+`rho_ash = 1.06 * rho_QCT + 0.0389` (g/cm3), then uses
+`E = 10500 * rho_ash^2.29` MPa. The default spine `benchmark-linear` preset
+uses `E = 2980 * rho_QCT^1.05` MPa without ash conversion. Named laws are in
+`material_laws.py`; `--elastic_E_func` overrides the law. Spine also supports
+`benchmark-nonlinear` (yield materials, 4% endpoint) and `none` presets;
+do not mix these with linear reference results.
 
-| Question | Main code location |
+## Outputs and QC
+
+| Suffix | Contents |
 | --- | --- |
-| Which command-line options are exposed? | `ogo/cli/GenerateFEM.py::build_parser` |
-| How does `ogoFEA spine` become a lower-level model-builder call? | `ogo/cli/GenerateFEM.py::build_spine_command` |
-| How does `ogoFEA hip` become a lower-level model-builder call? | `ogo/cli/GenerateFEM.py::build_femur_command` |
-| Where are solve endpoints, Pistoia settings, and result columns selected? | `ogo/cli/GenerateFEM.py::solve_report_profile`, `critical_volume_percent`, `solve_model` |
-| Where is model provenance written? | `ogo/cli/GenerateFEM.py::write_modeling_metadata` |
-| Where is the generated `.n88model` audited? | `ogo/cli/GenerateFEM.py::audit_generated_model`, `ogo/cli/CheckFEModelBC.py` |
+| `.n88model` | Generated model, updated with solution fields after solving |
+| `_results.csv` | Reaction force, stiffness and requested Pistoia results |
+| `_modeling.json` | Inputs, processing, materials, BCs and solver settings |
+| `_qc_metrics.csv` | Generation measurements, extended with solved SED checks |
+| `_qc_3d.webp`, `_sed_3d.webp` | Before/after three-view previews |
+| `_shaft_geometry.json` | Hip available, requested and verified retained length |
+| `_pistoia_mask.nii.gz` | Regional mask transformed into model coordinates |
 
-The anatomy-specific implementation is split below the CLI:
+CSV forces are in N and stiffness in N/mm; Pistoia also has kN fields.
+Reaction-force sign follows the model convention; use magnitudes for comparisons.
+Linear stiffness is reaction-force magnitude divided by applied displacement;
+Pistoia stiffness is reported separately. Missing results are blank, not zero.
 
-| Anatomy | Main file | What belongs there |
-| --- | --- | --- |
-| Spine compression | `ogo/fea/spine.py` | Vertebra labels, body/process QC, dense NumPy spine ICP, 1 mm resampling, stable PMMA cap generation, axial compression defaults. |
-| Hip sideways fall | `ogo/fea/femur.py` | Side handling, femur reference alignment, rough pre-ICP crop, post-ICP GT-length crop, femoral-head/GT/distal supports, sideways-fall defaults. |
-| Shared material tables | `ogo/fea/materials.py` | Bone material ID ranges, PMMA material, shared femur/spine material-table construction. |
-| Material laws | `ogo/fea/material_laws.py` | Density-to-modulus and yield-strength functions such as `default_E` and `kopperdahl_trab_E`. |
-| Shared geometry/BC helpers | `ogo/fea/boundary.py` | Resampling helpers, projected material disks, PMMA caps, contact footprint calculations. |
-| N88 model writing | `ogo/fea/model.py` | `create_microfe_model` and `write_model`. |
-| FAIM/N88 adapter | `ogo/util/faim.py` | Solver command resolution, running `faim`/N88 tools, Pistoia parsing, masked Pistoia, compact `_results.csv`. |
-
-For spine, the maintained path is:
-
-1. `GenerateFEM.py::build_spine_command` forwards the calibrated image,
-   segmentation, target `LEVEL:BODY_LABEL:PROCESS_LABEL`, preset, optional
-   Pistoia mask, and any lower-level overrides.
-2. `spine.py::clean_body_component` keeps the largest face-connected component
-   of the requested body label before registration and support construction.
-   Other labels, including the posterior process, are unchanged. The QC CSV
-   records the original component count, removed voxels, removed volume, and
-   removed body fraction. Removal of more than 5% triggers
-   `substantial_body_cleanup` for manual review, not automatic exclusion. This
-   conservative triage threshold is not a validated anatomical cutoff. Cleanup
-   cannot repair wrongly labelled anatomy connected to the main body.
-   `spine.py::main` then thresholds the body/process labels, crops around
-   the vertebra, checks posterior-process orientation, and runs scaled ICP to
-   the selected reference surface from `default_spine_reference_path`. The
-   maintained default `--spine_icp_target body` uses only the vertebral body
-   label and the bundled `L4_BODY_SPINE_COMPRESSION_REF.vtk` surface. The
-   optional `--spine_icp_target vertebra` uses the body plus posterior-process
-   labels and requires a matching full-vertebra reference surface. The default
-   backend is deterministic NumPy ICP with 8,000 surface points and 50
-   iterations. Alternate PCA-start rescue attempts are evaluated when
-   process-vector QC flags an implausible orientation. VTK ICP remains an
-   optional sensitivity check, not the maintained default.
-3. `spine.py` applies the transform and resamples the density image with cubic
-   interpolation and labels/masks with nearest-neighbor interpolation.
-4. `boundary.py::generate_bone_cap_mask` and related helpers generate superior
-   and inferior PMMA caps. The stable-contact settings are defined by
-   `DEFAULT_SPINE_STABLE_CONTACT_*` constants in `spine.py`.
-5. `materials.py::build_spine_material_table` assigns bone and PMMA material
-   definitions. The default benchmark linear preset uses
-   `material_laws.kopperdahl_trab_E`.
-6. `model.py::create_microfe_model` writes the N88 model structure, and the
-   high-level wrapper solves at the selected endpoint, defaulting to Crawford
-   `0.68%` strain for the maintained linear spine workflow.
-
-For hip, the maintained short-femur path is:
-
-1. `GenerateFEM.py::build_femur_command` forwards side, optional compartment
-   mask, optional Pistoia mask, and the femur crop settings.
-2. `femur.py::main` selects the side-specific femur mask and aligns it to the
-   bundled left or mirrored-right reference. The fixed rough crop for ICP
-   stability is controlled by `DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM`.
-3. The rough crop is used only for the ICP
-   estimate. The final model is then regenerated from the transformed full scan.
-4. `femur.py::proximal_sideways_fall_fixture_plane` and
-   `boundary.py::generate_projected_material_disk_vtk` create the femoral-head
-   and greater-trochanter PMMA supports on the full aligned femur.
-5. `femur.py::crop_vtk_images_to_greater_trochanter_length` measures the actual
-   generated GT disk's distal voxel face and applies the final flat shaft crop
-   the requested length distal to it. Before accepting the length, the usable
-   distal face must clear the entire transformed native scan end, removing
-   oblique-tail coverage. The fixture box is not a substitute for the disk edge.
-   Proximal supports stay unchanged, and the external crop face becomes the
-   distal shaft support. `_shaft_geometry.json` records the available coverage
-   and the final crop coordinates. Insufficient coverage stops model generation.
-6. `materials.py::build_femur_material_table` assigns bone and PMMA material
-   definitions. The simple whole-femur path uses one trabecular-style bone
-   region unless a compartment mask is supplied.
-7. The high-level wrapper solves and reports the maintained hip endpoint,
-   defaulting to `4%` displacement.
-
-The most important short-femur convention is the final shaft-length definition.
-The requested value is the distance between
-the final GT support and the final distal shaft boundary condition. The audit in
-`ogo/cli/CheckFEModelBC.py::audit_femur_sideways` reports the model-space
-measurement as:
-
-```text
-min(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
-```
-
-This is deliberately a boundary-condition measurement. It verifies the
-mechanical model that FAIM/N88 will solve rather than an intermediate crop
-coordinate.
-
-## Basic Commands
-
-### Recommended Spine Command
-
-For a standard solved L1 compression model, run the high-level wrapper. This
-generates the `.n88model`, audits the boundary conditions, solves it with
-FAIM/N88, runs optional Pistoia postprocessing, and writes a compact
-`_results.csv` next to the model:
+Previews use white backgrounds, gold supports and red constrained surfaces.
+Solved bone uses a shared linear Jet SED scale. Display smoothing does not
+change FE results. A graphics failure warns but does not invalidate the model.
+Compact WebP previews are for QC, not quantitative analysis. Legacy PNGs are
+supported. Too-short hips receive an available-anatomy preview, not a solved model.
 
 ```bash
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:2:3 \
-  --output_path derivatives/fea \
-  --threads 4 \
-  --faim_bin_dir /path/to/n88/bin \
-  --run_pistoia \
-  --critical_volume 12 \
-  --critical_strain 0.007
+ogoValidateFEA derivatives/fea --output derivatives/qc --gallery-zip --workers 4
 ```
 
-The `--vertebra` value is `LEVEL:BODY_LABEL:PROCESS_LABEL`. For example,
-`L1:2:3` means that label `2` is the L1 vertebral body and label `3` is the L1
-posterior process. Repeat `--vertebra` to process more than one level from the
-same image.
-
-To additionally report Pistoia for an ROI such as the vertebral body, pass a
-mask in the same image space as the calibrated CT and segmentation:
-
-```bash
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:2:3 \
-  --pistoia_mask sub-001_desc-L1Body_mask.nii.gz \
-  --output_path derivatives/fea \
-  --threads 4 \
-  --faim_bin_dir /path/to/n88/bin \
-  --run_pistoia \
-  --critical_volume 12 \
-  --critical_strain 0.007
-```
-
-Ogo transforms this ROI mask through the same preprocessing, alignment,
-resampling, and padding steps as the model, then writes the model-space mask as
-`<model-stem>_pistoia_mask.nii.gz`. The `_results.csv` includes both full-model
-Pistoia fields and `masked_pistoia_*` fields when a mask is supplied.
-
-If the ROI is already a label inside the main segmentation, keep the workflow
-less error-prone by selecting that label directly. For example, if label `20`
-is the L1 vertebral body and label `48` is the posterior process, this command
-uses the main segmentation as the Pistoia ROI source but keeps only label `20`
-for masked Pistoia:
-
-```bash
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:20:48 \
-  --pistoia_mask_label 20 \
-  --output_path derivatives/fea \
-  --threads 4 \
-  --run_pistoia \
-  --critical_volume 12 \
-  --critical_strain 0.007
-```
-
-When `--pistoia_mask_label` is supplied without `--pistoia_mask`, the main
-`bone_mask` is used as the ROI source. Repeat `--pistoia_mask_label` to keep a
-multi-label ROI. Without any label selection, `--pistoia_mask` remains a binary
-mask: every nonzero voxel in that mask is included.
-
-Generate and solve one L1 model:
-
-```bash
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:2:3 \
-  --output_path derivatives/fea
-```
-
-Generate L1 and L2 in one command:
-
-```bash
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:2:3 \
-  --vertebra L2:4:5 \
-  --output_path derivatives/fea
-```
-
-Generate only the model files, without running FAIM:
-
-```bash
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:2:3 \
-  --output_path derivatives/fea \
-  --no-solve
-```
-
-Generate the left femur:
-
-```bash
-ogoFEA hip \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-leftFemur_mask.nii.gz \
-  --side left \
-  --output_path derivatives/fea
-```
-
-Generate both femurs from a mask containing both sides:
-
-```bash
-ogoFEA hip \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-femur_mask.nii.gz \
-  --side both \
-  --output_path derivatives/fea
-```
-
-Generate a femur model with an explicit trabecular/cortical compartment mask:
-
-```bash
-ogoFEA hip \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-leftFemur_mask.nii.gz \
-  --side left \
-  --compartment_mask sub-001_desc-leftFemur_compartments.nii.gz \
-  --output_path derivatives/fea
-```
-
-Use `--dry-run` to print the lower-level command without generating files.
-
-## Solver Settings
-
-By default, `ogoFEA` generates each `.n88model`, audits the boundary
-conditions, writes a `_modeling.json` record, then runs the FAIM/N88 solve and
-postprocessing.
-
-Control the FAIM thread count with `--threads`:
-
-```bash
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:2:3 \
-  --threads 8
-```
-
-This sets the FAIM solver command to use the multithreaded engine with
-`--threads=8`. It is a per-solve thread count, not a request to run multiple
-models in parallel.
-
-If Ogo and FAIM/N88 are installed in separate conda environments, activate the
-Ogo environment first and pass the FAIM environment with `--faim_env`. Ogo
-generates the `.n88model` in the current Python process, then launches each
-FAIM/N88 subprocess through `conda run -n ENV_NAME`.
-
-For example, if Ogo is installed in `ogo-dev` and FAIM/N88 is installed in
-`ogoloco-n88`:
-
-```bash
-conda activate ogo-dev
-
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:2:3 \
-  --faim_env ogoloco-n88 \
-  --threads 8
-```
-
-The same pattern works for femur:
-
-```bash
-ogoFEA hip \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-leftFemur_mask.nii.gz \
-  --side left \
-  --faim_env ogoloco-n88 \
-  --threads 8
-```
-
-Use `--conda_executable` if `conda` is not on `PATH` or if a specific conda
-install should be used. For example:
-
-```bash
-ogoFEA spine \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-spine_labels.nii.gz \
-  --vertebra L1:2:3 \
-  --faim_env ogoloco-n88 \
-  --conda_executable /path/to/conda
-```
-
-Other available solver-location options are `--faim_bin_dir`,
-`--faim_install_root`, `--faim_license_dir`, and explicit command overrides
-such as `--faim_command`, `--n88postfaim_command`, and `--n88tabulate_command`.
-Ogo does not search your filesystem for an arbitrary N88 installation. If the
-N88 commands are not already on `PATH`, use `--faim_bin_dir`, `--faim_env`, or
-the explicit command overrides.
-
-FAIM/N88 does not interpret prescribed displacement as percent strain in these
-models. The `.n88model` stores the applied displacement in millimeters. For
-spine, Ogo converts Crawford `0.68%` strain to millimeters from the generated
-vertebral height before solving, updates the model displacement, and reports
-that solved load directly. Femur reporting still converts the `4%` endpoint
-from generated model geometry for `_results.csv`.
-
-## Outputs
-
-The default output directory is the calibrated image directory. Use
-`--output_path` for a dedicated derivatives folder.
-
-Expected default outputs are:
-
-| Output | Meaning |
-| --- | --- |
-| `.n88model` | The generated finite-element model. |
-| `_modeling.json` | Traceable record of inputs, alignment, image processing, material laws, boundary conditions, audit summary, and reporting settings. |
-| `_results.csv` | One-row summary written after solve with stiffness, reaction force, and profile-specific force endpoints. |
-| Solve/postprocessing files | Written when `--no-solve` is not used. These come from FAIM/N88 postprocessing. |
-
-Use `--debug` to write visual sidecars such as the boundary-condition audit
-PNG. These images are intended for manual model inspection and are not part of
-the minimal output contract.
-
-## Results CSV
-
-After a successful solve, `ogoFEA` writes one compact `_results.csv` next to the
-model. This is the file intended for downstream analysis tables.
-
-Maintained spine and femur models write the same columns:
-
-| Field | Meaning |
-| --- | --- |
-| `model_file` | Source `.n88model`. |
-| `analysis_file` | FAIM/N88 postprocessing text file used to tabulate reaction force. |
-| `analysis_var` | N88 reaction-force variable tabulated from `analysis_file`. |
-| `applied_displacement` | Prescribed displacement in the solved `.n88model`. |
-| `reaction_force_N` | Reaction force from the solved model at the prescribed displacement. |
-| `stiffness_N_per_mm` | Reaction force divided by applied displacement when computable. |
-| `characteristic_length_mm` | Spine: distance between `body_top` and `body_bottom` centroids along the loading axis. Femur: full generated-model span along the loading axis. |
-
-## Reaction Force and Displacement Endpoint
-
-The reported `reaction_force_N` is the net support reaction from the solved
-model at the prescribed displacement endpoint. For spine compression this is
-tabulated from the axial `fz_ns1` reaction force. For hip sideways fall this is
-tabulated from the lateral `fy_ns1` reaction force. The sign depends on the
-model coordinate convention, so the compact CSV reports the force magnitude
-used for stiffness and downstream comparisons.
-
-The reaction force and stiffness in `_results.csv` should be interpreted at
-that endpoint. They are the relevant summary values for the chosen model
-protocol: the force is the load carried by the model at the target normalized
-displacement, and stiffness is the secant stiffness from zero displacement to
-that same endpoint. Changing the endpoint can change both values, especially
-for nonlinear material settings, so comparisons should use the same model type,
-material law, boundary conditions, and displacement endpoint.
-
-Ogo chooses percent displacement endpoints so models of different physical
-size are compared at a similar normalized deformation:
-
-| Model | Default endpoint | Length used for conversion | Reason |
-| --- | --- | --- | --- |
-| Spine compression | `0.68%` strain | Distance between `body_top` and `body_bottom` centroids along the loading axis | Matches the vertebral strength endpoint reported by Crawford et al. (2003), and keeps the solved displacement scaled to each vertebral body height. |
-| Hip sideways fall | `4%` displacement | Full generated-model span along the loading axis | Keeps the sideways-fall load endpoint scaled to each generated femur model instead of using one fixed millimeter displacement for all femora. |
-
-FAIM/N88 stores prescribed displacement in millimeters, not percent strain.
-Before solving, `ogoFEA` converts the percent endpoint to millimeters from the
-generated model geometry and updates the `.n88model`. The exact percent
-endpoint, converted millimeter displacement, and characteristic length are
-recorded in `_modeling.json`; `_results.csv` stays compact for downstream
-statistics. `stiffness_N_per_mm` is computed as
-`reaction_force_N / applied_displacement`.
-
-## Reference Models
-
-The reference models define the common coordinate frame used before meshing and
-boundary-condition placement. They are alignment targets, not subject-specific
-geometry copied into the final model.
-
-For spine compression, the bundled vertebral-body reference is an L4 body. The
-same reference is used for all requested vertebrae. Before ICP, Ogo estimates
-principal-axis lengths for the segmented body and for the L4 reference, scales
-the reference to match the target vertebra within the configured scale limits,
-and then runs rigid ICP. This lets one L4 reference provide a stable model frame
-for other vertebral levels while still adapting to their size.
-
-For hip sideways fall, the canonical bundled reference is a left femur. Left
-femur models ICP-align directly to that reference. Right femur models use
-`RT_FEMUR_SIDEWAYS_FALL_REF.vtk` when it is present; otherwise Ogo mirrors the
-left femur reference across the x direction in memory and uses that mirrored
-surface as the right-side ICP target. The mirrored reference keeps left and
-right outputs in matching sideways-fall coordinate frames without requiring a
-separate right reference file.
-
-## Spine Model
-
-The spine workflow builds one compression model per `--vertebra` target:
-
-1. Keep the largest face-connected body-label component, record the removed
-   volume, then threshold the labelled mask into body and posterior process.
-2. Crop the image and masks to the vertebra.
-3. Align the body to the scaled L4 vertebral-body reference using ICP.
-4. Apply transform and isotropic resampling through the shared VTK reslice
-   helper. The default output spacing is `1.0 x 1.0 x 1.0 mm`.
-5. Smooth body/process masks with one binary close/open pass only when at
-   least one input spacing dimension is coarser than 2 mm.
-6. Generate superior and inferior PMMA caps fitted to the body surface.
-7. Convert density to material IDs and construct the N88 model.
-8. Apply axial compression boundary conditions.
-
-Default spine boundary conditions:
-
-| Region | Node set | Constraint |
-| --- | --- | --- |
-| Superior PMMA cap | `body_top` | Prescribed displacement in the compression direction. |
-| Inferior PMMA cap | `body_bottom` | Fixed in all displacement directions. |
-
-The default high-level spine preset is `benchmark-linear`. It applies the
-spineFE benchmark linear material settings for model construction, then
-`ogoFEA` updates the generated model to solve at Crawford `0.68%` strain.
-The `0.68%` endpoint follows Crawford RP, Cann CE, Keaveny TM. Finite element
-models predict in vitro vertebral body compressive strength better than
-quantitative computed tomography. Bone. 2003;33(4):744-50.
-doi:10.1016/s8756-3282(03)00210-2.
-
-Available spine presets:
-
-| Preset | Use |
-| --- | --- |
-| `benchmark-linear` | Default linear spineFE benchmark-style run. |
-| `benchmark-nonlinear` | Nonlinear material/yield settings for benchmark-style runs. |
-| `none` | Pass only explicit lower-level options. |
-
-Spine registration can be switched without editing code. The maintained default
-uses dense deterministic NumPy ICP on the vertebral-body surface:
-
-Initialization matches centroids while retaining native physical anatomical
-directions. PCA is used to estimate reference size, not to swap registration
-axes. The rigid fit is rejected if the superior-inferior axis or body-to-process
-direction changes by more than 60 degrees, or if posterior-process QC fails
-on the final resampled and cleaned masks. This initialization applies to both
-body-only and full-vertebra registration targets.
-There are no axis-permutation retries or least-bad fallback models. Images must
-have a superior-inferior physical z axis; NIfTI array ordering alone is not an
-orientation check. The same checks apply to the optional VTK backend.
-Boundary-contact QC remains separate: a correctly aligned model with a missing
-support must not be solved.
-
-```bash
-ogoFEA spine image.nii.gz spine_labels.nii.gz \
-  --vertebra L1:20:48 \
-  --registration_backend numpy \
-  --registration_landmarks 8000 \
-  --registration_iterations 50
-```
-
-For cases where the box-like vertebral body gives ambiguous rotations, ICP can
-instead use the whole vertebra surface. This needs a reference surface generated
-from the same aligned L4 reference, including body and posterior processes:
-
-```bash
-ogoFEA spine image.nii.gz spine_labels.nii.gz \
-  --vertebra L1:20:48 \
-  --spine_icp_target vertebra \
-  --reference_path /path/to/L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk
-```
-
-If `--reference_path` is omitted with `--spine_icp_target vertebra`, Ogo looks
-for the bundled `ogo/dat/L4_FULL_VERTEBRA_SPINE_COMPRESSION_REF.vtk` file and
-fails clearly if it is not installed.
-
-VTK ICP remains available for sensitivity checks, but it is not the maintained
-default for the spine workflow:
-
-```bash
-ogoFEA spine image.nii.gz spine_labels.nii.gz \
-  --vertebra L1:20:48 \
-  --registration_backend vtk \
-  --registration_landmarks 8000 \
-  --registration_iterations 50
-```
-
-## Femur Model
-
-Full-bone and regional Pistoia criteria can differ: use `--critical_volume` for
-the full bone and `--masked_critical_volume` for the supplied regional mask.
-For example, the L1 study uses `--critical_volume 12 --masked_critical_volume 35`.
-If the regional criterion is omitted, it inherits the full-bone value. The
-results CSV records both criteria and both failure loads separately.
-
-The femur workflow builds one sideways-fall model per side:
-
-1. Read the calibrated image and whole-femur mask.
-2. Pre-rotate the side to a stable starting orientation.
-3. ICP-align to the left femur reference or the mirrored right reference. The
-   maintained hip default uses evenly distributed surfaces (up to 40,000 points
-   per surface), four axial starting rotations, and bidirectional mean surface
-   distance to select a rigid NumPy ICP fit. Superior-inverting candidates are
-   rejected. The reference may be scaled to estimate registration; the native
-   bone is transformed rigidly and its physical dimensions are not scaled.
-   This fixed hip registration recipe has no backend-selection option.
-4. Apply transform and isotropic resampling through the shared VTK reslice
-   helper. The default output spacing is `1.0 x 1.0 x 1.0 mm`.
-5. Smooth the transformed femur mask with one binary close/open pass only when
-   at least one input spacing dimension is coarser than 2 mm. If a compartment
-   mask is supplied, the derived cortical binary mask follows the same rule.
-6. Generate PMMA fixtures for the femoral head and greater trochanter. The
-   femoral-head fixture is placed on the high-y side and the greater-trochanter
-   fixture is placed on the low-y side. Both fixtures are anchored to the
-   proximal model footprint so they do not overwrite bone voxels.
-7. Standardize the distal shaft with a flat post-ICP model-grid cut. The
-   rough 120-mm crop is used only for ICP and the
-   final model uses the transformed full scan. The requested shaft length starts
-   at the actual generated GT disk's distal face. Crop all model-grid images
-   together, preserving the proximal fixtures and their coordinates.
-   The default retained shaft is 10 mm. Scans with less available coverage are
-   recorded as too short; they are not solved as shorter substitutes.
-8. Convert density to material IDs and construct the N88 model.
-9. Apply sideways-fall boundary conditions.
-
-Default femur boundary conditions:
-
-| Region | Node set | Constraint |
-| --- | --- | --- |
-| Femoral head PMMA | `Femoral_Head_PMMA_Nodes` | Prescribed displacement toward the greater trochanter. |
-| Greater trochanter PMMA | `Greater_Trochanter_PMMA_Nodes` | Constrained in the loading direction. |
-| Distal shaft cut face | `Distal_Femur_Nodes` | Constrained to remove rigid-body motion. |
-
-Femur reporting defaults to stiffness and force at `4%` displacement. When
-`--run_pistoia` is supplied, the high-level wrapper also reports full-model
-Pistoia failure load and, if `--pistoia_mask` is supplied, masked-region
-Pistoia failure load.
-
-Femur masked Pistoia follows the same ROI convention as spine. A separate
-femoral-neck mask can be passed with `--pistoia_mask`. If the femoral-neck ROI
-is a label inside the same segmentation used as the femur mask, pass
-`--pistoia_mask_label LABEL` and omit `--pistoia_mask`; Ogo will use the main
-segmentation as the ROI source and keep only that label.
-
-The maintained 10-mm reporting configuration is:
-
-```bash
-ogoFEA hip image.nii.gz femur_mask.nii.gz \
-  --side left \
-  --femur_greater_trochanter_distal_length 10 \
-  --femur_shaft_length 120 \
-  --run_pistoia \
-  --critical_volume 11.2 \
-  --critical_strain 0.009
-```
-
-There is one maintained crop recipe. The command no longer exposes aspect-ratio,
-lesser-trochanter or oblique-midpoint alternatives. `--femur_cut_mode` remains a
-hidden compatibility argument accepting only `greater_trochanter_length`;
-old unsupported modes fail rather than silently using a different definition.
-
-The 11.2% full-bone criterion is specific to the adopted 10-mm shaft protocol;
-it is not automatically valid for other shaft lengths. Use `--no-solve` for
-geometry inspection. Length-specific calibration does not change the material
-law or critical strain.
-
-The generated model can be audited with `ogoFEA check-bc`. For hip sideways
-fall, the post-GT-support shaft length is measured from final boundary-condition
-node sets as:
-
-```text
-min(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)
-```
-
-The GT minimum is the distal edge; a percentile inside the disk would shift the
-length origin. The distal median represents the flat external support plane.
-
-### Geometry Records And 3D QC
-
-Every generated hip model has three inspectable sidecars:
-
-| File suffix | Contents |
-| --- | --- |
-| `_shaft_geometry.json` | Full available shaft before cropping, requested length, retained voxel-face length, verified length from the saved N88 BC nodes, GT/cut coordinates, registration diagnostics and export paths. |
-| `_surface.vtp` | External FE mesh surface in physical coordinates. `ModelRegion`: 0 bone, 1 GT support, 2 FH loading support. Material IDs are preserved. |
-| `_3d.png` | Four opaque mesh views: blue bone, gold GT support, red FH loading support, green distal constraint nodes. |
-
-`_icp.json` records the selected transform and all starting-fit scores. Explicit
-`--femur_icp_transform_out` overrides its path. A supplied transform remains
-useful for fixed-registration length sweeps, but cohort regeneration should
-estimate a fresh transform rather than reuse an unreviewed historical fit.
-
-`available_shaft_length_mm` is measured on the transformed full-scan model
-after generating the actual connected GT support and before the final crop.
-Each proximal support retains its own largest 26-connected PMMA component
-before the disks are combined. This removes disconnected shaft islands without
-discarding either main disk; connected unwanted extensions still require QC.
-It measures **usable complete-section coverage**, not the distance to the
-lowest corner of an angled scan end. Before any resampling, rough crop or
-padding, `shaft_geometry.capture_distal_scan_face` records the physical voxel
-corners of the first occupied distal femur slice. The inverse rigid ICP carries
-this original full-scan face into the model frame. The most proximal point
-(maximum aligned Z), plus a voxel-scale resampling clearance, sets the minimum
-safe flat plane; it is snapped proximally to the model's voxel-face grid.
-Background image padding and the separate 120-mm registration crop do not
-define the usable scan end.
-
-The clearance is half the first resampling voxel's extent projected onto
-aligned Z, plus half a final Z voxel. It bounds the two nearest-neighbor mask
-resamplings and is recorded in the sidecar; there is no fitted distance or
-percentile threshold. The final cut is the requested shaft length distal to the
-unchanged GT disk. If that cut cannot clear the original scan end, generation
-stops as `too_short`; it never substitutes a shorter shaft. No extra physical
-pre-trim changes the proximal supports or the ICP input.
-
-Version 3 geometry records distinguish `raw_available_shaft_length_mm`,
-`safe_distal_face_z_mm`, `oblique_trim_loss_mm`, and usable
-`available_shaft_length_mm`. `distal_scan_boundary` records the original and
-aligned limits and clearance. `complete_distal_section_verified` becomes true
-only when the saved distal BC plane also clears that safe limit. This check
-does not establish segmentation correctness or replace anatomical QC.
-`measured_shaft_length_mm` is checked after rereading the saved N88 file.
-For insufficient coverage, the JSON is still written with `status: too_short`
-and a null final length. Registration failures are unmeasured, not assigned a
-zero length. Coverage plots must use these records, state their denominator,
-and distinguish missing measurements from genuinely short scans. Successful
-geometry checks do not by themselves establish anatomical alignment quality.
-
-Implementation: `hip_registration.estimate_femur_icp` selects the rigid fit;
-`shaft_geometry.measure_available_shaft` defines coverage;
-`femur.crop_vtk_images_to_greater_trochanter_length` cuts all model-grid images;
-`shaft_geometry.verify_model_shaft` verifies the saved BC nodes; and
-`model_export.export_femur_model` writes the mesh and four-view image.
-These helpers do not change the material law, loading endpoint or regional
-Pistoia definitions. Whole-bone hip Pistoia defaults to 10% at strain 0.009.
-
-Use `--no-solve` to generate models and QC for inspection before solving.
-`--threads` limits VTK/ITK generation as well as the FAIM solver. For an
-I/O-heavy cohort generation pass, independent `--no-solve --threads 1` jobs
-can use the CPU budget without multiplying each job's image-filter threads.
-PNG rendering needs an X display or an EGL/OSMesa-enabled headless VTK build;
-without one, the N88 model and VTP are preserved and the export record marks
-PNG QC as unavailable. The surface export itself does not require a display.
-On Groot the existing
-`ogoloco-n88` environment provides headless VTK and the modeling dependencies.
-
-## Materials
-
-Spine and femur use the same shared material-table builder in
-`ogo.fea.materials`.
-
-Material ID convention:
-
-| Material | IDs |
-| --- | --- |
-| Background | `0` |
-| Trabecular bone | `1..128` |
-| Cortical bone | `129..256` when a cortical region is present |
-| PMMA fixtures/caps | Default `5000` |
-
-The default material law is `default_E`, defined in `ogo.fea.material_laws`:
-
-```text
-E = 10500 * rho^2.29 MPa
-```
-
-where `rho` is density in g/cc. Poisson's ratio defaults to `0.3` for bone.
-PMMA defaults are `E = 2500 MPa`, Poisson's ratio `0.3`.
-
-The default spine preset overrides the elastic law to `kopperdahl_trab_E` for
-both trabecular and cortical regions. The simple femur path uses `default_E`
-unless a material-law override is supplied. If a femur compartment mask is
-provided, cortical and trabecular regions use the same law unless cortical
-overrides are supplied.
-
-### Kopperdahl Spine Presets
-
-The spine benchmark presets use the Kopperdahl trabecular density-modulus law:
-
-```text
-E = 2980 * rho^1.05 MPa
-```
-
-where `rho` is density in g/cc. In code this is
-`ogo.fea.material_laws.kopperdahl_trab_E`.
-
-The `benchmark-linear` preset uses this elastic law only. It does not assign a
-bone yield criterion, so the solved model is linear elastic. The maintained
-spine workflow runs Pistoia when `--run_pistoia`, `--require_pistoia`, or
-`--pistoia_mask` is supplied.
-
-The `benchmark-nonlinear` preset additionally assigns the Kopperdahl
-compressive yield law:
-
-```text
-sigma_y,c = 37.4 * rho^1.39 MPa
-```
-
-where `rho` is density in g/cc. In code this is
-`ogo.fea.material_laws.kopperdahl_trab_yc`. The current nonlinear preset uses
-the same function for compression and tension unless the user supplies separate
-yield functions. When yield functions are present, Ogo creates
-`vtkboneMohrCoulombIsotropicMaterial` entries with the resolved tensile and
-compressive yield strengths.
-
-Material-law overrides can be passed through the high-level command because
-unknown options are forwarded to the lower-level generator:
-
-```bash
-ogoFEA hip \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-leftFemur_mask.nii.gz \
-  --side left \
-  --elastic_E_func kopperdahl_trab_E \
-  --cort_elastic_E_func kopperdahl_trab_E
-```
-
-Supported named laws are defined in `ogo.fea.material_laws`, including
-`default_E`, `kopperdahl_trab_E`, `kopperdahl_trab_yc`, `morgan_trab_E`,
-`crawford_voxel_E`, and Bayraktar-style constants.
-
-## Quality Control
-
-Every generated model is audited by `ogo/cli/CheckFEModelBC.py` unless
-`--skip_bc_audit` is used. The audit summary is embedded in `_modeling.json`.
-
-For manual inspection, run with `--debug`:
-
-```bash
-ogoFEA hip \
-  sub-001_desc-vqct_ct.nii.gz \
-  sub-001_desc-leftFemur_mask.nii.gz \
-  --side left \
-  --debug \
-  --no-solve
-```
-
-This writes a boundary-condition audit PNG next to the model. For spine, debug
-mode also enables quick-look output from the lower-level generator.
-
-## Common Adjustments
-
-Change output resolution:
-
-```bash
-ogoFEA spine image.nii.gz labels.nii.gz \
-  --vertebra L1:2:3 \
-  --iso_resolution 0.8
-```
-
-Change femur shaft retention after the greater-trochanter support:
-
-```bash
-ogoFEA hip image.nii.gz femur_mask.nii.gz \
-  --side left \
-  --femur_cut_mode greater_trochanter_length \
-  --femur_greater_trochanter_distal_length 45
-```
-
-Change PMMA dimensions:
-
-```bash
-ogoFEA hip image.nii.gz femur_mask.nii.gz \
-  --side left \
-  --pmma_thick 10 \
-  --pmma_intrusion 6
-```
-
-For hip sideways fall, both PMMA fixtures use bbox-relative contact planes by
-default. The maintained footprint is rectangular, centered from stored bbox
-fractions, and scaled independently to `1.1 x 1.1` of the model bbox in the two
-authored in-plane axes. `--pmma_thick` controls total fixture thickness;
-`--pmma_intrusion` controls how far anatomy can occupy that fixed thickness
-before unsupported contact columns are removed. The PMMA labels do not replace
-bone voxels.
-
-For spine compression, `--pmma_thick` controls the total generated disk
-thickness and `--pmma_intrusion` controls how far anatomy can occupy that fixed
-thickness. The maintained spine defaults are 10 mm thickness and 6 mm intrusion.
-Intrusion does not overwrite vertebral-body voxels; it limits how far from the
-superior/inferior body surface the cap is allowed to search for supporting
-anatomy before generating the flat PMMA disk.
-
-Stable-contact selection is enabled for the spine default. The locked recipe
-ignores the superficial 10% of the projected contact columns
-(`--stable_surface_trim_fraction 0.10`) and uses that deeper footprint only
-when it is at least 3 mm behind the first-contact surface
-(`--stable_surface_min_shift 3`). This catches osteophyte/ridge contacts while
-leaving normal shallow surface variation alone. The generated disk still uses
-the requested `--pmma_thick` and `--pmma_intrusion`; stable contact does not
-replace or silently reduce intrusion. The disk mask is repaired with in-plane
-gap closing, constrained not to overwrite anatomy, and reduced to the largest
-connected support component.
-
-After vtkbone identifies visible cap nodes, spine compression filters each cap
-node set to the dominant coordinate plane along the load axis. This removes
-small rim/contact-side nodes from the jelly-bean disk surface while keeping the
-full disk material geometry in the solved model.
-
-```bash
-ogoFEA spine image.nii.gz labels.nii.gz \
-  --vertebra L1:20:48 \
-  --pmma_thick 10 \
-  --pmma_intrusion 6
-```
-
-The stable-contact values are code-level defaults in
-`DEFAULT_SPINE_STABLE_CONTACT_*` and are locked by
-`tests/fea/test_workflow_locked_defaults.py`. Routine spine FEA should use the
-defaults rather than carrying per-run contact tuning flags.
-
-Run model generation only, inspect the `.n88model`, then solve later:
-
-```bash
-ogoFEA hip image.nii.gz femur_mask.nii.gz \
-  --side left \
-  --no-solve \
-  --debug
-```
+This writes `qc_summary.csv`, `study_inclusion.csv` and portable `gallery.zip`.
+Extract the ZIP and open `gallery.html`; models are not bundled. Use `--gallery`
+instead for an unpacked gallery and `--reviews study_inclusion.csv` to restore
+manual decisions. Filters, sorting, page size and individual before/after views
+support large-cohort review. Include/exclude records a reason and reviewer.
+Export the reviewed CSV: browser edits do not update the project CSV or ZIP.
+
+QC fails construction errors, flags uncertain anatomy or missing evidence for
+review, and does not apply strength thresholds. A pass is not proof of correct
+segmentation. Hip tests include shaft length, complete distal section, intended
+support-patch coverage and X/Z fixation; spine tests include cap contact and
+body/process orientation. Substantial body cleanup is flagged for review.
+
+Old models without measurements are backfilled once and cached. Use `--site`
+when anatomy cannot be inferred and `--evidence evidence.csv` for registered
+body/process masks or shaft sidecars stored elsewhere. Evidence columns are
+`site,model_id,body_mask,process_mask,shaft_geometry`; paths are relative to the
+CSV. Native-space masks cannot substitute for model-space evidence. Missing
+scan coverage stays unknown; backfill neither rewrites models nor renders images.
+Failures before meshing require job logs for participant accounting.
+
+For full-size resegmentation of reviewed failures, see the
+[cohort recovery example](../../examples/fea/cohort_recovery/README.md).

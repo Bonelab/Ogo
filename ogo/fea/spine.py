@@ -1,38 +1,7 @@
-"""Spine-specific defaults, helpers, and spineFE benchmark presets.
+"""Spine compression models: preparation, registration, supports and defaults.
 
-Default spine workflow:
-1. Read the calibrated density image and labelled vertebra mask. The high-level
-   wrapper uses ``--vertebra LEVEL:BODY_LABEL:PROCESS_LABEL`` so body and
-   posterior-process labels are explicit and traceable.
-2. Retain the largest face-connected body-label component, leaving the process
-   and other labels unchanged. Record the removed volume for segmentation QC.
-   Crop the vertebral body, posterior process, calibrated image, and combined
-   vertebra mask to the same bounding box.
-3. ICP-align the requested registration target to a bundled L4 compression
-   reference surface. The maintained body-only target uses the vertebral body;
-   the optional full-vertebra target uses body plus posterior-process labels
-   when the matching reference surface is available. By default the reference
-   is PCA-scaled within 0.8,0.8,0.75 to 1.2,1.2,1.3 before deterministic NumPy
-   rigid ICP (8,000 surface points, 50 iterations), initialized by centroids
-   without PCA axis swaps. Anatomical orientation checks reject invalid fits.
-   Reference scaling does not scale the physical dimensions of the solved bone.
-4. Apply the ICP transform and set the final output spacing to
-   1.0 x 1.0 x 1.0 mm in one shared VTK reslice helper. Image data use cubic
-   interpolation; body/process labels use nearest-neighbor interpolation.
-5. Smooth the transformed body/process masks with one binary close/open pass
-   only when at least one input spacing dimension is coarser than 2 mm. Then
-   generate fixed-thickness anatomy PMMA caps on the superior and inferior body
-   surfaces. The maintained cap thickness is 10 mm and the intrusion depth is
-   6 mm; projected contact starts at the first stable body footprint so small
-   osteophytes do not define the support plane.
-6. Build materials with the same shared bone/PMMA material-table helper used by
-   the femur workflow. The spine convention is trabecular material IDs 1..128
-   and cortical IDs 129..256; PMMA is a separate material ID.
-7. Apply axial compression boundary conditions: prescribed displacement at the
-   superior PMMA cap toward the inferior cap and fixed displacement at the
-   inferior cap. The wrapper solves and reports at 0.68 percent strain by
-   default.
-"""
+Shared geometry and mesh helpers live in alignment, boundary and model.
+The public ogoFEA wrapper handles solving and reporting; see docs/fea/implementation.md."""
 
 import os
 from pathlib import Path
@@ -416,6 +385,7 @@ def _as_bool(value):
 ###################################################################### HELPERS (Python)
 
 def remove_extension(filename):
+    """Remove all filename suffixes, including compound NIfTI extensions."""
     while True:
         filename, ext = os.path.splitext(filename)
         if not ext:
@@ -423,14 +393,14 @@ def remove_extension(filename):
     return filename
 
 def print_matrix(matrix):
+    """Log a VTK transformation matrix row by row."""
     for i in range(4):
-        # Create a string for the entire row
         row_message = " ".join(f"{matrix.GetElement(i, j):0.4f}" for j in range(4))
-        # Send the row as a single message
         ogo.message(row_message)
 
 
 def parse_scale_triplet(value, name="scale"):
+    """Parse one shared or three axis-specific reference-scale factors."""
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -463,13 +433,16 @@ class _NiftiImageHandle:
 
 
 def read(input_mask):
+    """Read a NIfTI mask through the shared image reader."""
     return _NiftiImageHandle(ogo.readNii(input_mask))
 
 def check_vertebra_presence(mask_reader, vertebra):
+    """Raise if the requested label is absent from the segmentation."""
     if vertebra not in vtk_to_numpy(mask_reader.GetOutput().GetPointData().GetScalars()).ravel():
         raise ValueError(f'Mask does not contain label {vertebra} for "{vertebra}" vertebra.')
 
 def threshold(mask_output, label):
+    """Return a binary VTK filter for one segmentation label."""
     threshold = vtk.vtkImageThreshold()
     threshold.SetInputData(mask_output)
     threshold.ThresholdBetween(float(label), float(label))
@@ -482,8 +455,7 @@ def threshold(mask_output, label):
     return threshold
 
 def label_mask(mask, label_value):
-    # Use vtkImageMathematics to change 1 values to a specific label value
-
+    """Assign a label value to a binary mask."""
     caster = vtk.vtkImageCast()
     caster.SetInputData(mask)
     caster.SetOutputScalarTypeToUnsignedChar()
@@ -498,7 +470,7 @@ def label_mask(mask, label_value):
     return math
 
 def combine_mask(mask1, mask2):
-    # Combine two masks using vtkImageLogic with a logical OR operation
+    """Return the logical union of two binary masks."""
     logic = vtk.vtkImageLogic()
     logic.SetInput1Data(mask1)
     logic.SetInput2Data(mask2)
@@ -507,7 +479,7 @@ def combine_mask(mask1, mask2):
     return logic
 
 def add_masks(mask1, mask2):
-    # Combine two masks by adding their values
+    """Add two label images and return the resulting VTK image."""
     math = vtk.vtkImageMathematics()
     math.SetInput1Data(mask1)
     math.SetInput2Data(mask2)
@@ -529,6 +501,7 @@ def add_masks(mask1, mask2):
     return threshold
 
 def crop_to_bounding_box(image_data, bb=None):
+    """Crop to a supplied or nonzero voxel extent; return image and extent."""
     if bb is None:
 
         extents = image_data.GetExtent()
@@ -710,6 +683,7 @@ def crop_and_transform(
     extra_label_outputs=None,
 ):
 
+    """Crop density and labels to one shared extent, with an optional mm margin."""
     _, bb = crop_to_bounding_box(fullvertebra.GetOutput())
     if float(margin_mm) > 0.0:
         bb = _expand_bounding_box_by_margin(bb, fullvertebra.GetOutput(), margin_mm)
@@ -727,6 +701,7 @@ def crop_and_transform(
     return tuple(out)
 
 def perform_marching_cubes(body_output):
+    """Extract the binary body surface for registration."""
     mcubes = vtk.vtkImageMarchingCubes()
     mcubes.SetInputConnection(body_output.GetOutputPort())
     mcubes.SetValue(1, 1.0)
@@ -792,6 +767,7 @@ def get_icp_with_scaling(
     iterations=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
 ):
 
+    """Scale the reference, then estimate rigid ICP without scaling the input bone."""
     sample_surface_points = surface_points_from_vtk_mask(
         body.GetOutput(),
         max_points=landmarks,
@@ -876,6 +852,7 @@ def get_icp_with_scaling(
 
 def get_icp(body, reference_path):
 
+    """Return the legacy VTK reference-to-body ICP transform."""
     mcubes = perform_marching_cubes(body)
     mcubes_output = mcubes.GetOutput()
     reference_bone = ogo.readPolyData(reference_path)
@@ -898,6 +875,7 @@ def get_icp(body, reference_path):
     return icp
 
 def transform_resample(image, matrix, iso_resolution, interpolation='cubic'):
+    """Reslice an image using the shared physical-space transform helper."""
     output = ogo.transformResample(image, matrix, iso_resolution, interpolation=interpolation)
     if output.GetNumberOfPoints() == 0:
         ogo.message("Reslice output contains no points. Check the input and transformation.")
@@ -1043,6 +1021,7 @@ def generate_cortical_mask(image_vtk, mask_vtk, threshold=0.2, min_th=1, max_th=
 
 
 def convert_image_to_material(image, mask, n_bins=128, cort_mask=None):
+    """Bin calibrated spine density into material IDs; no ash conversion is applied."""
     change = ogo.prepareFiniteElementImage(image)
     mask_change = ogo.prepareFiniteElementImage(mask)
     cort_mask_change = ogo.prepareFiniteElementImage(cort_mask) if cort_mask is not None else None
@@ -1068,11 +1047,13 @@ def resolve_func(func_or_name, module):
 
 ## Functions to check the results
 def check_image_values(image):
+    """Log the distinct scalar values in a VTK image."""
     array = vtk.util.numpy_support.vtk_to_numpy(image.GetPointData().GetScalars())
     unique_values = np.unique(array)
     ogo.message("Unique values in the image:", unique_values)
 
 def calculate_features(image, label):
+    """Measure a label's physical volume, centroid, axes and bounding box."""
     label_map = sitk.BinaryThreshold(image, lowerThreshold=label, upperThreshold=label, insideValue=1, outsideValue=0)
     stats = sitk.LabelShapeStatisticsImageFilter()
     stats.Execute(label_map)
@@ -1083,6 +1064,7 @@ def calculate_features(image, label):
     return {'volume': volume, 'centroid': centroid, 'principal_axes': principal_axes, 'extent': extent}
 
 def check_values(features, checks):
+    """Evaluate trusted QC expressions against measured label features."""
     results = {}
     pass_all = True
     for check, condition in checks.items():
@@ -1094,6 +1076,7 @@ def check_values(features, checks):
     return results
 
 def parse_filename(filepath):
+    """Extract legacy underscore-delimited metadata from a filename."""
     base_name = os.path.splitext(os.path.basename(filepath))[0]
     parts = base_name.split('_')
     return {
@@ -1105,7 +1088,7 @@ def parse_filename(filepath):
     }
 
 def visualize_slice(image, filepath):
-    # Get the dimensions of the vtkImageData object
+    """Save a middle x-slice PNG for optional legacy debugging."""
     dimensions = image.GetDimensions()  # (x, y, z)
     mid_x = dimensions[0] // 2  # Middle slice along the X-axis
 
@@ -1138,6 +1121,7 @@ def visualize_slice(image, filepath):
     ogo.message(f"Slice image saved to {filepath}")
 
 def check_image(vtkimage, output_filename=None):
+    """Run legacy body/process image checks and optionally save their results."""
     try:
         # Assuming 'image' is a vtkImageData object
         numpy_array = vtk_to_numpy(vtkimage.GetPointData().GetScalars())
@@ -1199,6 +1183,7 @@ def check_image(vtkimage, output_filename=None):
     return data['pass']
 
 def resample_to_match(target_image, source_image, interpolation='nearest'):
+    """Resample source spacing to target spacing using the requested interpolation."""
     resampler = vtk.vtkImageResample()
     resampler.SetInputData(source_image)
 
@@ -1334,6 +1319,7 @@ def clean_body_component(mask_image, body_label):
 
 def process_vertebra(input_mask, input_image, n88model_output_path, body_label, process_label, reference_path, **kwargs):
 
+    """Build one vertebra model, registered masks and generation QC sidecars."""
     pmma_mat_id = kwargs.get("pmma_mat_id", 5000)
     pistoia_mask = kwargs.get("pistoia_mask")
     pistoia_mask_label = kwargs.get("pistoia_mask_label") or []
@@ -1875,6 +1861,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
 
 
 def main():
+    """Parse anatomy-builder arguments and generate the requested vertebra model."""
     description = '''
     This script sets up the L4 vertebral compression FE model from the
         density (K2HPO4) calibrated image. This script sets up the model for a L4 vertebra
