@@ -129,10 +129,10 @@ def test_gallery_individual_views_keep_panel_order_and_cache(tmp_path):
     assert 'id="review-stage"' in content
     for view, color in zip(('oblique', 'top', 'bottom'), ((255, 0, 0), (0, 128, 0), (0, 0, 255))):
         assert f'data-view="{view}"' in content
-        asset = next((tmp_path / 'gallery_views').glob(f'*_{view}.png'))
+        asset = next((tmp_path / 'gallery_views').glob(f'*_{view}.webp'))
         with Image.open(asset) as cropped:
             assert cropped.size == (1400, 850)
-            assert cropped.getpixel((700, 425)) == color
+            assert max(abs(a - b) for a, b in zip(cropped.getpixel((700, 425)), color)) <= 5
         modified = asset.stat().st_mtime_ns
         generate_gallery([row], path)
         assert asset.stat().st_mtime_ns == modified
@@ -163,6 +163,8 @@ def test_gallery_zip_is_portable_and_has_review_records(tmp_path):
         assert {'gallery.html', 'qc_summary.csv', 'study_inclusion.csv'} <= set(archive.namelist())
         assert len([name for name in archive.namelist() if name.startswith('images/')]) == 1
         assert len([name for name in archive.namelist() if name.startswith('gallery_views/')]) == 3
+        assert not any(name.endswith('.png') for name in archive.namelist())
+        assert archive.testzip() is None
         content = archive.read('gallery.html').decode()
         assert 'src="images/' in content
         assert str(tmp_path) not in content

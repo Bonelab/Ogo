@@ -16,9 +16,9 @@ The workflow builders are organized by anatomy:
 
 ## Automatic Model QC
 
-Both anatomy workflows save one three-view anatomy panel (`*_qc_3d.png`)
+Both anatomy workflows save one three-view anatomy panel (`*_qc_3d.webp`)
 after model generation. The FAIM adapter saves a corresponding solved SED
-panel (`*_sed_3d.png`) after successful processing of a hip or spine model.
+panel (`*_sed_3d.webp`) after successful processing of a hip or spine model.
 The views use `ogo.cli.Visualize.vis3d`: white background, opaque bone and
 gold PMMA supports, with constrained surface-adjacent voxel layers in red.
 Individual views are framed independently. Numerical BC checks remain in CSV;
@@ -32,7 +32,10 @@ images do not imply that the requested shaft length was retained.
 SED uses a linear Jet scale, shared across the three views, from zero to the
 99th percentile of bone-element SED. A bone-masked Gaussian (sigma 0.8 mm)
 and light surface smoothing improve display only; FE arrays and results are
-unchanged. Each PNG has a JSON sidecar recording display settings. Spine
+unchanged. Review images use WebP (quality 85) at 1400 x 2550 pixels; individual
+gallery views are 1400 x 850 pixels. These compact lossy images are for QC, not
+quantitative analysis or publication. Each image has a JSON sidecar recording
+display settings and compression. Existing PNG previews remain supported. Spine
 generation retains `*_qc_body_mask.nii.gz` in model coordinates for consistent
 body/process colouring after solving. Temporary individual renders are removed.
 
@@ -92,7 +95,7 @@ Without a refreshed editable installation, use `python -m ogo.cli.ValidateFEA`.
 The gallery supports anatomy, QC status, reason, subject search, and anatomy/SED
 view selection, with expandable measurement tables. A separate camera selector
 shows oblique/side, top, bottom, or all views in both thumbnails and the review
-dialog. The fixed three-row Ogo renders are split once into cached PNGs in
+dialog. The fixed three-row Ogo renders are split once into cached WebP images in
 `gallery_views/`; unrecognized legacy layouts remain full montages. Image files
 remain external; retain their relative location and the view-assets folder when
 copying the gallery and models together.
@@ -106,8 +109,9 @@ ogoValidateFEA derivatives/fea --output derivatives/fea/qc --gallery-zip --worke
 Extract `gallery.zip` and open `gallery.html`. It includes `images/`,
 `gallery_views/`, `qc_summary.csv`, and the initial `study_inclusion.csv`.
 No original model directory or server is needed to review it. Model files are
-not included; original model paths remain in the CSV as provenance. Both solve
-stages and all available camera views are retained. Missing images remain
+not included; original model paths remain in the CSV as provenance. Legacy PNGs
+are converted to compact WebP images inside the ZIP without modifying their
+originals. Both solve stages and all available camera views are retained. Missing images remain
 missing. Large cohorts use lazy-loaded image files rather than embedded HTML.
 After review, export the updated inclusion CSV from the gallery; browser
 decisions cannot rewrite the CSV inside the original ZIP.

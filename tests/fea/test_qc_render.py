@@ -1,5 +1,7 @@
 """Display smoothing must not alter solved values or blend supports into bone."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -89,6 +91,21 @@ def test_export_keeps_only_panel_and_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(qc_render, "panel", fake_panel)
     path = qc_render.export_model_qc(tmp_path / "short.n88model", "hip",
                                     model=sentinel, ineligible=True)
-    assert path.endswith("short_qc_3d.png")
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["short_qc_3d.json", "short_qc_3d.png"]
+    assert path.endswith("short_qc_3d.webp")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["short_qc_3d.json", "short_qc_3d.webp"]
+    with Image.open(path) as image:
+        assert image.format == "WEBP"
+        assert image.size == (20, 60)
     assert all(not v["eligible_for_solve"] for v in json.loads((tmp_path / "short_qc_3d.json").read_text())["views"])
+    from ogo.fea.validation import write_measurements
+    import csv
+
+    legacy = tmp_path / "short_qc_3d.png"
+    legacy.touch()
+    Path(path).unlink()
+    metrics = write_measurements(tmp_path / "short.n88model", {"site": "hip", "retained_shaft_length_mm": 10})
+    qc_render.export_model_qc(tmp_path / "short.n88model", "hip", model=sentinel, ineligible=True)
+    with metrics.open() as stream:
+        row = next(csv.DictReader(stream))
+    assert row["anatomy_image"] == path
+    assert row["retained_shaft_length_mm"] == "10"

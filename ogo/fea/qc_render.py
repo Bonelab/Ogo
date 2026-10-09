@@ -8,7 +8,6 @@ SED smoothing is display-only. No model or analysis input is modified.
 import argparse
 import json
 import os
-import shutil
 import warnings
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -24,6 +23,7 @@ import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 from ogo.cli.Visualize import vis3d
+from ogo.fea.qc_images import save_review_image
 
 
 def smooth_bone_sed(values, indices, bone, spacing):
@@ -320,7 +320,7 @@ def panel(model_path, output_dir, site, body_mask=None, sed=False,
 
 def export_model_qc(model_path, site, body_mask=None, sed=False,
                     model=None, ineligible=False):
-    """Write one three-view PNG and its visualization settings beside a model.
+    """Write one three-view WebP and its visualization settings beside a model.
 
     An ineligible hip can supply its uncut supported mesh without writing an
     n88model or assigning an artificial distal boundary. Rendering errors are
@@ -339,15 +339,20 @@ def export_model_qc(model_path, site, body_mask=None, sed=False,
     if body_mask is None and site == "spine":
         body_mask = model_path.with_name(model_path.stem + "_qc_body_mask.nii.gz")
     suffix = "_sed_3d" if sed else "_qc_3d"
-    output = model_path.with_name(model_path.stem + suffix + ".png")
+    output = model_path.with_name(model_path.stem + suffix + ".webp")
     with TemporaryDirectory(prefix="ogo-qc-") as temporary:
         temporary = Path(temporary)
         rendered = panel(model_path, temporary, site, body_mask, sed, model, ineligible)
-        shutil.copyfile(rendered, output)
+        with Image.open(rendered) as image:
+            save_review_image(image, output)
         views = [json.loads((temporary / (model_path.stem + "_preview_" + view
                  + ("_sed" if sed else "") + ".json")).read_text())
                  for view in ("oblique", "top", "bottom")]
-        output.with_suffix(".json").write_text(json.dumps({"site": site, "views": views}, indent=2))
+        output.with_suffix(".json").write_text(json.dumps(
+            {"site": site, "views": views, "image_format": "WEBP", "image_quality": 85}, indent=2))
+    if model_path.with_name(model_path.stem + '_qc_metrics.csv').exists():
+        from ogo.fea.validation import write_measurements
+        write_measurements(model_path, {'sed_image' if sed else 'anatomy_image': str(output)})
     return str(output)
 
 

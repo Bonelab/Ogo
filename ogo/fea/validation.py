@@ -201,9 +201,10 @@ def write_measurements(model_path, measurements):
         with path.open(newline='') as stream:
             row.update(next(csv.DictReader(stream)))
     row.update(measurements)
+    from ogo.fea.qc_images import qc_image_path
     row.update(model_id=model_path.stem, model_path=str(model_path),
-               anatomy_image=str(model_path.with_name(model_path.stem + '_qc_3d.png')),
-               sed_image=str(model_path.with_name(model_path.stem + '_sed_3d.png')))
+               anatomy_image=str(qc_image_path(model_path)),
+               sed_image=str(qc_image_path(model_path, sed=True)))
     temporary = path.with_suffix('.csv.tmp')
     with temporary.open('w', newline='') as stream:
         writer = csv.DictWriter(stream, fieldnames=sorted(row))

@@ -13,13 +13,14 @@ from tempfile import TemporaryDirectory
 from urllib.parse import quote
 
 from ogo.fea.review import FIELDS, REASONS, identity, inclusion_row, write_inclusion
+from ogo.fea.qc_images import save_review_image
 
 
 def _camera_images(path, output):
     """Split the fixed three-row Ogo render, caching assets beside the gallery."""
     from PIL import Image
     with Image.open(path) as image:
-        if image.size != (1400, 2550) or not path.name.endswith(('_qc_3d.png', '_sed_3d.png')):
+        if image.size != (1400, 2550) or not path.stem.endswith(('_qc_3d', '_sed_3d')):
             return []
         stat = path.stat()
         key = hashlib.sha256(f'{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}'.encode()).hexdigest()[:20]
@@ -27,9 +28,9 @@ def _camera_images(path, output):
         directory.mkdir(exist_ok=True)
         assets = []
         for index, view in enumerate(('oblique', 'top', 'bottom')):
-            asset = directory / f'{key}_{view}.png'
+            asset = directory / f'{key}_{view}.webp'
             if not asset.exists():
-                image.crop((0, index * 850, 1400, (index + 1) * 850)).save(asset)
+                save_review_image(image.crop((0, index * 850, 1400, (index + 1) * 850)), asset)
             assets.append((view, asset))
         return assets
 
@@ -112,10 +113,16 @@ def export_gallery_zip(rows, output, decisions=None):
                         # Stable identity preserves browser autosave across exports.
                         name = hashlib.sha256(str(source).encode()).hexdigest()[:20] + '_' + source.name
                         target = images / name
-                        try:
-                            target.symlink_to(source)
-                        except OSError:
-                            shutil.copyfile(source, target)
+                        if source.suffix.lower() == '.png':
+                            from PIL import Image
+                            target = target.with_suffix('.webp')
+                            with Image.open(source) as image:
+                                save_review_image(image, target)
+                        else:
+                            try:
+                                target.symlink_to(source)
+                            except OSError:
+                                shutil.copyfile(source, target)
                         copied[source] = target.relative_to(root).as_posix()
                     record[key] = copied[source]
             portable.append(record)
@@ -130,7 +137,7 @@ def export_gallery_zip(rows, output, decisions=None):
         with zipfile.ZipFile(temporary_zip, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
             for source in sorted(root.rglob('*')):
                 if source.is_file() and source != temporary_zip:
-                    compression = zipfile.ZIP_STORED if source.suffix.lower() in ('.png', '.jpg', '.jpeg') else zipfile.ZIP_DEFLATED
+                    compression = zipfile.ZIP_STORED if source.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp') else zipfile.ZIP_DEFLATED
                     archive.write(source, source.relative_to(root).as_posix(), compress_type=compression)
         temporary_zip.replace(output)
     return output
