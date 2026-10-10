@@ -16,7 +16,7 @@ def _vtk_image_from_array(data, *, origin=(0, 0, 0), spacing=(1, 1, 1)):
 def test_surface_points_from_vtk_mask_uses_voxel_surface_centers():
     np = pytest.importorskip("numpy")
 
-    from ogo.fea.alignment import surface_points_from_vtk_mask
+    from ogo.fea.alignment.core import surface_points_from_vtk_mask
 
     mask = np.ones((3, 3, 3), dtype=np.uint8)
     image = _vtk_image_from_array(mask, origin=(10, 20, 30), spacing=(2, 3, 4))
@@ -36,7 +36,7 @@ def test_surface_points_from_vtk_mask_uses_voxel_surface_centers():
 def test_estimate_rigid_icp_recovers_simple_translation():
     np = pytest.importorskip("numpy")
 
-    from ogo.fea.alignment import estimate_rigid_icp
+    from ogo.fea.alignment.core import estimate_rigid_icp
 
     moving = np.asarray(
         [
@@ -63,7 +63,7 @@ def test_estimate_rigid_icp_vtk_recovers_simple_translation():
     pytest.importorskip("vtk")
     np = pytest.importorskip("numpy")
 
-    from ogo.fea.alignment import estimate_rigid_icp_vtk
+    from ogo.fea.alignment.core import estimate_rigid_icp_vtk
 
     moving = np.asarray(
         [
@@ -91,7 +91,7 @@ def test_estimate_rigid_icp_vtk_recovers_simple_translation():
 def test_invert_point_transform_reverses_row_vector_transform():
     np = pytest.importorskip("numpy")
 
-    from ogo.fea.alignment import invert_point_transform
+    from ogo.fea.alignment.core import invert_point_transform
 
     rotation = np.asarray(
         [
@@ -113,7 +113,7 @@ def test_invert_point_transform_reverses_row_vector_transform():
 def test_output_grid_for_point_transform_uses_transformed_voxel_centers():
     np = pytest.importorskip("numpy")
 
-    from ogo.fea.alignment import output_grid_for_point_transform
+    from ogo.fea.alignment.core import output_grid_for_point_transform
 
     points = np.asarray(
         [
@@ -141,7 +141,7 @@ def test_output_grid_for_point_transform_uses_transformed_voxel_centers():
 def test_resample_vtk_image_with_point_transform_uses_explicit_output_grid():
     np = pytest.importorskip("numpy")
 
-    from ogo.fea.alignment import resample_vtk_image_with_point_transform
+    from ogo.fea.alignment.core import resample_vtk_image_with_point_transform
     from ogo.util.vtk_image import vtk_image_to_numpy
 
     data = np.zeros((3, 3, 3), dtype=np.uint8)

@@ -5,11 +5,11 @@ import csv
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from ogo.fea.validation import evaluate, generate_gallery
-from ogo.fea.validation import write_measurements
-from ogo.fea.gallery import export_gallery_zip
-from ogo.fea.legacy_qc import backfill_measurements, evidence_signature, load_evidence, needs_backfill
-from ogo.fea.review import identity, load_decisions, write_inclusion
+from ogo.fea.qc.validation import evaluate, generate_gallery
+from ogo.fea.qc.validation import write_measurements
+from ogo.fea.qc.gallery import export_gallery_zip
+from ogo.fea.qc.legacy import backfill_measurements, evidence_signature, load_evidence, needs_backfill
+from ogo.fea.qc.review import identity, load_decisions, write_inclusion
 
 
 def _backfill_task(task):

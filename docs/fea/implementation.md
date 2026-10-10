@@ -9,17 +9,18 @@ audits the model, runs FAIM/N88 and writes modelling metadata.
 | Reporting endpoint and criteria | `GenerateFEM.solve_report_profile`, `critical_volume_percent`, `critical_strain` |
 | Spine preparation and model | `spine._prepare_spine_inputs`, `_register_spine_inputs`, `process_vertebra` |
 | Hip preparation and model | `femur._prepare_femur_inputs`, `_register_femur_inputs`, `sidewaysFallFe` |
-| Hip multistart alignment | `hip_registration.estimate_femur_icp` |
+| Hip multistart alignment | `alignment/hip.py: estimate_femur_icp` |
 | Physical scan-end/shaft measurements | `shaft_geometry.capture_distal_scan_face`, `measure_available_shaft`, `verify_model_shaft` |
-| Shared transforms | `alignment.py`, `image_io.py` |
+| Shared transforms | `alignment/`, `image_io.py` |
 | PMMA/contact geometry | `boundary.generate_bone_cap_mask`, `generate_projected_material_disk_vtk` |
 | Density laws and material tables | `material_laws.py`, `materials.build_bone_pmma_material_table` |
 | N88 mesh and file writing | `model.create_microfe_model`, `write_model` |
 | Solver discovery, Pistoia and results | `ogo/util/faim.py` |
-| Generation measurements / QC rules | `validation.measure_model`, `evaluate` |
-| Legacy measurement recovery | `legacy_qc.backfill_measurements` |
-| Three-view previews | `qc_render.py`, using `ogo/cli/Visualize.py` |
-| Gallery and review records | `gallery.py`, `review.py`, `gallery_review.js` |
+| Model construction record | `metadata.py` |
+| Generation measurements / QC rules | `qc/validation.py: measure_model`, `evaluate` |
+| Legacy measurement recovery | `qc/legacy.py: backfill_measurements` |
+| Three-view previews | `qc/render.py`, using `ogo/cli/Visualize.py` |
+| Gallery and review records | `qc/gallery.py`, `qc/review.py`, `qc/gallery_review.js` |
 
 Anatomy defaults are constants at the top of `spine.py` and `femur.py`.
 Shared helpers own geometry/material logic; the CLI owns solving and reporting.

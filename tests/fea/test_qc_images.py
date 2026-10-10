@@ -7,7 +7,7 @@ from PIL import Image
 
 
 def test_review_image_is_webp_without_resizing(tmp_path):
-    from ogo.fea.qc_images import save_review_image
+    from ogo.fea.qc.images import save_review_image
 
     path = tmp_path / 'case_qc_3d.webp'
     save_review_image(Image.new('RGB', (1400, 2550), 'white'), path)
@@ -17,7 +17,7 @@ def test_review_image_is_webp_without_resizing(tmp_path):
 
 
 def test_default_qc_panel_is_compact_webp(tmp_path):
-    from ogo.fea.qc_images import save_qc_panel
+    from ogo.fea.qc.images import save_qc_panel
 
     path = tmp_path / 'case_qc_3d.webp'
     save_qc_panel(Image.new('RGB', (1400, 2550), 'white'), path)
@@ -27,7 +27,7 @@ def test_default_qc_panel_is_compact_webp(tmp_path):
 
 
 def test_gallery_splits_compact_panel_without_mixing_views(tmp_path):
-    from ogo.fea.gallery import _camera_images
+    from ogo.fea.qc.gallery import _camera_images
 
     source = tmp_path / 'case_qc_3d.webp'
     panel = Image.new('RGB', (600, 1092))
@@ -46,7 +46,7 @@ def test_gallery_splits_compact_panel_without_mixing_views(tmp_path):
 
 @pytest.mark.parametrize('extension', ['.png', '.webp'])
 def test_gallery_splits_both_formats_into_webp(tmp_path, extension):
-    from ogo.fea.gallery import _camera_images
+    from ogo.fea.qc.gallery import _camera_images
 
     source = tmp_path / ('case_qc_3d' + extension)
     Image.new('RGB', (1400, 2550), 'white').save(source)
@@ -60,7 +60,7 @@ def test_gallery_splits_both_formats_into_webp(tmp_path, extension):
 
 def test_measurements_discover_legacy_png_and_prefer_webp(tmp_path):
     import csv
-    from ogo.fea.validation import write_measurements
+    from ogo.fea.qc.validation import write_measurements
 
     model = tmp_path / 'case.n88model'
     png = tmp_path / 'case_qc_3d.png'

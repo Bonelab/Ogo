@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from ogo.fea import alignment
+from ogo.fea.alignment import core as alignment
 
 
 def test_public_hip_defaults_are_the_locked_ten_mm_recipe():
@@ -24,7 +24,7 @@ def test_stride_sampling_does_not_truncate_the_proximal_end():
 
 
 def test_multistart_recovers_axial_rotation_without_scaling_native_geometry():
-    from ogo.fea.hip_registration import estimate_femur_icp
+    from ogo.fea.alignment.hip import estimate_femur_icp
 
     rng = np.random.default_rng(42)
     points = rng.normal(size=(800, 3)) * [5, 12, 30]
@@ -41,7 +41,7 @@ def test_multistart_recovers_axial_rotation_without_scaling_native_geometry():
 
 
 def test_superior_inversion_cannot_win_candidate_selection(monkeypatch):
-    from ogo.fea import hip_registration
+    from ogo.fea.alignment import hip as hip_registration
 
     calls = iter([0, 1, 2, 3])
 

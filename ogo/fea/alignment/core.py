@@ -1,4 +1,4 @@
-"""Shared point-cloud helpers for reference-frame FE alignment."""
+"""Shared point-cloud transforms and ICP for reference-frame FE alignment."""
 
 
 def polydata_points(polydata):

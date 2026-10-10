@@ -32,7 +32,7 @@ from ogo.util.echo_arguments import echo_arguments
 
 from pathlib import Path
 
-from ogo.fea.alignment import (
+from ogo.fea.alignment.core import (
     estimate_rigid_icp,
     point_cloud_axis_lengths,
     polydata_from_points,
@@ -50,7 +50,7 @@ from ogo.fea.boundary import (
     foreground_voxel_center_bounds_from_mask,
 )
 from ogo.fea.image_io import write_vtk_image_with_sitk_geometry
-from ogo.fea.hip_registration import estimate_femur_icp
+from ogo.fea.alignment.hip import estimate_femur_icp
 from ogo.fea.shaft_geometry import (
     aligned_distal_scan_boundary,
     capture_distal_scan_face,
@@ -1724,10 +1724,10 @@ def sidewaysFallFe(args):
         # Preserve a visual explanation of coverage failure without inventing
         # a distal boundary or sending an ineligible model to the solver.
         if shaft_crop.get("status") == "too_short":
-            from ogo.fea.qc_render import try_export_model_qc
+            from ogo.fea.qc.render import try_export_model_qc
 
             available_model = ogo.applyTestBase(ogo.Image2Mesh(conn2), material_table)
-            from ogo.fea.validation import measure_model, write_measurements
+            from ogo.fea.qc.validation import measure_model, write_measurements
 
             write_measurements(N88_fileName, measure_model(
                 available_model, "hip", shaft=shaft_crop, ineligible=True))
@@ -1921,7 +1921,7 @@ def sidewaysFallFe(args):
     # Write out n88model file
     ogo.message("Writing out n88model file: %s" % N88_fileName)
     shaft_crop = verify_model_shaft(model2, shaft_crop)
-    from ogo.fea.validation import measure_model, write_measurements
+    from ogo.fea.qc.validation import measure_model, write_measurements
 
     write_measurements(N88_fileName, measure_model(
         model2, "hip", shaft=shaft_crop, registration_rotation=icp_transform["rotation"]))
@@ -1931,7 +1931,7 @@ def sidewaysFallFe(args):
     saved_model.Update()
     shaft_crop = verify_model_shaft(saved_model.GetOutput(), shaft_crop)
 
-    from ogo.fea.qc_render import try_export_model_qc
+    from ogo.fea.qc.render import try_export_model_qc
 
     shaft_crop["exports"] = {"qc_3d": try_export_model_qc(N88_fileName, "hip", model=model2)}
     with open(str(N88_fileName).replace(".n88model", "_shaft_geometry.json"), "w") as stream:

@@ -22,7 +22,7 @@ import vtk
 import vtkbone
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
-from ogo.fea.alignment import (
+from ogo.fea.alignment.core import (
     estimate_rigid_icp,
     estimate_rigid_icp_vtk,
     invert_point_transform,
@@ -1999,7 +1999,7 @@ def process_vertebra(
             test = check_image(boundary_masks, dataframe_path)
 
     ogo.message(f"Writing n88model file: {n88model_output_path}")
-    from ogo.fea.validation import measure_model, write_measurements
+    from ogo.fea.qc.validation import measure_model, write_measurements
 
     measurements = measure_model(
         model, "spine", body_image=padded_mask1, process_image=padded_mask2,
@@ -2028,7 +2028,7 @@ def process_vertebra(
     # Retain the aligned body ROI so post-solve QC uses the identical anatomy.
     body_qc_path = n88model_output_path.replace(".n88model", "_qc_body_mask.nii.gz")
     write_vtk_image_with_sitk_geometry(padded_mask1, body_qc_path)
-    from ogo.fea.qc_render import try_export_model_qc
+    from ogo.fea.qc.render import try_export_model_qc
     try_export_model_qc(n88model_output_path, "spine", body_mask=body_qc_path, model=model)
 
 

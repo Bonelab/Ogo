@@ -59,7 +59,7 @@ def test_empty_body_is_rejected():
 
 
 def test_substantial_body_cleanup_requires_review_not_exclusion():
-    from ogo.fea.validation import evaluate
+    from ogo.fea.qc.validation import evaluate
 
     row = {'site': 'spine', 'body_cleanup_removed_fraction': 0.06}
     assert 'substantial_body_cleanup' in evaluate(row)['qc_reasons']

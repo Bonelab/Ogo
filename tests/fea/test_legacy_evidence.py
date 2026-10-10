@@ -8,7 +8,7 @@ from tests.fea.test_model_export import hip_model
 
 
 def test_evidence_cache_retries_only_when_inputs_change(tmp_path):
-    from ogo.fea.legacy_qc import evidence_signature, needs_backfill
+    from ogo.fea.qc.legacy import evidence_signature, needs_backfill
     model = tmp_path / 'case.n88model'
     model.touch()
     row = {'measurement_source': 'legacy_backfill'}
@@ -21,7 +21,7 @@ def test_evidence_cache_retries_only_when_inputs_change(tmp_path):
 
 
 def test_evidence_manifest_resolves_relative_paths_and_rejects_duplicates(tmp_path):
-    from ogo.fea.legacy_qc import load_evidence
+    from ogo.fea.qc.legacy import load_evidence
     path = tmp_path / 'sources.csv'
     path.write_text('site,model_id,body_mask\nspine,case,body.nii.gz\n')
     assert load_evidence(path)[('spine', 'case')]['body_mask'] == str(tmp_path / 'body.nii.gz')
@@ -32,7 +32,7 @@ def test_evidence_manifest_resolves_relative_paths_and_rejects_duplicates(tmp_pa
 
 def test_registered_mask_geometry_and_process_recovery(tmp_path):
     sitk = pytest.importorskip('SimpleITK')
-    from ogo.fea.legacy_qc import registered_anatomy
+    from ogo.fea.qc.legacy import registered_anatomy
     mask = sitk.GetImageFromArray(np.ones((2, 2, 2), dtype=np.uint8))
     body = tmp_path / 'body.nii.gz'
     sitk.WriteImage(mask, str(body))
@@ -50,7 +50,7 @@ def test_registered_mask_geometry_and_process_recovery(tmp_path):
 
 def test_registered_mask_must_match_voxel_lattice(tmp_path):
     sitk = pytest.importorskip('SimpleITK')
-    from ogo.fea.legacy_qc import registered_anatomy
+    from ogo.fea.qc.legacy import registered_anatomy
     mask = sitk.GetImageFromArray(np.ones((2, 2, 2), dtype=np.uint8))
     mask.SetOrigin((0.3, 0, 0))
     path = tmp_path / 'body.nii.gz'
@@ -60,7 +60,7 @@ def test_registered_mask_must_match_voxel_lattice(tmp_path):
 
 
 def test_zero_anatomy_offset_is_valid_evidence():
-    from ogo.fea.validation import evaluate
+    from ogo.fea.qc.validation import evaluate
     row = evaluate({'site': 'spine', 'measurement_source': 'legacy_backfill',
                     'process_body_axial_offset_mm': 0,
                     'process_body_transverse_offset_mm': 10})
@@ -69,7 +69,7 @@ def test_zero_anatomy_offset_is_valid_evidence():
 
 def test_hip_distal_set_is_recovered_from_saved_plane_not_union(tmp_path, monkeypatch, hip_model):
     import vtkbone
-    from ogo.fea.legacy_qc import backfill_measurements
+    from ogo.fea.qc.legacy import backfill_measurements
     model = hip_model
     model.ApplyBoundaryCondition('Femoral_Head_PMMA_Nodes', 1, -.1, 'top_displacement')
     model.ApplyBoundaryCondition('Greater_Trochanter_PMMA_Nodes', 1, 0, 'bottom_fixed_y_PMMA')

@@ -24,7 +24,7 @@ import vtkbone
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 from ogo.cli.Visualize import vis3d
-from ogo.fea.qc_images import REVIEW_PANEL_SIZE, save_qc_panel
+from ogo.fea.qc.images import REVIEW_PANEL_SIZE, save_qc_panel
 
 
 def smooth_bone_sed(values, indices, bone, spacing):
@@ -96,7 +96,7 @@ def prepare_model_qc(model_path, site, body_mask=None, sed=False,
         if array is None:
             raise ValueError("SED rendering requires a solved model with StrainEnergyDensity")
         sed_values = vtk_to_numpy(array)
-        from ogo.fea.validation import write_measurements
+        from ogo.fea.qc.validation import write_measurements
 
         finite = np.isfinite(sed_values)
         write_measurements(model_path, {
@@ -384,7 +384,7 @@ def export_model_qc(model_path, site, body_mask=None, sed=False,
             {"site": site, "views": views, "image_format": "WEBP", "image_quality": 85,
              "image_size_pixels": list(REVIEW_PANEL_SIZE), "review_only": True}, indent=2))
     if model_path.with_name(model_path.stem + '_qc_metrics.csv').exists():
-        from ogo.fea.validation import write_measurements
+        from ogo.fea.qc.validation import write_measurements
         write_measurements(model_path, {'sed_image' if sed else 'anatomy_image': str(output)})
     return str(output)
 

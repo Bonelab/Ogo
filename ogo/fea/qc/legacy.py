@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ogo.fea.validation import measure_model, model_grid, write_measurements
+from ogo.fea.qc.validation import measure_model, model_grid, write_measurements
 
 
 BACKFILL_VERSION = 3

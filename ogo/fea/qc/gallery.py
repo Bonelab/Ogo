@@ -12,8 +12,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import quote
 
-from ogo.fea.review import FIELDS, REASONS, identity, inclusion_row, write_inclusion
-from ogo.fea.qc_images import REVIEW_PANEL_SIZE, save_qc_panel, save_review_image
+from ogo.fea.qc.review import FIELDS, REASONS, identity, inclusion_row, write_inclusion
+from ogo.fea.qc.images import REVIEW_PANEL_SIZE, save_qc_panel, save_review_image
 
 
 def _camera_images(path, output):

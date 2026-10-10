@@ -52,3 +52,12 @@ def test_fea_shared_dependencies_are_available():
     assert (data / "LT_FEMUR_SIDEWAYS_FALL_REF.vtk").is_file()
     for target in spine.SPINE_ICP_TARGETS:
         assert spine.default_spine_reference_path(target).is_file()
+
+
+def test_alignment_and_qc_are_grouped_by_responsibility():
+    from ogo.fea.alignment import hip
+    from ogo.fea.qc import gallery, images, legacy, render, review, validation
+
+    assert Path(hip.__file__).parent.name == "alignment"
+    for module in (gallery, images, legacy, render, review, validation):
+        assert Path(module.__file__).parent.name == "qc"

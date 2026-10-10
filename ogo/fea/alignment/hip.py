@@ -7,7 +7,7 @@ it never scales the participant's anatomy or its solved voxel dimensions.
 import numpy as np
 from scipy.spatial import cKDTree
 
-from ogo.fea.alignment import estimate_rigid_icp
+from ogo.fea.alignment.core import estimate_rigid_icp
 
 
 def estimate_femur_icp(*, moving_points, fixed_points, iterations=50):

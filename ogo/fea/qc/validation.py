@@ -201,7 +201,7 @@ def write_measurements(model_path, measurements):
         with path.open(newline='') as stream:
             row.update(next(csv.DictReader(stream)))
     row.update(measurements)
-    from ogo.fea.qc_images import qc_image_path
+    from ogo.fea.qc.images import qc_image_path
     row.update(model_id=model_path.stem, model_path=str(model_path),
                anatomy_image=str(qc_image_path(model_path)),
                sed_image=str(qc_image_path(model_path, sed=True)))
@@ -346,6 +346,6 @@ def _spine_checks(row, number, failures, review):
 
 def generate_gallery(rows, output, decisions=None):
     """Build the standalone review gallery without opening any FE model."""
-    from ogo.fea.gallery import generate_gallery as render
+    from ogo.fea.qc.gallery import generate_gallery as render
 
     return render(rows, output, decisions=decisions)

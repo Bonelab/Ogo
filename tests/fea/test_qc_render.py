@@ -7,7 +7,7 @@ import pytest
 
 
 def test_masked_sed_smoothing_excludes_disks_and_preserves_source():
-    from ogo.fea.qc_render import smooth_bone_sed
+    from ogo.fea.qc.render import smooth_bone_sed
 
     indices = np.indices((3, 3, 3)).reshape(3, -1).T
     bone = indices[:, 0] < 2
@@ -19,7 +19,7 @@ def test_masked_sed_smoothing_excludes_disks_and_preserves_source():
 
 
 def test_sed_missing_or_invalid_is_rejected():
-    from ogo.fea.qc_render import smooth_bone_sed
+    from ogo.fea.qc.render import smooth_bone_sed
 
     with pytest.raises(ValueError, match="finite"):
         smooth_bone_sed(np.array([np.nan]), np.zeros((1, 3), dtype=int),
@@ -37,7 +37,7 @@ def test_qc_uses_existing_visualizer_extension():
 
 def test_panel_prepares_geometry_once_for_all_views(tmp_path, monkeypatch):
     from PIL import Image
-    from ogo.fea import qc_render
+    from ogo.fea.qc import render as qc_render
 
     prepared = object()
     calls = []
@@ -61,14 +61,14 @@ def test_panel_prepares_geometry_once_for_all_views(tmp_path, monkeypatch):
 
 
 def test_ineligible_qc_is_anatomy_only(tmp_path):
-    from ogo.fea.qc_render import export_model_qc
+    from ogo.fea.qc.render import export_model_qc
 
     with pytest.raises(ValueError, match="Ineligible"):
         export_model_qc(tmp_path / "short.n88model", "hip", sed=True, ineligible=True)
 
 
 def test_render_failure_warns_without_interrupting_solver(monkeypatch):
-    from ogo.fea import qc_render
+    from ogo.fea.qc import render as qc_render
 
     def fail(*args, **kwargs):
         raise RuntimeError("No graphics display")
@@ -92,7 +92,7 @@ def test_too_short_branch_exports_before_exit():
 def test_export_keeps_only_panel_and_settings(tmp_path, monkeypatch):
     import json
     from PIL import Image
-    from ogo.fea import qc_render
+    from ogo.fea.qc import render as qc_render
 
     def fake_panel(model_path, temporary, site, body_mask, sed, model, ineligible):
         assert ineligible
@@ -122,7 +122,7 @@ def test_export_keeps_only_panel_and_settings(tmp_path, monkeypatch):
         assert image.format == "WEBP"
         assert image.size == (20, 60)
     assert all(not v["eligible_for_solve"] for v in json.loads((tmp_path / "short_qc_3d.json").read_text())["views"])
-    from ogo.fea.validation import write_measurements
+    from ogo.fea.qc.validation import write_measurements
     import csv
 
     legacy = tmp_path / "short_qc_3d.png"

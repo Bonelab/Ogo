@@ -146,14 +146,12 @@ CSV. Native-space masks cannot substitute for model-space evidence. Missing
 scan coverage stays unknown; backfill neither rewrites models nor renders images.
 Failures before meshing require job logs for participant accounting.
 
-For full-size resegmentation of reviewed failures, see the
-[cohort recovery example](../../examples/fea/cohort_recovery/README.md).
-
 ## Maintenance
 
 Anatomy-specific builders are in `femur.py` and `spine.py`; `metadata.py` records
-their parsed settings. `qc_render.py` prepares geometry once per three-view
-preview, and `validation.py` applies the QC policy without changing FE results.
+their parsed settings. `alignment/` contains shared ICP and hip initialization.
+`qc/` contains validation, rendering, gallery export and review decisions;
+`qc/render.py` prepares geometry once per three-view preview.
 Shared image helpers remain in `ogo.util.Helper` and `ogo.util.vtk_image`;
 rendering uses `ogo.cli.Visualize`, and reference surfaces ship in `ogo/dat`.
 

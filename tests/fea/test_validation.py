@@ -2,7 +2,7 @@ import csv
 
 import numpy as np
 
-from ogo.fea.validation import evaluate, grid_measurements, write_measurements, generate_gallery
+from ogo.fea.qc.validation import evaluate, grid_measurements, write_measurements, generate_gallery
 
 
 def test_disk_contact_uses_faces_not_diagonal_neighbors():

@@ -950,8 +950,8 @@ def run_faim_pipeline(
         log_file.write_text(log_text)
         profile = str(report_profile or "").strip().lower()
         if profile in ("spine", "femur"):
-            from ogo.fea.qc_render import try_export_model_qc
-            from ogo.fea.validation import write_measurements
+            from ogo.fea.qc.render import try_export_model_qc
+            from ogo.fea.qc.validation import write_measurements
 
             write_measurements(model_file, {
                 "site": "hip" if profile == "femur" else "spine",

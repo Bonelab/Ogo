@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from ogo.fea.review import inclusion_row, load_decisions
+from ogo.fea.qc.review import inclusion_row, load_decisions
 
 
 def gallery_data(content):
@@ -15,7 +15,7 @@ def gallery_data(content):
 
 
 def test_gallery_pages_filters_and_compact_data(tmp_path):
-    from ogo.fea.gallery import generate_gallery
+    from ogo.fea.qc.gallery import generate_gallery
     rows = [{'site': 'spine', 'model_id': f'case{i}', 'qc_status': 'pass', 'qc_reasons': ''}
             for i in range(501)]
     content = generate_gallery(rows, tmp_path / 'gallery.html').read_text()
@@ -35,7 +35,7 @@ def test_gallery_pagination_and_flags_do_not_change_decisions():
     node = shutil.which('node')
     if not node:
         pytest.skip('Node is required')
-    from ogo.fea import gallery
+    from ogo.fea.qc import gallery
     script = Path(gallery.__file__).with_name('gallery_review.js')
     code = '''const assert = require('node:assert/strict');
 const {pageIndices, excludedByFlags, inclusionRecord} = require(SCRIPT);
@@ -58,7 +58,7 @@ def test_review_decision_restores_scroll_after_refresh():
     node = shutil.which('node')
     if not node:
         pytest.skip('Node is required')
-    from ogo.fea import gallery
+    from ogo.fea.qc import gallery
     script = Path(gallery.__file__).with_name('gallery_review.js')
     code = '''const assert = require('node:assert/strict');
 const {preserveScroll} = require(SCRIPT);
@@ -75,7 +75,7 @@ assert.equal(viewport.scrollY, 2400);
 
 
 def test_gallery_sorting_is_numeric_and_puts_missing_results_last(tmp_path):
-    from ogo.fea import gallery
+    from ogo.fea.qc import gallery
     node = shutil.which('node')
     if not node:
         pytest.skip('Node is required')
@@ -97,7 +97,7 @@ assert.deepEqual(sortIndices([0,1,2],rows,'reaction_force_N:desc'),[0,2,1]);
 
 
 def test_gallery_has_quick_decisions_on_each_card(tmp_path):
-    from ogo.fea.gallery import generate_gallery
+    from ogo.fea.qc.gallery import generate_gallery
     output = tmp_path / 'gallery.html'
     generate_gallery([{'site': 'hip', 'model_id': 'case', 'qc_status': 'fail',
                        'qc_reasons': 'incomplete_distal_boundary'}], output)
@@ -137,13 +137,13 @@ def test_import_requires_unambiguous_identity(tmp_path):
 
 def test_command_backfills_only_missing_measurements(tmp_path, monkeypatch):
     from ogo.cli import ValidateFEA
-    from ogo.fea.validation import write_measurements
+    from ogo.fea.qc.validation import write_measurements
     write_measurements(tmp_path / 'existing.n88model', {'site': 'hip'})
     (tmp_path / 'existing.n88model').touch()
     (tmp_path / 'legacy.n88model').touch()
     calls = []
     def backfill(path, site=None, evidence=None):
-        from ogo.fea.legacy_qc import evidence_signature
+        from ogo.fea.qc.legacy import evidence_signature
         calls.append(path.name)
         return write_measurements(path, {'site': 'spine', 'measurement_source': 'legacy_backfill',
                                         'legacy_evidence_signature': evidence_signature(path, evidence)})
@@ -160,7 +160,7 @@ def test_javascript_csv_roundtrip_and_manual_provenance():
     node = shutil.which('node')
     if not node:
         pytest.skip('Node is required for browser-independent JavaScript tests')
-    from ogo.fea import gallery
+    from ogo.fea.qc import gallery
     script = Path(gallery.__file__).with_name('gallery_review.js')
     code = '''const assert = require('node:assert/strict');
 const {inclusionRecord, encodeCSV, parseCSV, validateReviews, imageVisible} = require(SCRIPT);
@@ -187,21 +187,21 @@ assert.equal(inclusionRecord(row,{manual_decision:'automatic'}).final_inclusion,
 
 
 def test_gallery_does_not_interpret_template_words_in_subject(tmp_path):
-    from ogo.fea.validation import evaluate, generate_gallery
+    from ogo.fea.qc.validation import evaluate, generate_gallery
     row = evaluate({'site': 'hip', 'model_id': 'DATA_SCRIPT_CARDS', 'qc_reasons': ''})
     path = generate_gallery([row], tmp_path / 'review.html')
     assert 'DATA_SCRIPT_CARDS' in path.read_text()
 
 
 def test_legacy_anatomy_is_not_silently_certified():
-    from ogo.fea.validation import evaluate
+    from ogo.fea.qc.validation import evaluate
     row = evaluate({'site': 'spine', 'measurement_source': 'legacy_backfill'})
     assert 'legacy_body_process_metrics_missing' in row['qc_reasons']
 
 
 def test_gallery_individual_views_keep_panel_order_and_cache(tmp_path):
     from PIL import Image
-    from ogo.fea.gallery import generate_gallery
+    from ogo.fea.qc.gallery import generate_gallery
     image = tmp_path / 'case_qc_3d.png'
     panel = Image.new('RGB', (1400, 2550))
     for index, color in enumerate(('red', 'green', 'blue')):
@@ -227,7 +227,7 @@ def test_gallery_individual_views_keep_panel_order_and_cache(tmp_path):
 
 def test_gallery_unknown_montage_is_not_split(tmp_path):
     from PIL import Image
-    from ogo.fea.gallery import generate_gallery
+    from ogo.fea.qc.gallery import generate_gallery
     image = tmp_path / 'legacy.png'
     Image.new('RGB', (400, 400), 'white').save(image)
     row = {'site': 'spine', 'model_id': 'legacy', 'qc_status': 'review',
@@ -240,7 +240,7 @@ def test_gallery_unknown_montage_is_not_split(tmp_path):
 def test_gallery_zip_is_portable_and_has_review_records(tmp_path):
     import zipfile
     from PIL import Image
-    from ogo.fea.gallery import export_gallery_zip
+    from ogo.fea.qc.gallery import export_gallery_zip
     image = tmp_path / 'case_qc_3d.png'
     Image.new('RGB', (1400, 2550), 'red').save(image)
     row = {'site': 'hip', 'model_id': 'case', 'qc_status': 'review',
