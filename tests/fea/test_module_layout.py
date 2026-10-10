@@ -18,3 +18,19 @@ def test_domain_modules_expose_workflow_entry_points():
     assert callable(femur.sidewaysFallFe)
     assert callable(spine.main)
     assert callable(spine.process_vertebra)
+
+
+def test_femur_exposes_only_current_cropping_helpers():
+    from ogo.fea import femur
+
+    assert callable(femur.crop_vtk_images_to_fixed_proximal_length)
+    assert callable(femur.crop_vtk_images_to_greater_trochanter_length)
+    for name in (
+        "crop_vtk_images_to_bbox_ratio",
+        "crop_vtk_images_to_proximal_box_ratio",
+        "crop_vtk_images_to_flat_post_icp_ratio",
+        "crop_vtk_images_to_oblique_post_icp_ratio",
+        "standardize_femur_shaft_length",
+        "detect_lesser_trochanter_cut_z",
+    ):
+        assert not hasattr(femur, name), name

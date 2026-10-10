@@ -7,8 +7,8 @@ audits the model, runs FAIM/N88 and writes modelling metadata.
 | --- | --- |
 | CLI and site arguments | `GenerateFEM.build_parser`, `build_spine_command`, `build_femur_command` |
 | Reporting endpoint and criteria | `GenerateFEM.solve_report_profile`, `critical_volume_percent`, `critical_strain` |
-| Spine preparation and model | `spine.clean_body_component`, `get_icp_with_scaling`, `process_vertebra` |
-| Hip preparation and model | `femur.sidewaysFallFe`, `crop_vtk_images_to_greater_trochanter_length` |
+| Spine preparation and model | `spine._prepare_spine_inputs`, `_register_spine_inputs`, `process_vertebra` |
+| Hip preparation and model | `femur._prepare_femur_inputs`, `_register_femur_inputs`, `sidewaysFallFe` |
 | Hip multistart alignment | `hip_registration.estimate_femur_icp` |
 | Physical scan-end/shaft measurements | `shaft_geometry.capture_distal_scan_face`, `measure_available_shaft`, `verify_model_shaft` |
 | Shared transforms | `alignment.py`, `image_io.py` |
@@ -24,12 +24,16 @@ audits the model, runs FAIM/N88 and writes modelling metadata.
 Anatomy defaults are constants at the top of `spine.py` and `femur.py`.
 Shared helpers own geometry/material logic; the CLI owns solving and reporting.
 Changing a reporting criterion must not silently change model construction.
+Hip supports only the GT-relative flat shaft crop; the initial fixed-length crop
+is used for registration only. Spine settings are explicit keyword arguments;
+misspelled setting names raise an error before reading inputs.
 
 Spine cleans the body label, crops, estimates centroid-initialized ICP, resamples,
 builds caps/materials and applies compression. Hip captures the original distal
 scan face, rough-crops for registration, transforms the full scan, builds proximal
 supports, checks available coverage, then crops and constrains the shaft.
 Reference scaling changes the registration target, not native bone dimensions.
+The modelling JSON records spine label smoothing and resolved contact settings.
 
 For hip, the saved-model length check is
 `min(z of Greater_Trochanter_PMMA_Nodes) - median(z of Distal_Femur_Nodes)`.

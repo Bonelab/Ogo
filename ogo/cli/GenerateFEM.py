@@ -29,6 +29,7 @@ from ogo.fea.spine import (
     SPINE_ALIGNMENT_METHOD,
     SPINE_ICP_TARGETS,
     default_spine_reference_path,
+    generation_settings as spine_generation_settings,
     solve_report_profile as spine_solve_report_profile,
 )
 from ogo.fea.femur import (
@@ -438,6 +439,13 @@ def write_modeling_metadata(
         return None
 
     output_path = model_path.with_name(model_path.with_suffix("").name + "_modeling.json")
+    generation_settings = {}
+    if model_type == "spine":
+        generation_settings = spine_generation_settings()
+        if output_path.exists():
+            generation_settings = json.loads(output_path.read_text()).get(
+                "generation_settings", generation_settings
+            )
     common = {
         "schema_version": 1,
         "model_file": str(model_path),
@@ -558,6 +566,7 @@ def write_modeling_metadata(
             },
             "image_processing": {
                 "iso_resolution_mm": option_float(generator_argv, "--iso_resolution", DEFAULT_SPINE_ISO_RESOLUTION_MM),
+                "registration_label_smoothing": generation_settings["registration_label_smoothing"],
                 "spatial_operations": "ICP transform and isotropic output spacing in one shared VTK reslice",
                 "image_interpolation": "cubic",
                 "label_interpolation": "nearest-neighbor",
@@ -636,6 +645,7 @@ def write_modeling_metadata(
                 },
             },
             "boundary_conditions": {
+                "stable_contact": generation_settings["stable_contact"],
                 "fixture_geometry": {
                     "superior_cap": {
                         "label_id": option_int(generator_argv, "--top_node_set_id", 4),
@@ -896,6 +906,8 @@ def write_modeling_metadata(
             },
         })
 
+    if generation_settings:
+        metadata["generation_settings"] = generation_settings
     output_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     print(f"Wrote {output_path}")
     return output_path

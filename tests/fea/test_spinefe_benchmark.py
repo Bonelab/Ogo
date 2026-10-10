@@ -267,7 +267,12 @@ def test_spine_registration_uses_preprocessed_isotropic_body():
 
     from ogo.fea import spine
 
-    source = textwrap.dedent(inspect.getsource(spine.process_vertebra))
+    builder = inspect.getsource(spine.process_vertebra)
+    source = (
+        textwrap.dedent(inspect.getsource(spine._prepare_spine_inputs))
+        + textwrap.dedent(inspect.getsource(spine._register_spine_inputs))
+    )
+    assert builder.index("_prepare_spine_inputs(") < builder.index("_register_spine_inputs(")
 
     assert "SPINE_PREPROCESSING_CROP_MARGIN_MM" in source
     assert "resample_vtk_image_to_spacing" in source
@@ -287,7 +292,7 @@ def test_spine_workflow_resamples_to_explicit_reference_grid():
 
     from ogo.fea import spine
 
-    source = textwrap.dedent(inspect.getsource(spine.process_vertebra))
+    source = textwrap.dedent(inspect.getsource(spine._register_spine_inputs))
 
     assert "output_grid_for_point_transform" in source
     assert "resample_vtk_image_with_point_transform" in source

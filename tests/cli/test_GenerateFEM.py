@@ -827,6 +827,16 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
     assert data["alignment"]["registration_backend"] == "numpy"
     assert data["alignment"]["registration_landmarks"] == 8000
     assert data["alignment"]["registration_iterations"] == 50
+    assert data["image_processing"]["registration_label_smoothing"] == {
+        "sigma_mm": 1.0, "threshold": 0.5, "stage": "before ICP",
+    }
+    contact = data["boundary_conditions"]["stable_contact"]
+    assert contact["enabled"] is True
+    assert contact["trim_fraction"] == 0.10
+    assert contact["minimum_shift_mm"] == 3.0
+    assert contact["close_gaps_3d"] is True
+    assert contact["maximum_gap_voxels"] == 2
+    assert contact["keep_largest_component"] is True
     assert data["geometry"]["model_coordinates"] == "preprocessed_image_physical_space"
     assert data["materials"]["trabecular"]["elastic_E_func"] == "kopperdahl_trab_E"
     assert data["materials"]["cortical"]["material_id_range"] == [129, 256]
@@ -842,6 +852,28 @@ def test_spine_modeling_metadata_records_materials_and_bcs(tmp_path):
     assert data["boundary_conditions"]["constraints"][1]["value_mm"] == 0.0
     assert data["solve_and_reporting"]["target_displacement_percent"] == 0.68
     assert data["solve_and_reporting"]["run_pistoia"] is False
+
+
+def test_spine_metadata_preserves_resolved_generation_settings(tmp_path):
+    from ogo.fea.spine import generation_settings
+
+    model = tmp_path / "density_vertebra_2_L1.n88model"
+    model.write_text("dummy")
+    settings = generation_settings(
+        label_smoothing_sigma_mm=0.75,
+        stable_surface_trim_fraction=0.3,
+        stable_surface_min_shift=4.0,
+        stable_surface_close_gaps_3d=False,
+    )
+    sidecar = model.with_name(model.stem + "_modeling.json")
+    sidecar.write_text(json.dumps({"generation_settings": settings}))
+    path = GenerateFEM.write_modeling_metadata(
+        model, "spine", ["density.nii.gz", "mask.nii.gz"], _metadata_args(tmp_path)
+    )
+    data = json.loads(path.read_text())
+    assert data["image_processing"]["registration_label_smoothing"] == settings["registration_label_smoothing"]
+    assert data["boundary_conditions"]["stable_contact"] == settings["stable_contact"]
+    assert data["generation_settings"] == settings
 
 
 def test_femur_modeling_metadata_records_materials_shaft_and_bcs(tmp_path):

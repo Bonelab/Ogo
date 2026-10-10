@@ -11,7 +11,7 @@ def test_sideways_fall_icp_path_does_not_pre_rotate_input_images():
 
     from ogo.fea import femur
 
-    source = textwrap.dedent(inspect.getsource(femur.sidewaysFallFe))
+    source = textwrap.dedent(inspect.getsource(femur._register_femur_inputs))
     tree = ast.parse(source)
     pre_rotation_calls = [
         node
@@ -28,7 +28,7 @@ def test_sideways_fall_icp_path_uses_voxel_surface_points():
 
     from ogo.fea import femur
 
-    source = textwrap.dedent(inspect.getsource(femur.sidewaysFallFe))
+    source = textwrap.dedent(inspect.getsource(femur._register_femur_inputs))
     tree = ast.parse(source)
     called_names = {
         node.func.id
@@ -52,7 +52,7 @@ def test_sideways_fall_icp_path_uses_deterministic_point_cloud_transform():
 
     from ogo.fea import femur
 
-    source = textwrap.dedent(inspect.getsource(femur.sidewaysFallFe))
+    source = textwrap.dedent(inspect.getsource(femur._register_femur_inputs))
     tree = ast.parse(source)
     called_names = {
         node.func.id
@@ -69,39 +69,13 @@ def test_sideways_fall_icp_path_uses_deterministic_point_cloud_transform():
     assert helper_calls == []
 
 
-def test_sideways_fall_distal_support_is_bbox_relative_recipe_plane():
-    pytest.importorskip("vtk")
-    pytest.importorskip("vtkbone")
-
+def test_sideways_fall_distal_support_uses_final_flat_crop_face():
     from ogo.fea import femur
 
-    bounds = (
-        -76.45140061071066,
-        -31.451400610710657,
-        -102.34001525211478,
-        -36.34001525211478,
-        -0.39488812795613626,
-        83.60511187204386,
-    )
-    plane = femur.bbox_relative_oriented_contact_plane(
-        bounds,
-        center_fraction=femur.DISTAL_SHAFT_FIXTURE_CENTER_FRACTION,
-        size_fraction=femur.DISTAL_SHAFT_FIXTURE_SIZE_FRACTION,
-        normal=femur.DISTAL_SHAFT_FIXTURE_NORMAL,
-        size_bounds_axes=("x", "y"),
-        shape="anatomy",
-    )
-
-    assert femur.DISTAL_SHAFT_FIXTURE_CENTER_FRACTION == (0.5, 0.5, -0.1)
-    assert femur.DISTAL_SHAFT_FIXTURE_SIZE_FRACTION == (1.0, 1.0)
-    assert plane["center"] == pytest.approx(
-        (-53.95140061071066, -69.34001525211478, -8.794888127956137)
-    )
-    assert plane["normal"] == pytest.approx(
-        femur.DISTAL_SHAFT_FIXTURE_NORMAL,
-        abs=1.0e-12,
-    )
-    assert plane["size"] == pytest.approx((63.750, 45.0), abs=0.2)
+    source = inspect.getsource(femur.sidewaysFallFe)
+    assert "straight_crop_face_support_surface_vtk(" in source
+    assert "support_fraction=POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION" in source
+    assert femur.POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION == 0.9
 
 
 def test_sideways_fall_fits_contact_canvas_before_generating_pmma():

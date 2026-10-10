@@ -3,7 +3,58 @@
 Shared geometry and mesh helpers live in alignment, boundary and model.
 The public ogoFEA wrapper handles solving and reporting; see docs/fea/implementation.md."""
 
+import json
 import os
+import argparse
+import ogo.fea.material_laws
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import SimpleITK as sitk
+from scipy.ndimage import (
+    binary_dilation,
+    binary_erosion,
+    find_objects,
+    label,
+)
+import vtk
+import vtkbone
+from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
+
+from ogo.fea.alignment import (
+    estimate_rigid_icp,
+    estimate_rigid_icp_vtk,
+    invert_point_transform,
+    output_grid_for_point_transform,
+    point_cloud_axis_lengths,
+    polydata_points,
+    resample_vtk_image_with_point_transform,
+    sample_points,
+    surface_points_from_vtk_mask,
+)
+from ogo.fea.boundary import (
+    bbox_relative_contact_plane,
+    foreground_voxel_center_bounds,
+    generate_projected_material_disk_vtk,
+    pad_vtk_images_to_physical_bounds,
+    projected_material_disk_required_bounds,
+    resample_vtk_image_to_spacing,
+    should_smooth_resampled_mask,
+    smooth_binary_mask_vtk,
+    smooth_label_mask_vtk,
+)
+from ogo.fea.image_io import write_vtk_image_with_sitk_geometry
+from ogo.fea.model import (
+    apply_spine_boundary_conditions as apply_boundary_conditions,
+    create_microfe_model,
+    find_and_add_visible_nodes,
+    log_fe_arguments,
+)
+import ogo.util.Helper as ogo
+from ogo.util.echo_arguments import echo_arguments
+
+
 from pathlib import Path
 
 
@@ -93,6 +144,40 @@ def pistoia_mask_output_path(output_file):
     """Return the model-space Pistoia ROI mask sidecar path for a model."""
     output_path = Path(output_file)
     return output_path.with_name(f"{output_path.stem}_pistoia_mask.nii.gz")
+
+
+def generation_settings(
+    *,
+    label_smoothing_sigma_mm=DEFAULT_SPINE_LABEL_SMOOTHING_SIGMA_MM,
+    label_smoothing_threshold=DEFAULT_SPINE_LABEL_SMOOTHING_THRESHOLD,
+    stable_surface_fraction=DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
+    stable_surface_trim_fraction=DEFAULT_SPINE_STABLE_CONTACT_TRIM_FRACTION,
+    stable_surface_min_area_fraction=DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
+    stable_surface_max_depth=DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
+    stable_surface_min_shift=DEFAULT_SPINE_STABLE_CONTACT_MIN_SHIFT_MM,
+    stable_surface_close_gaps_3d=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
+    stable_surface_close_gaps_max_gap=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
+    stable_surface_keep_largest_component=DEFAULT_SPINE_STABLE_CONTACT_KEEP_LARGEST_COMPONENT,
+):
+    """Describe resolved label preparation and support construction settings."""
+    return {
+        "registration_label_smoothing": {
+            "sigma_mm": label_smoothing_sigma_mm,
+            "threshold": label_smoothing_threshold,
+            "stage": "before ICP",
+        },
+        "stable_contact": {
+            "enabled": stable_surface_fraction > 0 or stable_surface_trim_fraction > 0,
+            "surface_fraction": stable_surface_fraction,
+            "trim_fraction": stable_surface_trim_fraction,
+            "minimum_area_fraction": stable_surface_min_area_fraction,
+            "maximum_depth_mm": stable_surface_max_depth,
+            "minimum_shift_mm": stable_surface_min_shift,
+            "close_gaps_3d": stable_surface_close_gaps_3d,
+            "maximum_gap_voxels": stable_surface_close_gaps_max_gap,
+            "keep_largest_component": stable_surface_keep_largest_component,
+        },
+    }
 
 
 def _mask_centroid_physical(vtk_image):
@@ -309,61 +394,6 @@ def find_spinefe_benchmark_dir(start_dir=None, env_var="SPINEFE_BENCHMARK_DIR"):
 # -----------------------------------------------------------------------------
 # Spine compression workflow builder
 # -----------------------------------------------------------------------------
-
-import os
-import argparse
-import os
-from glob import glob
-import ogo.fea.material_laws
-
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import SimpleITK as sitk
-from matplotlib import pyplot as plt
-from scipy.ndimage import (
-    binary_dilation,
-    binary_erosion,
-    find_objects,
-    label,
-)
-from skimage.exposure import rescale_intensity
-import vtk
-import vtkbone
-from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
-
-from ogo.fea.alignment import (
-    estimate_rigid_icp,
-    estimate_rigid_icp_vtk,
-    invert_point_transform,
-    output_grid_for_point_transform,
-    point_cloud_axis_lengths,
-    polydata_points,
-    resample_vtk_image_with_point_transform,
-    sample_points,
-    surface_points_from_vtk_mask,
-)
-from ogo.fea.boundary import (
-    bbox_relative_contact_plane,
-    foreground_voxel_center_bounds,
-    generate_projected_material_disk_vtk,
-    pad_vtk_images_to_physical_bounds,
-    projected_material_disk_required_bounds,
-    resample_vtk_image_to_spacing,
-    should_smooth_resampled_mask,
-    smooth_binary_mask_vtk,
-    smooth_label_mask_vtk,
-)
-from ogo.fea.image_io import write_vtk_image_with_sitk_geometry
-from ogo.fea.model import (
-    apply_spine_boundary_conditions as apply_boundary_conditions,
-    create_microfe_model,
-    find_and_add_visible_nodes,
-    log_fe_arguments,
-)
-import ogo.util.Helper as ogo
-from ogo.util.echo_arguments import echo_arguments
-from scipy.ndimage import gaussian_filter
 
 
 vtk.vtkObject.GlobalWarningDisplayOff()
@@ -1317,72 +1347,19 @@ def clean_body_component(mask_image, body_label):
     return numpy_to_vtk_image(data, mask_image), metrics
 
 
-def process_vertebra(input_mask, input_image, n88model_output_path, body_label, process_label, reference_path, **kwargs):
-
-    """Build one vertebra model, registered masks and generation QC sidecars."""
-    pmma_mat_id = kwargs.get("pmma_mat_id", 5000)
-    pistoia_mask = kwargs.get("pistoia_mask")
-    pistoia_mask_label = kwargs.get("pistoia_mask_label") or []
-    iso_resolution = kwargs.get("iso_resolution", DEFAULT_SPINE_ISO_RESOLUTION_MM)
-    pmma_thick = kwargs.get("pmma_thick", DEFAULT_SPINE_PMMA_THICKNESS_MM)
-    pmma_intrusion = kwargs.get("pmma_intrusion", DEFAULT_SPINE_PMMA_INTRUSION_MM)
-    stable_surface_fraction = float(
-        kwargs.get("stable_surface_fraction", DEFAULT_SPINE_STABLE_CONTACT_FRACTION)
-    )
-    stable_surface_trim_fraction = float(
-        kwargs.get("stable_surface_trim_fraction", DEFAULT_SPINE_STABLE_CONTACT_TRIM_FRACTION)
-    )
-    stable_surface_min_area_fraction = float(
-        kwargs.get(
-            "stable_surface_min_area_fraction",
-            DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
-        )
-    )
-    stable_surface_max_depth = float(
-        kwargs.get("stable_surface_max_depth", DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM)
-    )
-    stable_surface_min_shift = float(
-        kwargs.get("stable_surface_min_shift", DEFAULT_SPINE_STABLE_CONTACT_MIN_SHIFT_MM)
-    )
-    stable_surface_close_gaps_3d = kwargs.get(
-        "stable_surface_close_gaps_3d",
-        DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
-    )
-    stable_surface_close_gaps_max_gap = int(
-        kwargs.get(
-            "stable_surface_close_gaps_max_gap",
-            DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
-        )
-    )
-    stable_surface_keep_largest_component = kwargs.get(
-        "stable_surface_keep_largest_component",
-        DEFAULT_SPINE_STABLE_CONTACT_KEEP_LARGEST_COMPONENT,
-    )
-    stable_surface_enabled = stable_surface_fraction > 0.0 or stable_surface_trim_fraction > 0.0
-    top_node_set_id = kwargs.get("top_node_set_id", DEFAULT_SPINE_TOP_NODE_SET_ID)
-    bottom_node_set_id = kwargs.get("bottom_node_set_id", DEFAULT_SPINE_BOTTOM_NODE_SET_ID)
-    quality_control = kwargs.get("quality_control", True)
-    process_orientation_qc = kwargs.get("process_orientation_qc", True)
-    registration_scale = kwargs.get("registration_scale", DEFAULT_SPINE_REGISTRATION_SCALE)
-    registration_min_scale = kwargs.get("registration_min_scale", DEFAULT_SPINE_REGISTRATION_MIN_SCALE)
-    registration_max_scale = kwargs.get("registration_max_scale", DEFAULT_SPINE_REGISTRATION_MAX_SCALE)
-    registration_backend = kwargs.get("registration_backend", DEFAULT_SPINE_REGISTRATION_BACKEND)
-    registration_landmarks = kwargs.get("registration_landmarks", DEFAULT_SPINE_REGISTRATION_LANDMARKS)
-    registration_iterations = kwargs.get("registration_iterations", DEFAULT_SPINE_REGISTRATION_ITERATIONS)
-    spine_icp_target = str(kwargs.get("spine_icp_target", DEFAULT_SPINE_ICP_TARGET)).strip().lower()
-    if spine_icp_target not in SPINE_ICP_TARGETS:
-        raise ValueError("spine_icp_target must be 'body' or 'vertebra'.")
-    mask_smoothing_spacing_threshold = kwargs.get(
-        "mask_smoothing_spacing_threshold",
-        DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
-    )
-    label_smoothing_sigma_mm = float(
-        kwargs.get("label_smoothing_sigma_mm", DEFAULT_SPINE_LABEL_SMOOTHING_SIGMA_MM)
-    )
-    label_smoothing_threshold = float(
-        kwargs.get("label_smoothing_threshold", DEFAULT_SPINE_LABEL_SMOOTHING_THRESHOLD)
-    )
-
+def _prepare_spine_inputs(
+    input_image,
+    input_mask,
+    body_label,
+    process_label,
+    pistoia_mask,
+    pistoia_mask_label,
+    iso_resolution,
+    label_smoothing_sigma_mm,
+    label_smoothing_threshold,
+    spine_icp_target,
+):
+    """Read, clean and resample labels and density on a common isotropic grid."""
     #Read Image and Mask
     ogo.message(f"Reading image...: {input_image}")
     image_reader = read(input_image)
@@ -1474,6 +1451,38 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     if spine_icp_target == "vertebra":
         registration_target = combine_mask(registration_body.GetOutput(), isolated_process.GetOutput())
 
+    return (
+        preprocessed_image,
+        preprocessed_pistoia_mask,
+        registration_target,
+        isolated_vertebra,
+        isolated_process,
+        input_spacing,
+        body_cleanup,
+    )
+
+
+def _register_spine_inputs(
+    preprocessed_image,
+    preprocessed_pistoia_mask,
+    registration_target,
+    isolated_vertebra,
+    isolated_process,
+    input_spacing,
+    reference_path,
+    iso_resolution,
+    registration_scale,
+    registration_min_scale,
+    registration_max_scale,
+    registration_backend,
+    registration_landmarks,
+    registration_iterations,
+    registration_margin_voxels,
+    mask_smoothing_spacing_threshold,
+    process_orientation_qc,
+    spine_icp_target,
+):
+    """Register the chosen surface and resample full anatomy into the reference frame."""
     # Marching Cubes and Registration
     if not os.path.exists(reference_path):
         raise FileNotFoundError(
@@ -1514,7 +1523,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         rotation=sample_to_reference_rotation,
         translation=sample_to_reference_translation,
         spacing=output_spacing,
-        margin_voxels=int(kwargs.get("registration_margin_voxels", 4)),
+        margin_voxels=int(registration_margin_voxels),
     )
     transformed_vertebra = resample_vtk_image_with_point_transform(
         isolated_vertebra.GetOutput(),
@@ -1580,6 +1589,161 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
             f"axial_offset={process_qc['axial_offset_mm']:.2f} mm, "
             f"transverse_offset={process_qc['transverse_offset_mm']:.2f} mm"
         )
+
+    return (
+        transformed_vertebra,
+        transformed_process,
+        transformed_image,
+        transformed_pistoia_mask,
+        sample_to_reference_rotation,
+    )
+
+
+def process_vertebra(
+    input_mask, input_image, n88model_output_path, body_label, process_label, reference_path,
+    *,
+    iso_resolution=DEFAULT_SPINE_ISO_RESOLUTION_MM,
+    pistoia_mask=None,
+    pistoia_mask_label=None,
+    pmma_thick=DEFAULT_SPINE_PMMA_THICKNESS_MM,
+    pmma_intrusion=DEFAULT_SPINE_PMMA_INTRUSION_MM,
+    stable_surface_fraction=DEFAULT_SPINE_STABLE_CONTACT_FRACTION,
+    stable_surface_trim_fraction=DEFAULT_SPINE_STABLE_CONTACT_TRIM_FRACTION,
+    stable_surface_min_area_fraction=DEFAULT_SPINE_STABLE_CONTACT_MIN_AREA_FRACTION,
+    stable_surface_max_depth=DEFAULT_SPINE_STABLE_CONTACT_MAX_DEPTH_MM,
+    stable_surface_min_shift=DEFAULT_SPINE_STABLE_CONTACT_MIN_SHIFT_MM,
+    stable_surface_close_gaps_3d=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_3D,
+    stable_surface_close_gaps_max_gap=DEFAULT_SPINE_STABLE_CONTACT_CLOSE_GAPS_MAX_GAP,
+    stable_surface_keep_largest_component=DEFAULT_SPINE_STABLE_CONTACT_KEEP_LARGEST_COMPONENT,
+    quality_control=True,
+    process_orientation_qc=True,
+    registration_scale=DEFAULT_SPINE_REGISTRATION_SCALE,
+    registration_min_scale=DEFAULT_SPINE_REGISTRATION_MIN_SCALE,
+    registration_max_scale=DEFAULT_SPINE_REGISTRATION_MAX_SCALE,
+    registration_backend=DEFAULT_SPINE_REGISTRATION_BACKEND,
+    registration_landmarks=DEFAULT_SPINE_REGISTRATION_LANDMARKS,
+    registration_iterations=DEFAULT_SPINE_REGISTRATION_ITERATIONS,
+    registration_margin_voxels=4,
+    spine_icp_target=DEFAULT_SPINE_ICP_TARGET,
+    mask_smoothing_spacing_threshold=DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
+    label_smoothing_sigma_mm=DEFAULT_SPINE_LABEL_SMOOTHING_SIGMA_MM,
+    label_smoothing_threshold=DEFAULT_SPINE_LABEL_SMOOTHING_THRESHOLD,
+    export_nifti=False,
+    poissons_ratio=DEFAULT_SPINE_POISSONS_RATIO,
+    elastic_E_func=None,
+    yield_comp_func=None,
+    yield_tens_func=None,
+    cort_elastic_E_func=None,
+    cort_yield_comp_func=None,
+    cort_yield_tens_func=None,
+    cort_poissons_ratio=None,
+    pmma_mat_id=DEFAULT_SPINE_PMMA_MATERIAL_ID,
+    pmma_E=DEFAULT_SPINE_PMMA_E_MPA,
+    pmma_v=DEFAULT_SPINE_PMMA_POISSONS_RATIO,
+    pmma_yield_compression=None,
+    pmma_yield_tension=None,
+    fe_displacement=DEFAULT_SPINE_FE_DISPLACEMENT_MM,
+    top_node_set_id=DEFAULT_SPINE_TOP_NODE_SET_ID,
+    bottom_node_set_id=DEFAULT_SPINE_BOTTOM_NODE_SET_ID,
+    top_node_set_name="body_top",
+    bottom_node_set_name="body_bottom",
+    top_direction=(0, 0, 1),
+    bottom_direction=(0, 0, -1),
+    top_displacement="top_displacement",
+    bottom_fixed_senses=("x", "y", "z"),
+    filter_bc_node_sets=True,
+    bc_filter_axis="z",
+    bc_filter_tolerance=1.0e-5,
+):
+    """Build one vertebra model, registered masks and generation QC sidecars."""
+    pistoia_mask_label = pistoia_mask_label or []
+    stable_surface_fraction = float(stable_surface_fraction)
+    stable_surface_trim_fraction = float(stable_surface_trim_fraction)
+    stable_surface_min_area_fraction = float(stable_surface_min_area_fraction)
+    stable_surface_max_depth = float(stable_surface_max_depth)
+    stable_surface_min_shift = float(stable_surface_min_shift)
+    stable_surface_close_gaps_max_gap = int(stable_surface_close_gaps_max_gap)
+    stable_surface_enabled = stable_surface_fraction > 0.0 or stable_surface_trim_fraction > 0.0
+    label_smoothing_sigma_mm = float(label_smoothing_sigma_mm)
+    label_smoothing_threshold = float(label_smoothing_threshold)
+    spine_icp_target = str(spine_icp_target).strip().lower()
+    if spine_icp_target not in SPINE_ICP_TARGETS:
+        raise ValueError("spine_icp_target must be 'body' or 'vertebra'.")
+    model_parameters = {
+        "poissons_ratio": poissons_ratio,
+        "elastic_E_func": elastic_E_func,
+        "yield_comp_func": yield_comp_func,
+        "yield_tens_func": yield_tens_func,
+        "cort_elastic_E_func": cort_elastic_E_func,
+        "cort_yield_comp_func": cort_yield_comp_func,
+        "cort_yield_tens_func": cort_yield_tens_func,
+        "cort_poissons_ratio": cort_poissons_ratio,
+        "pmma_mat_id": pmma_mat_id,
+        "pmma_E": pmma_E,
+        "pmma_v": pmma_v,
+        "pmma_yield_compression": pmma_yield_compression,
+        "pmma_yield_tension": pmma_yield_tension,
+        "fe_displacement": fe_displacement,
+        "top_node_set_id": top_node_set_id,
+        "bottom_node_set_id": bottom_node_set_id,
+        "top_node_set_name": top_node_set_name,
+        "bottom_node_set_name": bottom_node_set_name,
+        "top_direction": top_direction,
+        "bottom_direction": bottom_direction,
+        "top_displacement": top_displacement,
+        "bottom_fixed_senses": bottom_fixed_senses,
+        "filter_bc_node_sets": filter_bc_node_sets,
+        "bc_filter_axis": bc_filter_axis,
+        "bc_filter_tolerance": bc_filter_tolerance,
+    }
+
+    (
+        preprocessed_image,
+        preprocessed_pistoia_mask,
+        registration_target,
+        isolated_vertebra,
+        isolated_process,
+        input_spacing,
+        body_cleanup,
+    ) = _prepare_spine_inputs(
+        input_image,
+        input_mask,
+        body_label,
+        process_label,
+        pistoia_mask,
+        pistoia_mask_label,
+        iso_resolution,
+        label_smoothing_sigma_mm,
+        label_smoothing_threshold,
+        spine_icp_target,
+    )
+
+    (
+        transformed_vertebra,
+        transformed_process,
+        transformed_image,
+        transformed_pistoia_mask,
+        sample_to_reference_rotation,
+    ) = _register_spine_inputs(
+        preprocessed_image,
+        preprocessed_pistoia_mask,
+        registration_target,
+        isolated_vertebra,
+        isolated_process,
+        input_spacing,
+        reference_path,
+        iso_resolution,
+        registration_scale,
+        registration_min_scale,
+        registration_max_scale,
+        registration_backend,
+        registration_landmarks,
+        registration_iterations,
+        registration_margin_voxels,
+        mask_smoothing_spacing_threshold,
+        process_orientation_qc,
+        spine_icp_target,
+    )
 
     ogo.message(f"relabelling mask and identifying boundary surfaces...")
     # Assuming mask1_data and mask2_data are your initial binary masks
@@ -1803,10 +1967,10 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
         bottom_boundary_mask_image=inferior_disk,
         top_boundary_mask_label=1,
         bottom_boundary_mask_label=1,
-        **kwargs,
+        **model_parameters,
     )
 
-    if kwargs.get("export_nifti", False):
+    if export_nifti:
         ogo.message("generating nifti files...")
 
         export_nifti_outputs(
@@ -1847,12 +2011,25 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
     writer.SetFileName(n88model_output_path)
     writer.Update()
 
+    settings = generation_settings(
+        label_smoothing_sigma_mm=label_smoothing_sigma_mm,
+        label_smoothing_threshold=label_smoothing_threshold,
+        stable_surface_fraction=stable_surface_fraction,
+        stable_surface_trim_fraction=stable_surface_trim_fraction,
+        stable_surface_min_area_fraction=stable_surface_min_area_fraction,
+        stable_surface_max_depth=stable_surface_max_depth,
+        stable_surface_min_shift=stable_surface_min_shift,
+        stable_surface_close_gaps_3d=stable_surface_close_gaps_3d,
+        stable_surface_close_gaps_max_gap=stable_surface_close_gaps_max_gap,
+        stable_surface_keep_largest_component=stable_surface_keep_largest_component,
+    )
+    settings_path = Path(n88model_output_path).with_name(Path(n88model_output_path).stem + "_modeling.json")
+    settings_path.write_text(json.dumps({"generation_settings": settings}, indent=2) + "\n")
     # Retain the aligned body ROI so post-solve QC uses the identical anatomy.
     body_qc_path = n88model_output_path.replace(".n88model", "_qc_body_mask.nii.gz")
     write_vtk_image_with_sitk_geometry(padded_mask1, body_qc_path)
     from ogo.fea.qc_render import try_export_model_qc
     try_export_model_qc(n88model_output_path, "spine", body_mask=body_qc_path, model=model)
-
 
 
 ###################################################################### MAIN
@@ -1862,30 +2039,7 @@ def process_vertebra(input_mask, input_image, n88model_output_path, body_label, 
 
 def main():
     """Parse anatomy-builder arguments and generate the requested vertebra model."""
-    description = '''
-    This script sets up the L4 vertebral compression FE model from the
-        density (K2HPO4) calibrated image. This script sets up the model for a L4 vertebra
-        (including arch and pedicles). The analysis resamples the image to isotropic voxels,
-        transforms the image, applies the bone mask and bins the data. It then creates the FE
-        model for solving using FAIM (v8.1, Numerics Solutions Ltd, Calgary, Canada - Steven
-        Boyd).
-
-        Input: Calibrated K2HPO4 Image (*.nii), Bone Mask (*_MASK.nii)
-
-        Optional Parameters:
-        1) Mask Threshold
-        2) Isotropic resample voxel size
-        3) Power-law exponent
-        4) Power-law coefficient
-        5) Bone Poissons ratio
-        6) PMMA Elastic Modulus
-        7) PMMA Poissons ratio
-        8) PMMA pmma_thick
-        9) PMMA material ID
-        10) FE displacement
-
-        Output: N88 Model (*.n88model)
-    '''
+    description = """Build a vertebral compression model from calibrated K2HPO4 density\n    and body/process labels. Resample, register, place PMMA supports and write\n    an n88model. Use ogoFEA spine to also solve and report results."""
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
@@ -1912,10 +2066,6 @@ def main():
                         help="Set the isotropic voxel size [in mm]. (default: %(default)s [mm])")
     parser.add_argument("--mask_smoothing_spacing_threshold", type=float, default=DEFAULT_SPINE_MASK_SMOOTHING_SPACING_THRESHOLD_MM,
                         help="Smooth resampled body/process masks only when an input spacing dimension exceeds this value. (default: %(default)s [mm])")
-    #parser.add_argument("--elastic_exponent", type=float, default=2.29,
-    #                    help="Sets the exponent (b) for power law: E=A(den)^b. (default: %(default)s)")
-    #parser.add_argument("--elastic_Emax", type=float, default=10500,
-    #                    help="Sets the coefficient (A) Elastic Modulus value for the power law: E=A(den)^b. (default: %(default)s [MPa])")
     parser.add_argument("--poissons_ratio", type=float, default=DEFAULT_SPINE_POISSONS_RATIO,
                         help="Sets the Poisson's ratio for the material(s) in the FE model. (default: %(default)s)")
     parser.add_argument("--pmma_E", type=float, default=DEFAULT_SPINE_PMMA_E_MPA,
@@ -2014,13 +2164,10 @@ def main():
     if reference_path is None:
         reference_path = str(default_spine_reference_path(args.spine_icp_target))
 
-    # Extract all kwargs
-    kwargs = vars(args).copy()  # Convert parsed arguments to a dictionary
-    kwargs.pop("calibrated_image")  # Remove positional argument
-    kwargs.pop("bone_mask")  # Remove positional argument
-    kwargs.pop("mask_threshold")  # Remove required argument
-    kwargs.pop("process_mask_threshold")  # Remove required argument
-    kwargs.pop("reference_path")  # Ensure updated reference path
+    options = vars(args).copy()
+    for name in ("calibrated_image", "bone_mask", "mask_threshold",
+                 "process_mask_threshold", "reference_path", "output_path", "appendix"):
+        options.pop(name)
 
     # Run the vertebra processing
     process_vertebra(
@@ -2030,7 +2177,7 @@ def main():
         args.mask_threshold,
         args.process_mask_threshold,
         reference_path,
-        **kwargs  # Pass remaining arguments as kwargs
+        **options,
     )
 
 ###################################################################### MAIN

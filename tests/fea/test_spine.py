@@ -13,6 +13,41 @@ def _mock_registration_inputs(monkeypatch):
     return SimpleNamespace(GetOutput=lambda: None)
 
 
+def test_preparation_and_registration_preserve_spine_labels(tmp_path, monkeypatch):
+    vtk = pytest.importorskip("vtk")
+    from vtk.util.numpy_support import numpy_to_vtk
+    from ogo.fea.boundary import vtk_image_to_numpy
+
+    def image(array):
+        result = vtk.vtkImageData()
+        result.SetDimensions(array.shape)
+        result.SetSpacing(1, 1, 1)
+        result.GetPointData().SetScalars(numpy_to_vtk(array.ravel(order="F"), deep=True))
+        return result
+
+    labels = np.zeros((30, 40, 30), dtype=np.uint8)
+    labels[10:20, 10:20, 10:20] = 2
+    labels[13:17, 20:30, 13:17] = 3
+    density = image(np.full(labels.shape, 200, dtype=np.float32))
+    mask = image(labels)
+    monkeypatch.setattr(spine, "read", lambda path: SimpleNamespace(
+        GetOutput=lambda: density if path == "density" else mask))
+    prepared = spine._prepare_spine_inputs(
+        "density", "mask", 2, 3, None, None, 1.0, 0.0, 0.5, "body")
+    assert prepared[6]["body_cleanup_removed_voxels"] == 0
+    reference = tmp_path / "reference.vtk"
+    reference.touch()
+    identity = vtk.vtkTransform()
+    monkeypatch.setattr(spine, "get_icp_with_scaling", lambda *a, **k: identity)
+    registered = spine._register_spine_inputs(
+        *prepared[:6], str(reference), 1.0, None, "0.8,0.8,0.75",
+        "1.2,1.2,1.3", "numpy", 8000, 50, 4, 2.0, True, "body")
+    assert np.count_nonzero(vtk_image_to_numpy(registered[0])) == np.count_nonzero(labels == 2)
+    assert np.count_nonzero(vtk_image_to_numpy(registered[1])) == np.count_nonzero(labels == 3)
+    assert registered[3] is None
+    np.testing.assert_array_equal(registered[4], np.eye(3))
+
+
 def test_spine_icp_preserves_native_orientation_at_initialization(monkeypatch):
     body = _mock_registration_inputs(monkeypatch)
     calls = []
@@ -89,3 +124,9 @@ def test_benchmark_presets_match_spinefe_notebook_settings():
     assert nonlinear["target_displacement_percent"] == 4.0
     assert nonlinear["yield_comp_func"] == "kopperdahl_trab_yc"
     assert nonlinear["pmma_yield_compression"] == 70.0
+
+
+def test_process_vertebra_rejects_unknown_settings_before_reading_inputs():
+    with pytest.raises(TypeError, match="registration_landmakrs"):
+        spine.process_vertebra("missing_mask", "missing_image", "model.n88model", 2, 3,
+                               "reference.vtk", registration_landmakrs=8000)

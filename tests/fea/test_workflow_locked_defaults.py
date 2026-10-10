@@ -72,17 +72,7 @@ def _locked_workflow_defaults():
                 "greater_trochanter_center_fraction": list(
                     femur.GREATER_TROCHANTER_FIXTURE_CENTER_FRACTION
                 ),
-                "distal_shaft_center_fraction": list(
-                    femur.DISTAL_SHAFT_FIXTURE_CENTER_FRACTION
-                ),
-                "distal_shaft_size_fraction": list(
-                    femur.DISTAL_SHAFT_FIXTURE_SIZE_FRACTION
-                ),
-                "distal_shaft_normal": list(femur.DISTAL_SHAFT_FIXTURE_NORMAL),
                 "post_icp_distal_shaft_support_fraction": femur.POST_ICP_DISTAL_SHAFT_SUPPORT_FRACTION,
-                "bbox_ratio": list(femur.DEFAULT_FEMUR_BBOX_RATIO),
-                "bbox_crop_from": list(femur.DEFAULT_FEMUR_BBOX_CROP_FROM),
-                "proximal_reference_distance_mm": femur.DEFAULT_FEMUR_PROXIMAL_REFERENCE_DISTANCE_MM,
                 "reference_min_scale": list(femur.DEFAULT_FEMUR_REFERENCE_MIN_SCALE),
                 "reference_max_scale": list(femur.DEFAULT_FEMUR_REFERENCE_MAX_SCALE),
                 "registration_backend": femur.DEFAULT_FEMUR_REGISTRATION_BACKEND,
@@ -94,7 +84,6 @@ def _locked_workflow_defaults():
                 "cut_mode": femur.DEFAULT_FEMUR_CUT_MODE,
                 "shaft_length_mm": femur.DEFAULT_FEMUR_SHAFT_LENGTH_MM,
                 "rough_pre_icp_length_mm": femur.DEFAULT_FEMUR_ROUGH_PRE_ICP_LENGTH_MM,
-                "lesser_trochanter_distal_offset_mm": femur.DEFAULT_LESSER_TROCHANTER_DISTAL_OFFSET_MM,
                 "cortical_label": femur.DEFAULT_CORTICAL_LABEL,
                 "trabecular_label": femur.DEFAULT_TRABECULAR_LABEL,
                 "node_sets": list(femur.SIDEWAYS_FALL_NODE_SETS),
