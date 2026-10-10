@@ -38,7 +38,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           miniconda-version: "latest"
           activate-environment: test
-          channels: numerics88,simpleitk,conda-forge
+          channels: numerics88,conda-forge
           auto-activate-base: false
       - uses: actions/cache@v3
         id: conda-env-cache
@@ -48,7 +48,7 @@ jobs:
       - name: Create and install dependencies
         if: steps.conda-env-cache.outputs.cache-hit != 'true'
         run: |
-          conda install -y -n test -c numerics88 -c conda-forge vtkbone "vtk>=9.2" click flake8 matplotlib nose "numpy<2" pandas pbr pytest "scipy<1.13" simpleitk six sphinx pydicom gdcm netcdf4 pillow "setuptools<65.6"
+          conda install -y -n test --override-channels -c numerics88 -c conda-forge vtkbone "vtk>=9.2" "numpy<2" pandas nibabel pyyaml netcdf4 pbr pytest wheel "setuptools<65.6"
       - name: Install package
         run: |
           conda activate test

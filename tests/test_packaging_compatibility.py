@@ -65,3 +65,9 @@ def test_ci_uses_vtk9_and_supported_python():
     assert '"vtk>=9.2"' in text
     assert "vtkbone" in text
     assert "fail-fast: false" in text
+
+
+def test_qc_image_dependencies_are_declared():
+    requirements = Path(__file__).resolve().parents[1] / "requirements.txt"
+    names = {line.strip().lower() for line in requirements.read_text().splitlines()}
+    assert {"nibabel", "pillow", "netcdf4"} <= names
