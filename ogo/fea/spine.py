@@ -2037,8 +2037,8 @@ def process_vertebra(
 ###################################################################### MAIN
 
 
-def main():
-    """Parse anatomy-builder arguments and generate the requested vertebra model."""
+def build_parser():
+    """Define the spine builder's arguments and defaults."""
     description = """Build a vertebral compression model from calibrated K2HPO4 density\n    and body/process labels. Resample, register, place PMMA supports and write\n    an n88model. Use ogoFEA spine to also solve and report results."""
 
     parser = argparse.ArgumentParser(
@@ -2138,7 +2138,12 @@ def main():
     parser.add_argument("--export_nifti", action='store_true',
         help="If set, exports resampled grayscale image and labeled segmentation.")
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None):
+    """Generate a spine model from explicit arguments or the command line."""
+    args = build_parser().parse_args(argv)
 
     # Print arguments
     ogo.message(echo_arguments("ogoFEA-spine-builder", vars(args)))

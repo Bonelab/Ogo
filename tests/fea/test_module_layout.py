@@ -34,3 +34,21 @@ def test_femur_exposes_only_current_cropping_helpers():
         "detect_lesser_trochanter_cut_z",
     ):
         assert not hasattr(femur, name), name
+
+
+def test_fea_shared_dependencies_are_available():
+    import inspect
+    from ogo.util import Helper
+    from ogo.cli.Visualize import vis3d
+    from ogo.fea import femur, spine
+
+    for name in ("readNii", "readPolyData", "transformResample",
+                 "prepareFiniteElementImage", "imageConnectivity", "bmd_preprocess",
+                 "cast2short", "applyMaskByArray", "density2materialID", "maskThreshold"):
+        assert callable(getattr(Helper, name)), name
+    assert "interpolation" in inspect.signature(Helper.transformResample).parameters
+    assert {"renderer_setup", "label_palette"} <= set(inspect.signature(vis3d).parameters)
+    data = Path(femur.__file__).parents[1] / "dat"
+    assert (data / "LT_FEMUR_SIDEWAYS_FALL_REF.vtk").is_file()
+    for target in spine.SPINE_ICP_TARGETS:
+        assert spine.default_spine_reference_path(target).is_file()

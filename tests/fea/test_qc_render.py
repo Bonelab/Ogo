@@ -35,6 +35,31 @@ def test_qc_uses_existing_visualizer_extension():
     assert "label_palette" in signature.parameters
 
 
+def test_panel_prepares_geometry_once_for_all_views(tmp_path, monkeypatch):
+    from PIL import Image
+    from ogo.fea import qc_render
+
+    prepared = object()
+    calls = []
+
+    def prepare(*args):
+        calls.append("prepare")
+        return prepared
+
+    def render(model_path, output_dir, site, body_mask, view, sed,
+               model_override, ineligible, *, prepared_data):
+        assert prepared_data is prepared
+        calls.append(view)
+        path = output_dir / (view + ".png")
+        Image.new("RGB", (20, 20), "blue").save(path)
+        return path
+
+    monkeypatch.setattr(qc_render, "prepare_model_qc", prepare)
+    monkeypatch.setattr(qc_render, "preview", render)
+    qc_render.panel(tmp_path / "case.n88model", tmp_path, "hip")
+    assert calls == ["prepare", "oblique", "top", "bottom"]
+
+
 def test_ineligible_qc_is_anatomy_only(tmp_path):
     from ogo.fea.qc_render import export_model_qc
 

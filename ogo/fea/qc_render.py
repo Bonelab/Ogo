@@ -6,6 +6,7 @@ SED smoothing is display-only. No model or analysis input is modified.
 """
 
 import argparse
+from dataclasses import dataclass
 import json
 import os
 import warnings
@@ -44,10 +45,24 @@ def smooth_bone_sed(values, indices, bone, spacing):
     return numerator[locations] / denominator[locations]
 
 
-def preview(model_path, output_dir, site, body_mask=None, view="oblique", sed=False,
-            model_override=None, ineligible=False):
-    """Render one model view with anatomy or SED colours and coloured supports."""
-    start = perf_counter()
+@dataclass
+class PreparedQC:
+    """Geometry and display-only SED shared by the three rendered views."""
+
+    model: object
+    labels: np.ndarray
+    volume: np.ndarray
+    affine: np.ndarray
+    bone_tree: object
+    display_sed: object
+    lookup: object
+    sed_max: object
+
+
+def prepare_model_qc(model_path, site, body_mask=None, sed=False,
+                     model_override=None, ineligible=False):
+    """Load and prepare geometry and display values once for all camera views."""
+    model_path = Path(model_path)
     if model_override is None:
         reader = vtkbone.vtkboneN88ModelReader()
         reader.SetFileName(str(model_path))
@@ -72,6 +87,7 @@ def preview(model_path, output_dir, site, body_mask=None, view="oblique", sed=Fa
     materials = vtk_to_numpy(model.GetCellData().GetScalars())
     disk = materials == 5000
     sed_values = None
+    bone_tree = display_sed = lookup = sed_max = None
     if sed:
         from scipy.spatial import cKDTree
         from matplotlib import colormaps
@@ -80,24 +96,24 @@ def preview(model_path, output_dir, site, body_mask=None, view="oblique", sed=Fa
         if array is None:
             raise ValueError("SED rendering requires a solved model with StrainEnergyDensity")
         sed_values = vtk_to_numpy(array)
-        if view == "oblique":
-            from ogo.fea.validation import write_measurements
+        from ogo.fea.validation import write_measurements
 
-            finite = np.isfinite(sed_values)
-            write_measurements(model_path, {
-                "sed_available": True,
-                "sed_finite": bool(np.all(finite)),
-                "sed_nonnegative": bool(np.all(sed_values[finite] >= 0)),
-                "bone_sed_p99": float(np.percentile(sed_values[~disk & finite], 99))
-                if np.any(~disk & finite) else None,
-            })
+        finite = np.isfinite(sed_values)
+        write_measurements(model_path, {
+            "sed_available": True,
+            "sed_finite": bool(np.all(finite)),
+            "sed_nonnegative": bool(np.all(sed_values[finite] >= 0)),
+            "bone_sed_p99": float(np.percentile(sed_values[~disk & finite], 99))
+            if np.any(~disk & finite) else None,
+        })
         if not np.all(np.isfinite(sed_values)) or np.any(sed_values < 0):
             raise ValueError("Nonfinite or negative SED values")
         sed_max = float(np.percentile(sed_values[~disk], 99))
         if sed_max <= 0:
             raise ValueError("No positive bone SED")
         display_sed = smooth_bone_sed(sed_values, indices, ~disk, spacing)
-        assert np.all(np.isfinite(display_sed))
+        if not np.all(np.isfinite(display_sed)):
+            raise ValueError("Nonfinite smoothed display SED")
         bone_tree = cKDTree(centers[~disk])
         lookup = vtk.vtkLookupTable()
         lookup.SetNumberOfTableValues(256)
@@ -157,10 +173,24 @@ def preview(model_path, output_dir, site, body_mask=None, view="oblique", sed=Fa
         labels[~disk & (membership[connectivity].sum(axis=1) >= 4)] = 5
     volume = np.zeros(tuple(indices.max(axis=0) + 1), dtype=np.uint8)
     volume[tuple(indices.T)] = labels
-    assert np.count_nonzero(volume) == model.GetNumberOfCells()
+    if np.count_nonzero(volume) != model.GetNumberOfCells():
+        raise ValueError("Duplicate or missing FE voxel centres")
     affine = np.eye(4)
     affine[:3, :3] = np.diag(spacing)
     affine[:3, 3] = origin
+    return PreparedQC(model, labels, volume, affine, bone_tree, display_sed, lookup, sed_max)
+
+
+def preview(model_path, output_dir, site, body_mask=None, view="oblique", sed=False,
+            model_override=None, ineligible=False, *, prepared_data=None):
+    """Render a camera view from prepared anatomy or solved SED."""
+    start = perf_counter()
+    model_path, output_dir = Path(model_path), Path(output_dir)
+    data = prepared_data if prepared_data is not None else prepare_model_qc(
+        model_path, site, body_mask, sed, model_override, ineligible)
+    model, labels, volume, affine = data.model, data.labels, data.volume, data.affine
+    bone_tree, display_sed, lookup, sed_max = (
+        data.bone_tree, data.display_sed, data.lookup, data.sed_max)
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = output_dir / model_path.stem
     nifti_path = Path(str(prefix) + "_debug_labels.nii.gz")
@@ -298,10 +328,11 @@ def preview(model_path, output_dir, site, body_mask=None, view="oblique", sed=Fa
 def panel(model_path, output_dir, site, body_mask=None, sed=False,
           model_override=None, ineligible=False):
     """Stack three opaque views, each independently framed for inspection."""
+    prepared = prepare_model_qc(model_path, site, body_mask, sed, model_override, ineligible)
     rows = []
     for view in ("oblique", "top", "bottom"):
         path = preview(model_path, output_dir, site, body_mask, view, sed,
-                       model_override, ineligible)
+                       model_override, ineligible, prepared_data=prepared)
         with Image.open(path) as source:
             rgb = source.convert("RGB")
             pixels = np.asarray(rgb)

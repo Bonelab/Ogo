@@ -1946,8 +1946,8 @@ def sidewaysFallFe(args):
     sys.exit()
 
 
-def main():
-    """Parse anatomy-builder arguments and generate a sideways-fall femur model."""
+def build_parser():
+    """Define the femur builder's arguments and defaults."""
     description = """Build a sideways-fall femur model from calibrated K2HPO4 density\n    and a femur label mask. Estimate ICP from a proximal crop, then retain a\n    complete flat shaft measured from the distal GT support edge. Use ogoFEA\n    hip to also solve and report results."""
 
 
@@ -2034,8 +2034,12 @@ def main():
                         help="Sets the yield strength in compression for PMMA material in the FE model. (default: %(default)s [MPa])")
     parser.add_argument("--pmma_yield_tension", type=float, default=None,
                         help="Sets the yield strength in tension for PMMA material in the FE model. (default: %(default)s [MPa])")
-    # Parse and display
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None):
+    """Generate a femur model from explicit arguments or the command line."""
+    args = build_parser().parse_args(argv)
 
     # Set default reference paths
     if args.reference_path is None:

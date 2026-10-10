@@ -214,6 +214,16 @@ def write_measurements(model_path, measurements):
     return path
 
 
+QC_POLICY_VERSION = 1
+SHAFT_LENGTH_TOLERANCE_MM = 0.01
+BOUNDARY_PLANARITY_TOLERANCE_MM = 1e-4
+COVERAGE_ROUNDING_TOLERANCE = 1e-6
+LEGACY_DISTAL_FACE_MINIMUM_COVERAGE = 0.89
+BODY_CLEANUP_REVIEW_FRACTION = 0.05
+PROCESS_AXIAL_OFFSET_RATIO = 0.75
+PROCESS_AXIAL_OFFSET_MARGIN_MM = 2.0
+
+
 def evaluate(measurements):
     """Apply versioned construction tests. Missing evidence requires review."""
     row = dict(measurements)
@@ -258,38 +268,7 @@ def evaluate(measurements):
     elif not truth(row['loading_axis_matches']):
         failures.append('incorrect_loading_axis')
     if row.get('site') == 'hip' and 'too_short' not in failures:
-        measured, requested = number('measured_shaft_length_mm'), number('requested_shaft_length_mm')
-        if measured is None or requested is None:
-            review.append('missing_shaft_length')
-        elif abs(measured - requested) > 0.01:
-            failures.append('shaft_length_mismatch')
-        if 'complete_distal_section_verified' not in row:
-            review.append('missing_distal_section_check')
-        elif not truth(row['complete_distal_section_verified']):
-            failures.append('incomplete_distal_section')
-        span = number('distal_boundary_span_mm')
-        if span is None:
-            review.append('missing_distal_planarity')
-        elif span > 1e-4:
-            failures.append('nonplanar_distal_boundary')
-        coverage = number('distal_support_patch_coverage_fraction')
-        minimum = 1 - 1e-6
-        if coverage is None:
-            # Older CSVs only describe the full face. Allow the established
-            # inset patch without requiring model reopening for gallery export.
-            coverage = number('distal_boundary_coverage_fraction')
-            minimum = 0.89
-        if coverage is None:
-            review.append('missing_distal_boundary_coverage')
-        elif coverage < minimum:
-            failures.append('incomplete_distal_boundary')
-        shaft_nodes = number('shaft_bc_node_count')
-        for direction in ('x', 'z'):
-            fixed_nodes = number('shaft_bc_fixed_' + direction + '_node_count')
-            if shaft_nodes is None or fixed_nodes is None:
-                review.append('missing_shaft_fixation_' + direction)
-            elif fixed_nodes != shaft_nodes:
-                failures.append('incomplete_shaft_fixation_' + direction)
+        _hip_checks(row, number, truth, failures, review)
     for key in row:
         if key.endswith('_contact_area_mm2') and number(key) == 0:
             failures.append('no_axial_contact_' + key.split('_contact')[0])
@@ -303,23 +282,66 @@ def evaluate(measurements):
         if key in row and not truth(row[key]):
             failures.append('invalid_' + key)
     transverse = number('process_body_transverse_offset_mm')
-    if axial is not None and transverse is not None and axial > 0.75 * transverse + 2:
+    if (axial is not None and transverse is not None
+            and axial > PROCESS_AXIAL_OFFSET_RATIO * transverse + PROCESS_AXIAL_OFFSET_MARGIN_MM):
         review.append('process_orientation')
     if row.get('site') == 'spine':
-        # Review triage only: substantial cleanup can indicate a second vertebra
-        # or a disconnected anatomical region, not necessarily a failed model.
-        removed = number('body_cleanup_removed_fraction')
-        if removed is not None and removed > 0.05:
-            review.append('substantial_body_cleanup')
-        for name in ('body_top', 'body_bottom'):
-            span = number(name + '_span_mm')
-            if span is None:
-                review.append('missing_' + name + '_planarity')
-            elif span > 1e-4:
-                failures.append('nonplanar_' + name)
+        _spine_checks(row, number, failures, review)
     row.update(qc_status='fail' if failures else 'review' if review else 'pass',
-               qc_reasons=';'.join(failures + review), qc_policy_version=1)
+               qc_reasons=';'.join(failures + review), qc_policy_version=QC_POLICY_VERSION)
     return row
+
+
+
+def _hip_checks(row, number, truth, failures, review):
+    """Check shaft length, the flat distal face and its fixation."""
+    measured, requested = number('measured_shaft_length_mm'), number('requested_shaft_length_mm')
+    if measured is None or requested is None:
+        review.append('missing_shaft_length')
+    elif abs(measured - requested) > SHAFT_LENGTH_TOLERANCE_MM:
+        failures.append('shaft_length_mismatch')
+    if 'complete_distal_section_verified' not in row:
+        review.append('missing_distal_section_check')
+    elif not truth(row['complete_distal_section_verified']):
+        failures.append('incomplete_distal_section')
+    span = number('distal_boundary_span_mm')
+    if span is None:
+        review.append('missing_distal_planarity')
+    elif span > BOUNDARY_PLANARITY_TOLERANCE_MM:
+        failures.append('nonplanar_distal_boundary')
+    coverage = number('distal_support_patch_coverage_fraction')
+    minimum = 1 - COVERAGE_ROUNDING_TOLERANCE
+    if coverage is None:
+        # Older CSVs only describe the full face. Allow the established
+        # inset patch without requiring model reopening for gallery export.
+        coverage = number('distal_boundary_coverage_fraction')
+        minimum = LEGACY_DISTAL_FACE_MINIMUM_COVERAGE
+    if coverage is None:
+        review.append('missing_distal_boundary_coverage')
+    elif coverage < minimum:
+        failures.append('incomplete_distal_boundary')
+    shaft_nodes = number('shaft_bc_node_count')
+    for direction in ('x', 'z'):
+        fixed_nodes = number('shaft_bc_fixed_' + direction + '_node_count')
+        if shaft_nodes is None or fixed_nodes is None:
+            review.append('missing_shaft_fixation_' + direction)
+        elif fixed_nodes != shaft_nodes:
+            failures.append('incomplete_shaft_fixation_' + direction)
+
+
+def _spine_checks(row, number, failures, review):
+    """Check support planarity and triage substantial body cleanup."""
+    # Review triage only: substantial cleanup can indicate a second vertebra
+    # or a disconnected anatomical region, not necessarily a failed model.
+    removed = number('body_cleanup_removed_fraction')
+    if removed is not None and removed > BODY_CLEANUP_REVIEW_FRACTION:
+        review.append('substantial_body_cleanup')
+    for name in ('body_top', 'body_bottom'):
+        span = number(name + '_span_mm')
+        if span is None:
+            review.append('missing_' + name + '_planarity')
+        elif span > BOUNDARY_PLANARITY_TOLERANCE_MM:
+            failures.append('nonplanar_' + name)
 
 
 def generate_gallery(rows, output, decisions=None):

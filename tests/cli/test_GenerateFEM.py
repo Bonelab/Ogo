@@ -868,7 +868,8 @@ def test_spine_metadata_preserves_resolved_generation_settings(tmp_path):
     sidecar = model.with_name(model.stem + "_modeling.json")
     sidecar.write_text(json.dumps({"generation_settings": settings}))
     path = GenerateFEM.write_modeling_metadata(
-        model, "spine", ["density.nii.gz", "mask.nii.gz"], _metadata_args(tmp_path)
+        model, "spine", ["density.nii.gz", "mask.nii.gz", "--mask_threshold", "2",
+                         "--process_mask_threshold", "3"], _metadata_args(tmp_path)
     )
     data = json.loads(path.read_text())
     assert data["image_processing"]["registration_label_smoothing"] == settings["registration_label_smoothing"]
@@ -985,3 +986,31 @@ def test_femur_modeling_metadata_records_absolute_displacement(tmp_path):
     assert constraint["value_mm"] == -2.56
     assert constraint["target_displacement_percent"] is None
     assert constraint["value_source"] == "explicit --fe_displacement used as absolute model displacement"
+
+
+def test_builder_call_does_not_replace_sys_argv():
+    import sys
+
+    original = sys.argv
+    received = []
+
+    def builder(argv):
+        assert sys.argv is original
+        received.extend(argv)
+
+    GenerateFEM._call_cli(builder, ["density", "mask"])
+    assert received == ["density", "mask"]
+
+
+def test_metadata_uses_builder_parser_defaults(tmp_path, monkeypatch):
+    from ogo.fea import femur
+
+    parser = femur.build_parser()
+    parser.set_defaults(pmma_E=3100)
+    monkeypatch.setattr(femur, "build_parser", lambda: parser)
+    model = tmp_path / "density_LF.n88model"
+    model.write_text("dummy")
+    path = GenerateFEM.write_modeling_metadata(
+        model, "hip", ["density.nii.gz", "mask.nii.gz"], _metadata_args(tmp_path)
+    )
+    assert json.loads(path.read_text())["materials"]["pmma"]["elastic_E_MPa"] == 3100

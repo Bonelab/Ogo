@@ -148,3 +148,17 @@ Failures before meshing require job logs for participant accounting.
 
 For full-size resegmentation of reviewed failures, see the
 [cohort recovery example](../../examples/fea/cohort_recovery/README.md).
+
+## Maintenance
+
+Anatomy-specific builders are in `femur.py` and `spine.py`; `metadata.py` records
+their parsed settings. `qc_render.py` prepares geometry once per three-view
+preview, and `validation.py` applies the QC policy without changing FE results.
+Shared image helpers remain in `ogo.util.Helper` and `ogo.util.vtk_image`;
+rendering uses `ogo.cli.Visualize`, and reference surfaces ship in `ogo/dat`.
+
+Run the FE and shared-helper regression tests after changing these dependencies:
+
+```bash
+python -m pytest tests/fea tests/cli/test_GenerateFEM.py tests/util/test_Helper.py
+```
