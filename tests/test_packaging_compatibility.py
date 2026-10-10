@@ -55,3 +55,13 @@ def test_ci_uses_conda_with_required_test_dependencies():
     assert install_line is not None
     assert "pytest" in install_line.group()
     assert '"setuptools<65.6"' in install_line.group()
+
+
+def test_ci_uses_vtk9_and_supported_python():
+    """FEA uses VTK 9 image directions and reference-surface readers."""
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/main.yml"
+    text = workflow.read_text(encoding="utf-8")
+    assert 'python-version: ["3.10"]' in text
+    assert '"vtk>=9.2"' in text
+    assert "vtkbone" in text
+    assert "fail-fast: false" in text
