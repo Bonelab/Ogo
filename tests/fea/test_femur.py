@@ -137,7 +137,7 @@ def test_icp_transform_sidecar_round_trips_matrix(tmp_path):
 
     matrix = np.eye(4)
     matrix[:3, 3] = [1.5, -2.0, 3.25]
-    path = tmp_path / "sub-RETRO2_00000_left_icp.json"
+    path = tmp_path / "sub-001_left_icp.json"
 
     femur.write_icp_transform(
         path,
@@ -164,28 +164,6 @@ def test_invalid_femur_side_is_rejected():
 def test_hip_fixture_defaults_use_fixed_thickness_and_intrusion():
     assert femur.DEFAULT_PMMA_THICKNESS_MM == pytest.approx(10.0)
     assert femur.DEFAULT_PMMA_INTRUSION_MM == pytest.approx(6.0)
-
-
-def test_swap_xz_footprint_preserves_center_and_swaps_lengths():
-    swapped = femur.swap_xz_footprint((10, 50, 1, 3, 100, 120))
-
-    assert swapped == pytest.approx((20, 40, 1, 3, 90, 130))
-
-
-def test_expand_z_footprint_preserves_center():
-    expanded = femur.expand_z_footprint((20, 40, 1, 3, 90, 130), 20)
-
-    assert expanded == pytest.approx((20, 40, 1, 3, 80, 140))
-
-
-def test_expand_xz_footprint_preserves_center():
-    expanded = femur.expand_xz_footprint(
-        (20, 40, 1, 3, 90, 130),
-        x_extension_mm=10,
-        z_extension_mm=20,
-    )
-
-    assert expanded == pytest.approx((15, 45, 1, 3, 80, 140))
 
 
 def test_bbox_relative_fixture_bounds_scale_lateral_axes_to_model_bbox():

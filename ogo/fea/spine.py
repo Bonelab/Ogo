@@ -8,7 +8,6 @@ import os
 import argparse
 import ogo.fea.material_laws
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import SimpleITK as sitk
@@ -880,38 +879,6 @@ def get_icp_with_scaling(
 
     return vtk_transform
 
-def get_icp(body, reference_path):
-
-    """Return the legacy VTK reference-to-body ICP transform."""
-    mcubes = perform_marching_cubes(body)
-    mcubes_output = mcubes.GetOutput()
-    reference_bone = ogo.readPolyData(reference_path)
-
-    icp = vtk.vtkIterativeClosestPointTransform()
-    icp.SetTarget(mcubes_output)
-    icp.SetSource(reference_bone)
-
-    icp.StartByMatchingCentroidsOn()
-    icp.GetLandmarkTransform().SetModeToRigidBody()
-    icp.SetMeanDistanceModeToRMS()
-    icp.SetMaximumMeanDistance(0.05)
-    icp.CheckMeanDistanceOn()
-    icp.SetMaximumNumberOfLandmarks(DEFAULT_SPINE_REGISTRATION_LANDMARKS)
-    icp.SetMaximumNumberOfIterations(DEFAULT_SPINE_REGISTRATION_ITERATIONS)
-    icp.Update()
-
-    ogo.message("ICP Matrix:")
-    print_matrix(icp.GetMatrix())
-    return icp
-
-def transform_resample(image, matrix, iso_resolution, interpolation='cubic'):
-    """Reslice an image using the shared physical-space transform helper."""
-    output = ogo.transformResample(image, matrix, iso_resolution, interpolation=interpolation)
-    if output.GetNumberOfPoints() == 0:
-        ogo.message("Reslice output contains no points. Check the input and transformation.")
-    return output
-
-
 def _matrix_rotation_translation(matrix):
     rotation = np.asarray(
         [[matrix.GetElement(row, col) for col in range(3)] for row in range(3)],
@@ -943,7 +910,6 @@ def identify_boundary_surface(input_vtk_image, top_value, bottom_value):
 
     # Apply boundary conditions from the original method
     eroded_mask = binary_erosion(binary_mask, iterations=1)
-    #dilated_mask = binary_dilation(binary_mask, iterations=1)
     outline_mask = (eroded_mask == 0) & (binary_mask == 1)
 
     # Highlight the outline
@@ -1004,7 +970,6 @@ def generate_cortical_mask(image_vtk, mask_vtk, threshold=0.2, min_th=1, max_th=
 
     # Convert VTK images to numpy arrays
     image_np = vtk_to_numpy(image_vtk.GetPointData().GetScalars()).reshape(image_vtk.GetDimensions(), order='F').astype(np.float32)
-    #image_np = gaussian_filter(image_np, sigma=1)  # Adjust sigma as needed
 
     mask_np = vtk_to_numpy(mask_vtk.GetPointData().GetScalars()).reshape(mask_vtk.GetDimensions(), order='F') > 0
 
@@ -1057,31 +1022,17 @@ def convert_image_to_material(image, mask, n_bins=128, cort_mask=None):
     cort_mask_change = ogo.prepareFiniteElementImage(cort_mask) if cort_mask is not None else None
     connected_image = ogo.imageConnectivity(change)
     thr_image = ogo.bmd_preprocess(connected_image, -31)
-    #this was done previously - but if someone wants this they should just do it in the calib functions
-    #ash_image = ogo.bmd_K2hpo4ToAsh(thr_image)
     cast_image = ogo.cast2short(thr_image)
     bone_image = ogo.applyMaskByArray(cast_image, mask_change)
     binned_image, bin_centers = ogo.density2materialID(bone_image, n_bins=n_bins, cort_mask=cort_mask_change)
 
     return binned_image, bin_centers
 
-def resolve_func(func_or_name, module):
-    """Resolve a material-law function by object or configured name."""
-    from ogo.fea.materials import resolve_material_func
-
-    return resolve_material_func(func_or_name, module)
-
 ###################################################################### QUALITY CONTROL
 ## Functions to check image and boundary conditions
 ###################################################################### QUALITY CONTROL
 
 ## Functions to check the results
-def check_image_values(image):
-    """Log the distinct scalar values in a VTK image."""
-    array = vtk.util.numpy_support.vtk_to_numpy(image.GetPointData().GetScalars())
-    unique_values = np.unique(array)
-    ogo.message("Unique values in the image:", unique_values)
-
 def calculate_features(image, label):
     """Measure a label's physical volume, centroid, axes and bounding box."""
     label_map = sitk.BinaryThreshold(image, lowerThreshold=label, upperThreshold=label, insideValue=1, outsideValue=0)
@@ -1116,39 +1067,6 @@ def parse_filename(filepath):
         'NUMBER': parts[4] if len(parts) > 4 else '',
         'filename': '_'.join(parts[:-3]) if len(parts) > 3 else base_name,
     }
-
-def visualize_slice(image, filepath):
-    """Save a middle x-slice PNG for optional legacy debugging."""
-    dimensions = image.GetDimensions()  # (x, y, z)
-    mid_x = dimensions[0] // 2  # Middle slice along the X-axis
-
-    # Convert vtkImageData to a NumPy array
-    vtk_array = vtk_to_numpy(image.GetPointData().GetScalars())
-    numpy_array = vtk_array.reshape(dimensions[::-1])  # Reverse dimensions to match NumPy order (z, y, x)
-
-    # Extract the middle X slice
-    slice_img = numpy_array[:, :, mid_x]
-
-    # Clip values at the 90th percentile
-    percentile_90 = np.percentile(slice_img, 90)
-    clipped_slice = np.clip(slice_img, 0, percentile_90)  # Cap values at the 90th percentile
-
-    # Normalize the clipped slice to [0, 1] range
-    normalized_slice = (clipped_slice - clipped_slice.min()) / (clipped_slice.max() - clipped_slice.min() + 1e-8)
-
-    # Plot the normalized slice
-    plt.figure(figsize=(4.0, 4.0))
-    plt.imshow(normalized_slice, cmap='viridis', origin="lower")
-    plt.title('Middle X', fontsize=9, pad=2)
-    plt.xlabel('Y', fontsize=8)
-    plt.ylabel('Z', fontsize=8)
-    plt.tick_params(axis='both', which='major', labelsize=8, length=2.5, pad=1.5)
-
-    # Save the output image
-    plt.tight_layout(pad=0.2)
-    plt.savefig(filepath, dpi=300)
-    plt.close()
-    ogo.message(f"Slice image saved to {filepath}")
 
 def check_image(vtkimage, output_filename=None):
     """Run legacy body/process image checks and optionally save their results."""
@@ -1746,9 +1664,8 @@ def process_vertebra(
     )
 
     ogo.message(f"relabelling mask and identifying boundary surfaces...")
-    # Assuming mask1_data and mask2_data are your initial binary masks
-    mask1_labeled = label_mask(transformed_vertebra, 2)  # Apply label 1 to the first mask
-    mask2_labeled = label_mask(transformed_process, 1)  # Apply label 2 to the second mask
+    mask1_labeled = label_mask(transformed_vertebra, 2)
+    mask2_labeled = label_mask(transformed_process, 1)
 
     # Combine masks here (otherwise it does weird interpolations)
     combined_masks = add_masks(mask1_labeled.GetOutput(), mask2_labeled.GetOutput())  # Combine the labeled masks
@@ -1757,14 +1674,8 @@ def process_vertebra(
     boundary_masks = identify_boundary_surface(combined_masks.GetOutput(), bottom_node_set_id, top_node_set_id)
 
     ogo.message("creating cortical mask....")
-    #1 - 3 alterantive (to create a continous cortical shell - changed to 0 5 )
 
     cort_mask = generate_cortical_mask(transformed_image, combined_masks.GetOutput(), threshold=1, min_th=2, max_th=5)
-
-    #writer = vtk.vtkXMLImageDataWriter()
-    #writer.SetFileName('/home/matthias.walle/work/fem/CT_FE_TEMPLATE/MODELS/10001_QCT_vertebra_20_cortmask.vti')
-    #writer.SetInputData(cort_mask)  # For VTK 8+
-    #writer.Write()
 
     ogo.message(f"converting image to material ID...")
     # This converts the raw image to a material ID mapped image
@@ -1957,7 +1868,6 @@ def process_vertebra(
         padded_mask, inferior_disk, superior_disk], [None, bottom_node_set_id, top_node_set_id])
 
     # This is the final model that we will use for the FEA.
-    # For the future --> pull out material table to have option without disks
     ogo.message("generating n88model file...")
     model = create_microfe_model(
         image_with_pads,
@@ -2106,20 +2016,8 @@ def build_parser():
                         help="Sets the yield strength in compression for PMMA material in the FE model. (default: %(default)s [MPa])")
     parser.add_argument("--pmma_yield_tension", type=float, default=None,
                         help="Sets the yield strength in tension for PMMA material in the FE model. (default: %(default)s [MPa])")
-#    parser.add_argument("--bone_yield_compression", type=float, default=None,
-#                        help="Sets the yield strength in compression for bone material in the FE model. (default: %(default)s [MPa])")
-#    parser.add_argument("--bone_yield_tension", type=float, default=None,
-#                        help="Sets the yield strength in tension for bone material in the FE model. (default: %(default)s [MPa])")
-#    parser.add_argument("--cort_elastic_Emax", type=float,
-#                        help="Sets the maximum elastic modulus for cortical bone in the FE model. (default: %(default)s)")
-#    parser.add_argument("--cort_elastic_exponent", type=float,
-#                        help="Sets the elastic exponent for cortical bone in the FE model.")
     parser.add_argument("--cort_poissons_ratio", type=float,
                         help="Sets the Poisson's ratio for cortical bone in the FE model.")
-#    parser.add_argument("--cort_yield_compression", type=float,
-#                        help="Sets the yield strength in compression for cortical bone in the FE model.")
-#    parser.add_argument("--cort_yield_tension", type=float,
-#                        help="Sets the yield strength in tension for cortical bone in the FE model.")
     parser.add_argument("--elastic_E_func", type=str, default="default_E",
         help="Function name for trabecular bone Young’s modulus. (default: default_E)")
     parser.add_argument("--yield_comp_func", type=str,

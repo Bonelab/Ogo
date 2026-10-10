@@ -48,8 +48,6 @@ FAIM/N88 tools must be on `PATH`, or supplied through `--faim_bin_dir DIR`,
 `--faim_install_root DIR` or `--faim_env ENV`. Individual command overrides
 are also available. Ogo does not search the filesystem for installations.
 Use `--faim_license_dir DIR` when the license is not already configured.
-On ARC, `source /work/boyd_lab/conda_init/ogo_fea.sh` configures the shared
-environment; run generation and solving on a compute node.
 
 ## Model conventions
 

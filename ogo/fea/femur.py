@@ -933,56 +933,6 @@ def pad_vtk_images_to_foreground_margin(
     }
 
 
-def swap_xz_footprint(bounds):
-    """Swap x/z footprint dimensions of physical bounds around the same center."""
-    x_center = (float(bounds[0]) + float(bounds[1])) / 2.0
-    z_center = (float(bounds[4]) + float(bounds[5])) / 2.0
-    x_length = float(bounds[1]) - float(bounds[0])
-    z_length = float(bounds[5]) - float(bounds[4])
-    return (
-        x_center - z_length / 2.0,
-        x_center + z_length / 2.0,
-        float(bounds[2]),
-        float(bounds[3]),
-        z_center - x_length / 2.0,
-        z_center + x_length / 2.0,
-    )
-
-
-def expand_z_footprint(bounds, extension_mm):
-    """Expand physical bounds along z around the same center."""
-    z_center = (float(bounds[4]) + float(bounds[5])) / 2.0
-    z_length = float(bounds[5]) - float(bounds[4]) + float(extension_mm)
-    if z_length <= 0:
-        raise ValueError("Expanded z footprint length must be positive.")
-    return (
-        float(bounds[0]),
-        float(bounds[1]),
-        float(bounds[2]),
-        float(bounds[3]),
-        z_center - z_length / 2.0,
-        z_center + z_length / 2.0,
-    )
-
-
-def expand_xz_footprint(bounds, *, x_extension_mm=0.0, z_extension_mm=0.0):
-    """Expand physical bounds along x and z around the same center."""
-    x_center = (float(bounds[0]) + float(bounds[1])) / 2.0
-    z_center = (float(bounds[4]) + float(bounds[5])) / 2.0
-    x_length = float(bounds[1]) - float(bounds[0]) + float(x_extension_mm)
-    z_length = float(bounds[5]) - float(bounds[4]) + float(z_extension_mm)
-    if x_length <= 0 or z_length <= 0:
-        raise ValueError("Expanded x/z footprint lengths must be positive.")
-    return (
-        x_center - x_length / 2.0,
-        x_center + x_length / 2.0,
-        float(bounds[2]),
-        float(bounds[3]),
-        z_center - z_length / 2.0,
-        z_center + z_length / 2.0,
-    )
-
-
 # -----------------------------------------------------------------------------
 # Hip sideways-fall workflow builder
 # -----------------------------------------------------------------------------

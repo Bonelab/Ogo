@@ -20,14 +20,6 @@ provides vtkbone; solving additionally requires FAIM/N88 tools and a license.
 Use tools already on `PATH`, or add `--faim_bin_dir /path/to/n88/bin` to commands.
 A separate solver conda environment can be selected with `--faim_env NAME`.
 
-On ARC, use the shared installation instead:
-
-```bash
-source /work/boyd_lab/conda_init/ogo_fea.sh
-```
-
-Run generation and solving on a compute node, not the login node.
-
 ## Generate and inspect
 
 Use density-calibrated QCT in mg/cm3 K2HPO4-equivalent units and a segmentation
