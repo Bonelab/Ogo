@@ -423,41 +423,6 @@ def scale_reference_point_cloud_to_sample(
     }
 
 
-def scale_reference_to_sample_principal_lengths(
-    reference_polydata,
-    sample_polydata,
-    *,
-    min_scale=DEFAULT_FEMUR_REFERENCE_MIN_SCALE,
-    max_scale=DEFAULT_FEMUR_REFERENCE_MAX_SCALE,
-):
-    """Scale a femur reference so its principal lengths match the sample."""
-    import numpy as np
-    import vtk
-
-    reference_lengths = principal_axis_lengths(reference_polydata)
-    sample_lengths = principal_axis_lengths(sample_polydata)
-    scale = sample_lengths / np.maximum(reference_lengths, 1.0e-6)
-    min_values = _scale_triplet(min_scale, "min_scale")
-    max_values = _scale_triplet(max_scale, "max_scale")
-    scale = np.clip(scale, min_values, max_values)
-
-    transform = vtk.vtkTransform()
-    transform.Scale(float(scale[0]), float(scale[1]), float(scale[2]))
-
-    transform_filter = vtk.vtkTransformPolyDataFilter()
-    transform_filter.SetInputData(reference_polydata)
-    transform_filter.SetTransform(transform)
-    transform_filter.Update()
-
-    return transform_filter.GetOutput(), {
-        "reference_axis_lengths": reference_lengths.tolist(),
-        "sample_axis_lengths": sample_lengths.tolist(),
-        "scale_factors": scale.tolist(),
-        "min_scale": min_values.tolist(),
-        "max_scale": max_values.tolist(),
-    }
-
-
 def _vtk_image_from_array(array, template_vtk_image, *, origin, vtk_array_type=None):
     """Create a zero-based VTK image from an x/y/z NumPy array."""
     import numpy as np

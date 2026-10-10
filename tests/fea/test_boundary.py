@@ -6,7 +6,6 @@ from ogo.fea.boundary import (  # noqa: E402
     bbox_relative_contact_bounds,
     bbox_relative_contact_direction,
     bbox_relative_contact_plane,
-    bounds_with_reference_extent,
     foreground_voxel_center_bounds_from_mask,
     generate_bone_cap_mask,
     generate_projected_material_disk_mask,
@@ -100,15 +99,6 @@ def test_bbox_relative_contact_bounds_can_enforce_square_footprint():
     )
 
     assert contact_bounds == pytest.approx((8, 52, -20, 80, 103, 147))
-
-
-def test_bounds_with_reference_extent_preserves_current_center():
-    current_bounds = (10, 20, -5, 35, 100, 133)
-    reference_bounds = (0, 49, 0, 43, 0, 34)
-
-    bounds = bounds_with_reference_extent(current_bounds, reference_bounds)
-
-    assert bounds == pytest.approx((-9.5, 39.5, -6.5, 36.5, 99.5, 133.5))
 
 
 def test_foreground_voxel_center_bounds_from_mask_uses_xyz_array_order():
@@ -432,29 +422,6 @@ def test_anatomy_bone_cap_uses_axis_aligned_surface_depth_inferior():
             assert np.flatnonzero(cap[:, y, z]).size <= 5
 
 
-def test_vtk_bone_cap_uses_requested_output_value():
-    vtk = pytest.importorskip("vtk")
-    from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
-
-    from ogo.fea.boundary import generate_bone_cap_vtk
-
-    labels = np.zeros((12, 8, 8), dtype=np.uint16)
-    labels[4:7, 2:6, 2:6] = 12
-    vtk_arr = numpy_to_vtk(np.swapaxes(labels, 0, 2).ravel(order="F"), deep=True)
-    image = vtk.vtkImageData()
-    image.SetDimensions(list(np.swapaxes(labels, 0, 2).shape))
-    image.SetSpacing((1, 1, 1))
-    image.SetOrigin((0, 0, 0))
-    image.GetPointData().SetScalars(vtk_arr)
-
-    cap = generate_bone_cap_vtk(
-        image, label_value=12, axis="x", direction="up", thickness=2, shape="box", output_value=5000
-    )
-    cap_np = vtk_to_numpy(cap.GetPointData().GetScalars()).reshape(cap.GetDimensions(), order="F")
-
-    assert set(np.unique(cap_np)) == {0, 5000}
-
-
 def test_projected_material_disk_uses_fixed_thickness_and_anatomy_intrusion():
     active = np.zeros((14, 14, 14), dtype=bool)
     active[4:10, 6:9, 4:10] = True
@@ -653,7 +620,6 @@ def test_projected_material_disk_trimmed_stable_surface_excludes_protrusion_colu
     assert not np.any(disk[7, 2:5, 7])
     assert np.any(disk[7, :, 7])
     assert np.any(disk[5, :, 5])
-
 
 
 def test_projected_material_disk_trim_keeps_bumps_below_min_shift():

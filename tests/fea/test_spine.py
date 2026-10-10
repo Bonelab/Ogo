@@ -1,3 +1,4 @@
+from tests.fea import helpers
 from ogo.fea import spine
 import numpy as np
 import pytest
@@ -112,8 +113,8 @@ def test_spine_reference_path_depends_on_icp_target():
 
 
 def test_benchmark_presets_match_spinefe_notebook_settings():
-    linear = spine.benchmark_linear_params()
-    nonlinear = spine.benchmark_nonlinear_params()
+    linear = helpers.benchmark_linear_params()
+    nonlinear = helpers.benchmark_nonlinear_params()
 
     assert linear["fe_displacement"] == -0.2
     assert linear["target_displacement_percent"] == 0.68

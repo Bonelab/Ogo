@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pytest
 
-from tests.fea.test_model_export import hip_model
+from tests.fea.helpers import hip_model
 
 
 def test_evidence_cache_retries_only_when_inputs_change(tmp_path):

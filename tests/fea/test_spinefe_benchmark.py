@@ -9,7 +9,8 @@ import textwrap
 import pytest
 
 from ogo.fea.model import filter_node_set_to_dominant_coordinate_plane
-from ogo.fea.spine import build_benchmark_sample_model, find_spinefe_benchmark_dir
+from tests.fea import helpers
+from tests.fea.helpers import build_benchmark_sample_model, find_spinefe_benchmark_dir
 
 
 def test_benchmark_sample_model_updates_prescribed_displacement(monkeypatch, tmp_path):
@@ -19,7 +20,7 @@ def test_benchmark_sample_model_updates_prescribed_displacement(monkeypatch, tmp
 
     updates = []
     monkeypatch.setattr(
-        spine,
+        helpers,
         "prepare_benchmark_images",
         lambda input_image_path, input_mask_path: ("image", "mask", [1.0]),
     )

@@ -287,39 +287,6 @@ def test_proximal_sideways_fall_fixture_plane_does_not_reach_distal_shaft():
     assert plane["center"][2] + plane["size"][0] / 2.0 == pytest.approx(120.0)
 
 
-def test_scale_reference_to_sample_principal_lengths_clips_and_scales_origin():
-    reference = _polydata_from_points(
-        [
-            (-1.0, 0.0, 0.0),
-            (1.0, 0.0, 0.0),
-            (0.0, -2.0, 0.0),
-            (0.0, 2.0, 0.0),
-            (0.0, 0.0, -3.0),
-            (0.0, 0.0, 3.0),
-        ]
-    )
-    sample = _polydata_from_points(
-        [
-            (-0.5, 0.0, 0.0),
-            (0.5, 0.0, 0.0),
-            (0.0, -4.0, 0.0),
-            (0.0, 4.0, 0.0),
-            (0.0, 0.0, -6.0),
-            (0.0, 0.0, 6.0),
-        ]
-    )
-
-    scaled, metadata = femur.scale_reference_to_sample_principal_lengths(
-        reference,
-        sample,
-        min_scale=(0.8, 0.8, 0.75),
-        max_scale=(1.2, 1.2, 1.3),
-    )
-
-    assert metadata["scale_factors"] == pytest.approx([0.8, 1.2, 1.3])
-    assert scaled.GetBounds() == pytest.approx((-0.8, 0.8, -2.4, 2.4, -3.9, 3.9))
-
-
 def test_scale_reference_point_cloud_to_sample_preserves_reference_center():
     np = pytest.importorskip("numpy")
 

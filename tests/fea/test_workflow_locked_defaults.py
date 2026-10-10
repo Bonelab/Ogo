@@ -1,3 +1,4 @@
+from tests.fea import helpers
 import json
 from pathlib import Path
 
@@ -51,10 +52,10 @@ def _locked_workflow_defaults():
                     spine.SPINE_INFERIOR_CONTACT_CENTER_FRACTION
                 ),
                 "benchmark_linear": _selected_spine_benchmark(
-                    spine.benchmark_linear_params()
+                    helpers.benchmark_linear_params()
                 ),
                 "benchmark_nonlinear": _selected_spine_benchmark(
-                    spine.benchmark_nonlinear_params()
+                    helpers.benchmark_nonlinear_params()
                 ),
             },
             "hip-sideways-fall": {

@@ -165,24 +165,6 @@ def bbox_relative_contact_plane(
     }
 
 
-def bounds_with_reference_extent(current_bounds, reference_bounds):
-    """Return bounds centered on ``current_bounds`` with ``reference_bounds`` extents."""
-    import numpy as np
-
-    current = np.asarray(current_bounds, dtype=float)
-    reference = np.asarray(reference_bounds, dtype=float)
-    if current.shape != (6,) or reference.shape != (6,):
-        raise ValueError("bounds must contain x/y/z min/max values.")
-    out = []
-    for axis in range(3):
-        current_lo, current_hi = current[2 * axis], current[2 * axis + 1]
-        reference_lo, reference_hi = reference[2 * axis], reference[2 * axis + 1]
-        center = (current_lo + current_hi) / 2.0
-        extent = reference_hi - reference_lo
-        out.extend([center - extent / 2.0, center + extent / 2.0])
-    return tuple(float(value) for value in out)
-
-
 def foreground_voxel_center_bounds_from_mask(mask, *, origin, spacing):
     """Return x/y/z physical bounds of nonzero voxel centers."""
     import numpy as np
@@ -1700,36 +1682,6 @@ def generate_bone_cap_mask(mask, *, axis="x", direction="up", thickness=5, shape
     output[work_bb] = cap
     output[mask] = False
     return largest_connected_component(output)
-
-
-def generate_bone_cap_vtk(
-    labelled_vtk_image,
-    *,
-    label_value,
-    axis="x",
-    direction="up",
-    thickness=5,
-    shape="fit",
-    intrusion=None,
-    output_value=1,
-):
-    """Generate a VTK PMMA/support cap from a labelled bone mask."""
-    import numpy as np
-
-    labels = vtk_image_to_numpy(labelled_vtk_image, processing_order=True)
-    cap = generate_bone_cap_mask(
-        labels == label_value,
-        axis=axis,
-        direction=direction,
-        thickness=thickness,
-        shape=shape,
-        intrusion=intrusion,
-    )
-    return numpy_to_vtk_image(
-        (cap.astype(np.uint16) * int(output_value)),
-        labelled_vtk_image,
-        processing_order=True,
-    )
 
 
 def generate_projected_material_disk_vtk(
