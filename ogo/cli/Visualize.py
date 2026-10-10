@@ -107,7 +107,9 @@ def get_lookup_table():
             lut.SetTableValue(idx, 0, 0, 0, 0)
     return lut
     
-def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elevation, azimuth, flip, outfile, offscreen, pad, overwrite, func):
+def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elevation, azimuth, flip, outfile, offscreen, pad, overwrite, func, *, renderer_setup=None, label_palette=None):
+    """Render labels; optional per-call palette and scene setup support FE QC."""
+    label_definitions = lb.labels_dict if label_palette is None else label_palette
     
     # Check if output exists and should overwrite
     if outfile:
@@ -153,14 +155,14 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
     labels = getLabels(reader.GetOutput())
 
     for idx,label in enumerate(labels):
-        rgb = lb.labels_dict[label]['RGB']
-        desc = lb.labels_dict[label]['LABEL']
+        rgb = label_definitions[label]['RGB']
+        desc = label_definitions[label]['LABEL']
         ogo.message('{:5d}: ({:3d},{:3d},{:3d}) – {}'.format(label,rgb[0],rgb[1],rgb[2],desc))
     
     # Specify a selection of labels (helpful for TotalSegmentator results)
     if collection:
         if collection == 'all':
-            valid_list = [v['LABEL'] for k, v in lb.labels_dict.items()]
+            valid_list = [v['LABEL'] for k, v in label_definitions.items()]
         elif collection == 'ossai':
             valid_list = ['Femur Right', 'Femur Left', 'Pelvis Right', 'Pelvis Left', 'Sacrum', 'L6', 'L5', 'L4', 'L3', 'L2', 'L1']
         elif collection == 'skeleton':
@@ -186,7 +188,7 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
             if label in labels:
                 tmp.append(label)
             else:
-                ogo.message('[WARNING]: Selected label {} [{}] not in input image.'.format(lb.labels_dict[label]['LABEL'],label))
+                ogo.message('[WARNING]: Selected label {} [{}] not in input image.'.format(label_definitions[label]['LABEL'],label))
         labels = tmp
     
     # Create lists for VTK classes
@@ -213,7 +215,7 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
     
     for idx,label in enumerate(labels):
         
-        ogo.message('Processing label {} ({})'.format(label,lb.labels_dict[label]['LABEL']))
+        ogo.message('Processing label {} ({})'.format(label,label_definitions[label]['LABEL']))
         thres.append(vtk.vtkImageThreshold())
         extract.append(vtk.vtkExtractVOI())
         padding.append(vtk.vtkImageConstantPad())
@@ -221,7 +223,7 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
         mcube.append(vtk.vtkImageMarchingCubes())
         mapper.append(vtk.vtkDataSetMapper())
         actor.append(vtk.vtkActor())
-        rgb = lb.labels_dict[label]['RGB']
+        rgb = label_definitions[label]['RGB']
         
         thres[idx].SetInputConnection(reader.GetOutputPort())
         thres[idx].SetInValue(127)
@@ -280,6 +282,8 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
     renderer.GetActiveCamera().Elevation(elevation)
     renderer.GetActiveCamera().Azimuth(azimuth)
     renderer.ResetCamera()
+    if renderer_setup is not None:
+        renderer_setup(renderer)
     
     # Render the scene
     renderWindow.Render()
@@ -298,6 +302,8 @@ def vis3d(input_filename, select, collection, gaussian, radius, isosurface, elev
         writer.Write()
     
     ogo.message('Done.')
+    if offscreen:
+        renderWindow.Finalize()
     
 def vis2d(input_filename, outfile, mask_image, window, level, nThreads, image_orientation, slice_percent, offscreen, overwrite, func):
     

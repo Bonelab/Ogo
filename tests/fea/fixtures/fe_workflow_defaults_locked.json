@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "workflows": {
+    "hip-sideways-fall": {
+      "cortical_label": 1,
+      "cut_mode": "greater_trochanter_length",
+      "post_icp_distal_shaft_support_fraction": 0.9,
+      "fe_displacement_mm": -4.0,
+      "femoral_head_center_fraction": [
+        0.5,
+        1.1,
+        0.5
+      ],
+      "fixture_shape": "anatomy",
+      "fixture_size_fraction": [
+        1.0,
+        1.0
+      ],
+      "greater_trochanter_center_fraction": [
+        0.5,
+        -0.1,
+        0.5
+      ],
+      "input_margin_mm": 16.0,
+      "iso_resolution_mm": 1.0,
+      "left_femur_code": 1,
+      "mask_smoothing_spacing_threshold_mm": 2.0,
+      "node_sets": [
+        "Femoral_Head_PMMA_Nodes",
+        "Greater_Trochanter_PMMA_Nodes",
+        "Distal_Femur_Nodes"
+      ],
+      "pmma_intrusion_mm": 6.0,
+      "pmma_thickness_mm": 10.0,
+      "reference_max_scale": [
+        1.2,
+        1.2,
+        1.3
+      ],
+      "reference_min_scale": [
+        0.8,
+        0.8,
+        0.75
+      ],
+      "registration_backend": "numpy",
+      "registration_iterations": 50,
+      "registration_landmarks": 40000,
+      "right_femur_code": 2,
+      "rough_pre_icp_length_mm": 120.0,
+      "shaft_length_mm": 120.0,
+      "target_displacement_percent": 4.0,
+      "trabecular_label": 2
+    },
+    "spine-compression": {
+      "benchmark_linear": {
+        "bottom_direction": [
+          0,
+          0,
+          -1
+        ],
+        "bottom_node_set_id": 5,
+        "cort_elastic_E_func": "kopperdahl_trab_E",
+        "cort_yield_comp_func": null,
+        "cort_yield_tens_func": null,
+        "elastic_E_func": "kopperdahl_trab_E",
+        "fe_displacement": -0.2,
+        "pmma_E": 2500,
+        "pmma_mat_id": 300,
+        "pmma_v": 0.3,
+        "target_displacement_percent": 0.68,
+        "top_direction": [
+          0,
+          0,
+          1
+        ],
+        "top_node_set_id": 6,
+        "yield_comp_func": null,
+        "yield_tens_func": null
+      },
+      "benchmark_nonlinear": {
+        "bottom_direction": [
+          0,
+          0,
+          -1
+        ],
+        "bottom_node_set_id": 5,
+        "cort_elastic_E_func": "kopperdahl_trab_E",
+        "cort_yield_comp_func": "kopperdahl_trab_yc",
+        "cort_yield_tens_func": "kopperdahl_trab_yc",
+        "elastic_E_func": "kopperdahl_trab_E",
+        "fe_displacement": -2.0,
+        "pmma_E": 2500,
+        "pmma_mat_id": 300,
+        "pmma_v": 0.3,
+        "target_displacement_percent": 4.0,
+        "top_direction": [
+          0,
+          0,
+          1
+        ],
+        "top_node_set_id": 6,
+        "yield_comp_func": "kopperdahl_trab_yc",
+        "yield_tens_func": "kopperdahl_trab_yc"
+      },
+      "bottom_node_set_id": 3,
+      "contact_size_fraction": [
+        1.6,
+        1.6
+      ],
+      "inferior_contact_center_fraction": [
+        0.5,
+        0.5,
+        -0.05
+      ],
+      "iso_resolution_mm": 1.0,
+      "label_smoothing_sigma_mm": 1.0,
+      "label_smoothing_threshold": 0.5,
+      "mask_smoothing_spacing_threshold_mm": 2.0,
+      "pmma_e_mpa": 2500,
+      "pmma_intrusion_mm": 6,
+      "pmma_material_id": 5000,
+      "pmma_thickness_mm": 10,
+      "reference_filename": "L4_BODY_SPINE_COMPRESSION_REF.vtk",
+      "registration_backend": "numpy",
+      "registration_iterations": 50,
+      "registration_landmarks": 8000,
+      "registration_max_scale": "1.2,1.2,1.3",
+      "registration_min_scale": "0.8,0.8,0.75",
+      "spine_icp_target": "body",
+      "stable_surface_close_gaps_3d": true,
+      "stable_surface_close_gaps_max_gap": 2,
+      "stable_surface_fraction": 0.0,
+      "stable_surface_keep_largest_component": true,
+      "stable_surface_max_depth_mm": 24.0,
+      "stable_surface_min_area_fraction": 0.12,
+      "stable_surface_min_shift_mm": 3.0,
+      "stable_surface_trim_fraction": 0.1,
+      "superior_contact_center_fraction": [
+        0.5,
+        0.5,
+        1.05
+      ],
+      "target_displacement_percent": 0.68,
+      "top_node_set_id": 4
+    }
+  }
+}

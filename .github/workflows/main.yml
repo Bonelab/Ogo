@@ -20,9 +20,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macOS-latest]
-        python-version: [3.7]
+        os: [ubuntu-latest, macos-15-intel]
+        python-version: ["3.10"]
     
     name: ${{ matrix.os }}, Python ${{ matrix.python-version }}
     
@@ -37,7 +38,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           miniconda-version: "latest"
           activate-environment: test
-          channels: numerics88,simpleitk,conda-forge
+          channels: numerics88,conda-forge
           auto-activate-base: false
       - uses: actions/cache@v3
         id: conda-env-cache
@@ -47,11 +48,11 @@ jobs:
       - name: Create and install dependencies
         if: steps.conda-env-cache.outputs.cache-hit != 'true'
         run: |
-          conda install -n test n88tools click flake8 matplotlib nose numpy opencv pandas pbr scipy simpleitk six sphinx pydicom gdcm "setuptools<65.6"
+          conda install -y -n test --override-channels -c numerics88 -c conda-forge vtkbone "vtk>=9.2" "numpy<2" pandas nibabel pyyaml netcdf4 pbr pytest wheel "setuptools<65.6"
       - name: Install package
         run: |
           conda activate test
           pip install -e .
       - name: Run tests
         run: |
-          nosetests tests
+          python -m pytest tests
