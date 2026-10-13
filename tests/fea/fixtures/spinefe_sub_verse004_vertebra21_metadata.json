@@ -1,0 +1,22 @@
+{
+  "linear": {
+    "mesh": {
+      "elements": 67137,
+      "nodes": 77892
+    },
+    "node_sets": {
+      "body_top": 1432,
+      "body_bottom": 1413
+    }
+  },
+  "nonlinear": {
+    "mesh": {
+      "elements": 67137,
+      "nodes": 77892
+    },
+    "node_sets": {
+      "body_top": 1432,
+      "body_bottom": 1413
+    }
+  }
+}

@@ -46,6 +46,14 @@ which was presented at the ASBMR in 2018 and published in 2020:
 For further information about the Bone Imaging Laboratory see https://bonelab.ucalgary.ca. 
 Please contact us for further questions, comments or interest in contributing to this project.
 
+Finite Element Modelling
+========================
+
+For hip and spine models, start with the `FEA run guide <ogo/fea/README.md>`_.
+The `vertebra quickstart <docs/fea/vertebra_fea_quickstart.md>`_ covers installation
+and a first L1 model; the `code map <docs/fea/implementation.md>`_ locates the
+registration, material laws, supports and QC functions.
+
 Install
 =======
 
