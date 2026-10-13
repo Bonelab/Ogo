@@ -101,7 +101,7 @@ def get_phantom(phantom_type):
         calibration_dict['type'] = 'k2hpo4'
         calibration_dict['serial'] = '#4408'
         calibration_dict['number_rods'] = 4
-        calibration_dict['rod_labels'] = [131, 132, 133, 134]
+        calibration_dict['rod_labels'] = [121, 122, 123, 124]
         calibration_dict['rod_names'] = ['A', 'B', 'C', 'D']
         calibration_dict['densities'] = [58.88, -53.40, 157.05, 157.13]
         calibration_dict['h2o_densities'] = [1103.57, 1056.95, 1119.52, 1120.10]
@@ -112,9 +112,9 @@ def get_phantom(phantom_type):
         calibration_dict['type'] = 'CHA'
         calibration_dict['serial'] = '#BDC-71'
         calibration_dict['number_rods'] = 3
-        calibration_dict['rod_labels'] = [141, 142, 143]
+        calibration_dict['rod_labels'] = [125, 126, 127]
         calibration_dict['rod_names'] = ['A', 'B', 'C']
-        calibration_dict['densities'] = [100, 400, 800]
+        calibration_dict['densities'] = [100.4, 399.9, 795.7]
         calibration_dict['h2o_densities'] = [None]
 
     elif phantom_type in 'QRM-BDC 6-rod':
@@ -123,9 +123,9 @@ def get_phantom(phantom_type):
         calibration_dict['type'] = 'CHA'
         calibration_dict['serial'] = '#BDC-106'
         calibration_dict['number_rods'] = 6
-        calibration_dict['rod_labels'] = [151, 152, 153, 154, 155, 156]
+        calibration_dict['rod_labels'] = [128, 129, 130, 131, 132, 133]
         calibration_dict['rod_names'] = ['A', 'B', 'C', 'D', 'E', 'F']
-        calibration_dict['densities'] = [0, 100, 200, 400, 600, 800]
+        calibration_dict['densities'] = [0, 98.0, 200.0, 395.7, 596.4, 798.0]
         calibration_dict['h2o_densities'] = [None]
 
     elif phantom_type in 'Image Analysis QCT-3D Plus':
@@ -145,7 +145,7 @@ def get_phantom(phantom_type):
         calibration_dict['type'] = 'CHA'
         calibration_dict['serial'] = 'unknown'
         calibration_dict['number_rods'] = 5
-        calibration_dict['rod_labels'] = [121, 122, 123, 124, 125]
+        calibration_dict['rod_labels'] = [116, 117, 118, 119, 120]
         calibration_dict['rod_names'] = ['A', 'B', 'C', 'D', 'E']
         calibration_dict['densities'] = [0, 50, 100, 150, 200]
         calibration_dict['h2o_densities'] = [None]
@@ -399,6 +399,40 @@ def infoNIFTI(reader):
     print('!> {:30s} = {}'.format('NIFTIHeader', reader.GetNIFTIHeader()))
     print(guard)
 
+def custom_labelsDict(file_path):
+    """Takes a labels file that is used from ITKSnap and returns a DICT
+    """
+    labels_dict = {}
+    labels_hdr = ''
+    
+    # Get the header
+    try:
+        with open(file_path, 'r') as file:
+            for line in file:
+                # Process each line 
+                # The 'line' variable will contain the current line, including the newline character '\n'
+                # You might want to strip whitespace, including the newline, using .strip()
+                #processed_line = line.strip()
+                if line.startswith("#") or line.strip() == "": # header information or blank line
+                  labels_hdr += line
+                else: # labels
+                  info = line.split()
+                  ind = int(info[0])
+                  rgb = [int(info[1]), int(info[2]), int(info[3])]
+                  alpha = float(info[4])
+                  vis = int(info[5])
+                  idx = int(info[6])
+                  lab = (line.split('\"')[1]).strip() # tricky as we need to include spaces in the label name
+                  labels_dict[ind]={"RGB":rgb,"A":alpha,"VIS":vis,"IDX":idx,"LABEL":lab}
+                  #print(ind,rgb,alpha,vis,idx,lab)
+
+    except FileNotFoundError:
+        print(f"Error: The file '{file_path}' was not found.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    return labels_dict,labels_hdr
+
 
 def applyMask(imageData, maskData):
     """Applies the mask to the image.
@@ -649,9 +683,17 @@ def bmd_metrics(vtk_image):
     """
     spacing = vtk_image.GetSpacing()
     numpy_image = vtk2numpy(vtk_image)
+    nonzero_data = numpy_image[numpy_image != 0]
     voxel_count = np.count_nonzero(numpy_image)
     voxel_volume = spacing[0] * spacing[1] * spacing[2]  # [mm^3]
     voxel_volume2 = voxel_volume / 1000  # [cm^3]
+    
+    mean_signal = np.mean(nonzero_data)
+    std_noise = np.std(nonzero_data)
+    if mean_signal == 0:
+      signal_to_noise = 0
+    else:
+      signal_to_noise = mean_signal / std_noise
 
     # BMD measures
     BMD_total = numpy_image.sum()  # [mg/cc K2HPO4]
@@ -667,7 +709,10 @@ def bmd_metrics(vtk_image):
         'Integral BMD [mg/cc]': BMD_AVG,
         'Integral BMC [mg]': BMC,
         'Bone Volume [mm^3]': VOLUME_mm,
-        'Bone Volume [cm^3]': VOLUME_cm
+        'Bone Volume [cm^3]': VOLUME_cm,
+        'mean_signal': mean_signal,
+        'std_noise': std_noise,
+        'SNR': signal_to_noise
     }
 
 
@@ -1450,7 +1495,7 @@ def maskThreshold(imageData, threshold_values):
     combined_mask = None
     
     for i, threshold_value in enumerate(threshold_values, start=1):
-        message("Threshold Value: %d" % threshold_value)
+        #message("Threshold Value: %d" % threshold_value)
         
         # Threshold the image for the current value
         thres = vtk.vtkImageThreshold()
