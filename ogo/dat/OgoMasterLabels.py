@@ -26,10 +26,7 @@ labels_hdr = \
     '# Label Ranges\n' + \
     '#               Bones:   1 to  79 & 150 to 175\n' + \
     '#           Int Calib:  91 to  97\n' + \
-    '#               Bones:   1 to  79 & 150 to 175\n' + \
-    '#           Int Calib:  91 to  97\n' + \
     '#            Phantoms: 111 to 136\n' + \
-    '#    DXA Compartments: 176 to 187\n' + \
     '#    DXA Compartments: 176 to 187\n' + \
     '# Muscle, organs, etc: 200 to 244\n' + \
     '#\n' + \
@@ -39,7 +36,6 @@ labels_hdr = \
     '# see possible colors, ogoPrintLabels --colors.\n' + \
     '# \n' + \
     '# September 25, 2023\n' + \
-    '# March 26, 2026\n' + \
     '# March 26, 2026\n' + \
     '################################################\n' + \
     '# IND    R    G    B    A  VIS  IDX  LABEL\n'  + \
@@ -560,10 +556,6 @@ ts_labels_dict = {
     72:  {'LABEL_TS1': 'scapula_right', 'LABEL_TS2': 'scapula_right', 'OGO_LABEL': 58},
     73:  {'LABEL_TS1': 'clavicula_left', 'LABEL_TS2': 'clavicle', 'OGO_LABEL': 61},
     74:  {'LABEL_TS1': 'clavicula_right', 'LABEL_TS2': 'clavicle', 'OGO_LABEL': 60},
-    71:  {'LABEL_TS1': 'scapula_left', 'LABEL_TS2': 'scapula_left', 'OGO_LABEL': 59},
-    72:  {'LABEL_TS1': 'scapula_right', 'LABEL_TS2': 'scapula_right', 'OGO_LABEL': 58},
-    73:  {'LABEL_TS1': 'clavicula_left', 'LABEL_TS2': 'clavicle', 'OGO_LABEL': 61},
-    74:  {'LABEL_TS1': 'clavicula_right', 'LABEL_TS2': 'clavicle', 'OGO_LABEL': 60},
     75:  {'LABEL_TS1': 'femur_left', 'LABEL_TS2': 'femur_left', 'OGO_LABEL': 2},
     76:  {'LABEL_TS1': 'femur_right', 'LABEL_TS2': 'femur_right', 'OGO_LABEL': 1},
     77:  {'LABEL_TS1': 'hip_left', 'LABEL_TS2': 'hip_left', 'OGO_LABEL': 4},
@@ -581,30 +573,6 @@ ts_labels_dict = {
     89:  {'LABEL_TS1': 'iliopsoas_right', 'LABEL_TS2': 'iliopsoas muscle', 'OGO_LABEL': 244},
     90:  {'LABEL_TS1': 'brain', 'LABEL_TS2': 'brain', 'OGO_LABEL': 211},
     91:  {'LABEL_TS1': 'skull', 'LABEL_TS2': 'skull', 'OGO_LABEL': -1},
-    92:  {'LABEL_TS1': 'rib_right_4', 'LABEL_TS2': 'rib_right_4', 'OGO_LABEL': 166},
-    93:  {'LABEL_TS1': 'rib_right_3', 'LABEL_TS2': 'rib_right_3', 'OGO_LABEL': 165},
-    94:  {'LABEL_TS1': 'rib_left_1', 'LABEL_TS2': 'rib_left_1', 'OGO_LABEL': 150},
-    95:  {'LABEL_TS1': 'rib_left_2', 'LABEL_TS2': 'rib_left_2', 'OGO_LABEL': 151},
-    96:  {'LABEL_TS1': 'rib_left_3', 'LABEL_TS2': 'rib_left_3', 'OGO_LABEL': 152},
-    97:  {'LABEL_TS1': 'rib_left_4', 'LABEL_TS2': 'rib_left_4', 'OGO_LABEL': 153},
-    98:  {'LABEL_TS1': 'rib_left_5', 'LABEL_TS2': 'rib_left_5', 'OGO_LABEL': 154},
-    99:  {'LABEL_TS1': 'rib_left_6', 'LABEL_TS2': 'rib_left_6', 'OGO_LABEL': 155},
-    100: {'LABEL_TS1': 'rib_left_7', 'LABEL_TS2': 'rib_left_7', 'OGO_LABEL': 156},
-    101: {'LABEL_TS1': 'rib_left_8', 'LABEL_TS2': 'rib_left_8', 'OGO_LABEL': 157},
-    102: {'LABEL_TS1': 'rib_left_9', 'LABEL_TS2': 'rib_left_9', 'OGO_LABEL': 158},
-    103: {'LABEL_TS1': 'rib_left_10', 'LABEL_TS2': 'rib_left_10', 'OGO_LABEL': 159},
-    104: {'LABEL_TS1': 'rib_left_11', 'LABEL_TS2': 'rib_left_11', 'OGO_LABEL': 160},
-    105: {'LABEL_TS1': 'rib_left_12', 'LABEL_TS2': 'rib_left_12', 'OGO_LABEL': 161},
-    106: {'LABEL_TS1': 'rib_right_1', 'LABEL_TS2': 'rib_right_1', 'OGO_LABEL': 163},
-    107: {'LABEL_TS1': 'rib_right_2', 'LABEL_TS2': 'rib_right_2', 'OGO_LABEL': 164},
-    108: {'LABEL_TS1': 'rib_right_5', 'LABEL_TS2': 'rib_right_5', 'OGO_LABEL': 167},
-    109: {'LABEL_TS1': 'rib_right_6', 'LABEL_TS2': 'rib_right_6', 'OGO_LABEL': 168},
-    110: {'LABEL_TS1': 'rib_right_7', 'LABEL_TS2': 'rib_right_7', 'OGO_LABEL': 169},
-    111: {'LABEL_TS1': 'rib_right_8', 'LABEL_TS2': 'rib_right_8', 'OGO_LABEL': 170},
-    112: {'LABEL_TS1': 'rib_right_9', 'LABEL_TS2': 'rib_right_9', 'OGO_LABEL': 171},
-    113: {'LABEL_TS1': 'rib_right_10', 'LABEL_TS2': 'rib_right_10', 'OGO_LABEL': 172},
-    114: {'LABEL_TS1': 'rib_right_11', 'LABEL_TS2': 'rib_right_11', 'OGO_LABEL': 173},
-    115: {'LABEL_TS1': 'rib_right_12', 'LABEL_TS2': 'rib_right_12', 'OGO_LABEL': 174},
     92:  {'LABEL_TS1': 'rib_right_4', 'LABEL_TS2': 'rib_right_4', 'OGO_LABEL': 166},
     93:  {'LABEL_TS1': 'rib_right_3', 'LABEL_TS2': 'rib_right_3', 'OGO_LABEL': 165},
     94:  {'LABEL_TS1': 'rib_left_1', 'LABEL_TS2': 'rib_left_1', 'OGO_LABEL': 150},
