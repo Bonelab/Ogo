@@ -23,6 +23,7 @@ from ogo.fea.spine import (
     solve_report_profile as spine_solve_report_profile,
 )
 from ogo.fea.femur import (
+    DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM,
     solve_report_profile as femur_solve_report_profile,
 )
 
@@ -642,6 +643,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Femur side to process. Repeatable; defaults to both.",
     )
+    hip.add_argument(
+        "--femur_greater_trochanter_distal_length",
+        type=float,
+        default=None,
+        metavar="MM",
+        help=(
+            "Retained complete flat shaft length from the distal edge of the "
+            "GT support (greater-trochanter disk), after removing the incomplete "
+            "distal section. Insufficient coverage fails generation. "
+            f"Default: {DEFAULT_FEMUR_GREATER_TROCHANTER_DISTAL_LENGTH_MM:g} mm."
+        ),
+    )
 
     return parser
 
@@ -723,6 +736,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     if args.model_type == "hip":
         femur_extra_args = pistoia_mask_args + list(extra_args)
+        if args.femur_greater_trochanter_distal_length is not None:
+            femur_extra_args.extend([
+                "--femur_greater_trochanter_distal_length",
+                str(args.femur_greater_trochanter_distal_length),
+            ])
         for side in expand_sides(args.side or ["both"]):
             cmd = build_femur_command(
                 calibrated_image=args.calibrated_image,
