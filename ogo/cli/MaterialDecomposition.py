@@ -27,7 +27,7 @@ def print_pattern(pattern):
   print('{:>20s}: {:s}'.format('name', name))
   print('{:>20s}: {:s}'.format('ext', ext))
   
-def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet, overwrite):
+def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet, overwrite, water_offset=None):
   
   # Initialize variables
   choices = list(md.mass_density().keys())
@@ -47,6 +47,11 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
       os.sys.exit('[ERROR] Energies must be between 40 and 190 keV.')
   if energies[0] == energies[1]:
     os.sys.exit('[ERROR] Energies cannot be equal.')
+
+  # Check that water_offset values are provided if specified
+  if water_offset is not None:
+    if len(water_offset) != 2:
+      os.sys.exit('[ERROR] water_offset must have exactly 2 values.')
 
   # Check that the materials are valid
   if len(materials)<2 or len(materials)>3:
@@ -168,6 +173,16 @@ def MaterialDecomposition(images, energies, materials, pattern, suppress, quiet,
 
   np_high = sitk.GetArrayFromImage(ct2)
   np_high_flattened=np_high.reshape(-1)
+  
+  # Apply water correction if specified
+  if water_offset is not None:
+    if not quiet:
+      ogo.message('Applying water correction:')
+      ogo.message('  Low energy offset:  {:d} HU'.format(water_offset[0]))
+      ogo.message('  High energy offset: {:d} HU'.format(water_offset[1]))
+      ogo.message('')
+    np_low_flattened = np_low_flattened + water_offset[0]
+    np_high_flattened = np_high_flattened + water_offset[1]
   
   original_shape = np_low.shape
   
@@ -373,6 +388,11 @@ Example calls:
     PCD_ESP_140kV_090keV_Br40_04Th_10Slices.nii.gz \\
     40 90 cha water adipose --pattern ./PCD_ESP_140kV.nii.gz
   
+  ogoMaterialDecomposition \\
+    PCD_HIPQC_120kV_060KEV_LOW_Qr40_04Th_10Slices.nii.gz \\
+    PCD_HIPQC_120kV_084KEV_HGH_Qr40_04Th_10Slices.nii.gz \\
+    60 84 cha water --water_offset -10 5 --pattern PCD_HIPQC_120kV.nii.gz
+  
 '''
 
   # Setup argument parsing
@@ -406,6 +426,12 @@ Example calls:
                       default=[], 
                       metavar='MAT1 MAT2 (MAT3)', 
                       help='File outputs to suppress (e.g., HA, water, adipose)')
+  parser.add_argument('--water_offset',
+                      type=int,
+                      default=None,
+                      nargs=2,
+                      metavar='HU HU',
+                      help='Apply water correction in HU prior to material decomposition')
   #parser.add_argument('--max_adipose', 
   #                    type=float, 
   #                    default=[], 
