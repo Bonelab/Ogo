@@ -12,6 +12,27 @@ GenerateFEM = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(GenerateFEM)
 
 
+def test_hip_help_explains_retained_shaft_length(capsys):
+    with pytest.raises(SystemExit) as exc:
+        GenerateFEM.main(["hip", "--help"])
+    assert exc.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "--femur_greater_trochanter_distal_length" in help_text
+    assert "GT support" in help_text
+    assert "10 mm" in help_text
+
+
+def test_hip_shaft_length_is_forwarded_once(capsys):
+    GenerateFEM.main([
+        "hip", "density.nii.gz", "hip_mask.nii.gz", "--side", "left",
+        "--femur_greater_trochanter_distal_length", "15",
+        "--dry-run", "--no-solve",
+    ])
+    command = capsys.readouterr().out
+    assert command.count("--femur_greater_trochanter_distal_length") == 1
+    assert "--femur_greater_trochanter_distal_length 15.0" in command
+
+
 def test_generation_thread_limit_applies_to_vtk_and_itk():
     vtk = pytest.importorskip("vtk")
     sitk = pytest.importorskip("SimpleITK")
