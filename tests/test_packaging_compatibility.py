@@ -1,10 +1,16 @@
 import ast
-import re
+from importlib import metadata
+import os
 from pathlib import Path
+import subprocess
+import sysconfig
+
+from packaging.requirements import Requirement
+from packaging.version import Version
 
 
 def test_setup_py_does_not_bootstrap_setup_dependencies():
-    """CI installs build dependencies before installing this package."""
+    """Build isolation supplies dependencies without setuptools bootstrapping."""
     repo_root = Path(__file__).resolve().parents[1]
     setup_py = repo_root / "setup.py"
     tree = ast.parse(setup_py.read_text(encoding="utf-8"), filename=str(setup_py))
@@ -14,7 +20,7 @@ def test_setup_py_does_not_bootstrap_setup_dependencies():
             continue
         assert node.arg != "setup_requires", (
             "setup.py should not use setup_requires; that setuptools bootstrap path "
-            "is fragile in the Python 3.7 CI environment."
+            "is fragile in isolated builds."
         )
 
 
@@ -29,45 +35,35 @@ def test_build_system_declares_pbr_dependency():
     assert '"pbr' in text
 
 
-def test_ci_conda_install_is_non_interactive():
-    """Cache misses in CI should not wait for an install confirmation prompt."""
-    repo_root = Path(__file__).resolve().parents[1]
-    workflow = repo_root / ".github" / "workflows" / "main.yml"
-    text = workflow.read_text(encoding="utf-8")
-
-    install_lines = re.findall(r"^\s*(?:conda|mamba) install\b.*$", text, flags=re.MULTILINE)
-    assert install_lines, "The CI workflow should install dependencies."
-    for line in install_lines:
-        assert " -y " in " {0} ".format(line), (
-            "CI install commands should include -y so cache misses "
-            "cannot block on confirmation."
-        )
-
-
-def test_ci_uses_conda_with_required_test_dependencies():
-    """Keep the upstream conda setup, pytest and the setuptools compatibility pin."""
-    repo_root = Path(__file__).resolve().parents[1]
-    workflow = repo_root / ".github" / "workflows" / "main.yml"
-    text = workflow.read_text(encoding="utf-8")
-
-    assert "mamba-version:" not in text
-    install_line = re.search(r"^\s*conda install\b.*$", text, flags=re.MULTILINE)
-    assert install_line is not None
-    assert "pytest" in install_line.group()
-    assert '"setuptools<65.6"' in install_line.group()
-
-
-def test_ci_uses_vtk9_and_supported_python():
-    """FEA uses VTK 9 image directions and reference-surface readers."""
-    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/main.yml"
-    text = workflow.read_text(encoding="utf-8")
-    assert 'python-version: ["3.10"]' in text
-    assert '"vtk>=9.2"' in text
-    assert "vtkbone" in text
-    assert "fail-fast: false" in text
-
-
 def test_qc_image_dependencies_are_declared():
     requirements = Path(__file__).resolve().parents[1] / "requirements.txt"
-    names = {line.strip().lower() for line in requirements.read_text().splitlines()}
+    names = {
+        Requirement(line).name.lower()
+        for line in requirements.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    }
     assert {"nibabel", "pillow", "netcdf4"} <= names
+
+
+def test_editable_install_uses_checkout_and_matching_version():
+    """CI must exercise this checkout rather than another installed Ogo."""
+    import ogo
+
+    root = Path(__file__).resolve().parents[1]
+    assert Path(ogo.__file__).resolve() == root / "ogo" / "__init__.py"
+    assert Version(ogo.__version__) == Version(metadata.version("ogo"))
+
+
+def test_installed_label_command_runs_outside_checkout(tmp_path):
+    """Exercise a real installed command, not just its help or parser."""
+    executable = "ogoPrintLabels.exe" if os.name == "nt" else "ogoPrintLabels"
+    command = Path(sysconfig.get_path("scripts")) / executable
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    result = subprocess.run(
+        [str(command), "--echo", "labels"], cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"Femur Right"' in result.stdout

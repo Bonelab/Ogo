@@ -1,58 +1,58 @@
-# This is a basic workflow to help you get started with Actions
-
 name: Python CI
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the master branch
   push:
-    branches: [ master ]
+    branches: [master, ogo-modernization]
   pull_request:
-    branches: [ master ]
+    branches: [master]
   schedule:
-    [cron: "0 12 1,15 * *"]
-
-  # Allows you to run this workflow manually from the Actions tab
+    - cron: '0 12 1,15 * *'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    name: ${{ matrix.os }}, Python 3.12
     runs-on: ${{ matrix.os }}
-    
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15-intel]
-        python-version: ["3.10"]
-    
-    name: ${{ matrix.os }}, Python ${{ matrix.python-version }}
-    
+        os: [ubuntu-24.04, macos-15-intel]
     defaults:
       run:
         shell: bash -l {0}
+    env:
+      MPLBACKEND: Agg
+      QT_QPA_PLATFORM: offscreen
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
 
     steps:
-      - uses: actions/checkout@v3
-      - uses: conda-incubator/setup-miniconda@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: ${{ matrix.python-version }}
-          miniconda-version: "latest"
-          activate-environment: test
-          channels: numerics88,conda-forge
+          fetch-depth: 0 # PBR derives the version from history/tags.
+          persist-credentials: false
+      - uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
+        with:
+          miniforge-version: 26.7.2-0
+          activate-environment: ogo
+          environment-file: environment.yml
+          channel-priority: strict
           auto-activate-base: false
-      - uses: actions/cache@v3
-        id: conda-env-cache
-        with:
-          path: ${{ env.CONDA }}/envs/test
-          key: conda-env-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('.github/workflows/main.yml') }}
-      - name: Create and install dependencies
-        if: steps.conda-env-cache.outputs.cache-hit != 'true'
+      # Prove fresh provisioning before considering download caching.
+      - name: Install and check development package
         run: |
-          conda install -y -n test --override-channels -c numerics88 -c conda-forge vtkbone "vtk>=9.2" "numpy<2" pandas nibabel pyyaml netcdf4 pbr pytest wheel "setuptools<65.6"
-      - name: Install package
+          python -m pip install -e . "pytest>=7,<10"
+          python -m pip check
+          python --version
+          python -m pip show ogo
+          conda list '^(python|numpy|vtk|vtkbone)$'
+      - name: Run existing tests and installed-command smoke check
         run: |
-          conda activate test
-          pip install -e .
-      - name: Run tests
-        run: |
-          python -m pytest tests
+          python -m pytest tests -m 'not integration' -ra

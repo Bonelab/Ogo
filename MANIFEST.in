@@ -1,0 +1,9 @@
+include pyproject.toml setup.cfg setup.py README.rst requirements.txt environment.yml
+recursive-include ogo/dat *.vtk
+include ogo/fea/qc/gallery_review.js
+# These committed executables are macOS Intel binaries, not portable package data.
+# Keep them in the checkout; GraphCuts users must supply suitable native tools.
+prune ogo/util/graphcuts/bin
+prune plans
+prune archive
+global-exclude .DS_Store *.py[cod]

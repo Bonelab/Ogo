@@ -1,5 +1,5 @@
 # Internal tools
-pbr
+pbr>=7.1.3,<8
 click
 
 # Image processing
@@ -9,16 +9,15 @@ matplotlib
 netCDF4
 nibabel
 Pillow
+vtk>=9.2
+pandas
+PyYAML
+opencv-python<4.12
+scikit-image
+scikit-learn
 
 # Statistics
 scipy>=1.7,<1.13
 
 # Machine learning
 batchgenerators
-
-# Documentation
-Sphinx
-
-# Testings
-nose
-flake8

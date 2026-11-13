@@ -57,6 +57,8 @@ registration, material laws, supports and QC functions.
 Install
 =======
 
+Create a Conda environment called ``ogo``, activate it, and install Ogo:
+
 .. code-block:: bash
 
     # Clone the repository onto your computer and change into the directory.
@@ -64,20 +66,32 @@ Install
     git clone git@github.com:Bonelab/Ogo.git
     # ... or straight HTTPS
     git clone https://github.com/Bonelab/Ogo.git
+    cd Ogo
 
-    # It is recommended to create a virtual environment using conda:
-    conda create -n ogo -c numerics88 -c conda-forge pandas nibabel pyyaml vtkbone python=3
+    # Create a virtual environment using the provided environment.yml file. This will install all dependencies.
+    conda env create --file environment.yml
     
     # Activate your conda environment, make sure you have conda installed on your system.
-    # Best way to install conda is through anaconda
     conda activate ogo
     
     # Install in an 'editable' format 
-    pip install -e .
+    python -m pip install -e .
 
-    # You can also run the full install
-    python setup.py install
+The environment file selects Python 3.12 and the compatible VTK/vtkbone stack.
+GraphCuts executables and FEA solver tools require their own installation.
 
+Development checks
+==================
+
+To run the automated checks in the activated environment:
+
+.. code-block:: bash
+
+    python -m pip install "pytest>=7,<10"
+    python -m pytest tests -m "not integration" -ra
+
+Integration tests require external study data or solver resources and are run
+separately with those inputs. Install Sphinx only when building the documentation.
 
 Utilities
 =========
@@ -162,8 +176,10 @@ with the :code:`ogo` environment activated.
      - measure bone mineral density for each label provided from a calibrated CT scan
    * - :code:`ogoCreateDatasetJSON`
      - generates JSON for defining raw CT, labelled CT, and unlabelled CT for machine learning (nnUNet)
-   * - :code:`ogoGenerateFEM`
-     - prepares a label (femur, spine) for finite element analysis using FAIM (https://bonelab.github.io/n88/)
+   * - :code:`ogoFEA`
+     - prepares hip/spine finite-element models and attempts solving by default; use --no-solve for generation only
+   * - :code:`ogoValidateFEA`
+     - validates and reviews FEA models and quality-control outputs
    * - :code:`ogoGraphCuts`
      - wrapper for using GraphCuts and requires user to install compiled software (see ogo.util)
    * - :code:`ogoImageCalibration`
@@ -188,8 +204,6 @@ with the :code:`ogo` environment activated.
      - output the labels used for bones and other tissues
    * - :code:`ogoProcrustes`
      - determine whether two datasets have similar bone anatomy as per Procrustes
-   * - :code:`ogoReadPickle`
-     - read pickle files used in machine learning (deprecated)
    * - :code:`ogoRepairNIfTI`
      - fix instances of corrupted NIfTI files
    * - :code:`ogoReplaceLabels`
