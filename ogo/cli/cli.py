@@ -1,61 +1,90 @@
 """Select a migrated command without importing unrelated scientific workflows."""
 
 import argparse
+from contextlib import contextmanager
 import importlib
+import logging
+import sys
+import time
 
 from ogo import __version__
 
 
-"""
-Command-line interface for the Ogo modernization pilot. This defines a set of commands available in the new "ogo" entry point.
-
-Required demonstration of the new CLI:
-- Read: Demonstrate that the new workflow reads an image (i.e. NIfTI, aims, etc.) and prints its metadata
-- Write: Demonstrate that the new workflow writes an image
-- Apply filter: Demonstrate that the new workflow applies a filter to an image (e.g., Gaussian smoothing)
-- Threshold: Demonstrate that the new workflow thresholds an image (e.g., binary thresholding)
----
-Potential candidate commands for demonstration:
-- ogo.cli.ReplaceLabels: [Reads] an image, modifies its labels, and [writes] the output image.
----
-Migrated commands:
-- ogo.cli.PrintLabels: Print standard label definitions and color tables
----
-"""
-
 COMMANDS = {
     "print-labels": ("ogo.cli.PrintLabels", "Print standard label definitions and color tables"),
+    "check-labels": ("ogo.cli.CheckLabels", "Inspect segmentation labels or check required IDs"),
 }
+
+
+class _ElapsedFormatter(logging.Formatter):
+    """Prefix diagnostics with monotonic elapsed seconds and align extra lines."""
+
+    def __init__(self, started):
+        super().__init__("%(message)s")
+        self.started = started
+
+    def format(self, record):
+        message = super().format(record)
+        prefix = f"{time.monotonic() - self.started:8.2f}s [{record.levelname}] "
+        return prefix + message.replace("\n", "\n" + " " * len(prefix))
+
+
+@contextmanager
+def _command_logging(level, started):
+    """Own one stderr handler for this invocation, restoring application state."""
+    logger = logging.getLogger("ogo")
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(level)
+    handler.setFormatter(_ElapsedFormatter(started))
+    previous_level, previous_propagate = logger.level, logger.propagate
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
 
 
 def main(argv=None):
     """Dispatch the selected command and return its exit status."""
+    started = time.monotonic()
     command_help = "Commands:\n" + "\n".join(
         f"  {name:<16} {description}"
         for name, (_, description) in COMMANDS.items()
     )
     parser = argparse.ArgumentParser(
         prog="ogo",
-        description="Ogo modernization pilot. <Placeholder description of the new ogo CLI>",
+        description="Ogo modernization pilot: run migrated research commands.",
         epilog=command_help,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "--verbose", dest="log_level", action="store_const", const=logging.DEBUG,
+        help="Show debug diagnostics (before the command)",
+    )
+    verbosity.add_argument(
+        "--quiet", dest="log_level", action="store_const", const=logging.WARNING,
+        help="Show only warnings and errors (before the command)",
+    )
+    parser.set_defaults(log_level=logging.INFO)
     parser.add_argument("command", nargs="?", choices=COMMANDS, help="Command to run")
     parser.add_argument("arguments", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
-    # If no command is provided, print help and exit
     if args.command is None:
         parser.print_help()
         return 0
 
-    # Dispatch to the selected command module
     module_name, _ = COMMANDS[args.command]
-    # Import the module and call its main() function with the remaining arguments
-    module = importlib.import_module(module_name)
-    # Call the main function of the selected command module with the remaining arguments
-    return module.main(args.arguments)
+    with _command_logging(args.log_level, started):
+        module = importlib.import_module(module_name)
+        return module.main(args.arguments)
 
 
 if __name__ == "__main__":

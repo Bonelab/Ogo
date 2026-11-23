@@ -83,8 +83,8 @@ GraphCuts executables and FEA solver tools require their own installation.
 Modernization pilot
 ===================
 
-The ``ogo-modernization`` branch currently installs only ``ogo``, with one
-migrated subcommand: ``print-labels``.
+The ``ogo-modernization`` branch currently installs only ``ogo``, with two
+migrated subcommands: ``print-labels`` and ``check-labels``.
 
 From the modernization checkout, use a separate pilot environment:
 
@@ -94,7 +94,7 @@ From the modernization checkout, use a separate pilot environment:
     conda activate ogo-pilot
     python -m pip install -e .
 
-Then inspect the catalog or print a table:
+Then inspect the catalog, print a table, or check segmentation labels:
 
 .. code-block:: bash
 
@@ -103,15 +103,21 @@ Then inspect the catalog or print a table:
     ogo print-labels --help
     ogo print-labels > ogo-master-labels.txt
     ogo print-labels --echo colors16
+    ogo check-labels segmentation.nii.gz
+    ogo check-labels segmentation.nii.gz --require 2 10 --include-description
+    ogo --quiet check-labels segmentation.nii.gz > labels.txt
 
-The formatter can also be called from Python without printing or ending the
-process:
+The operations can also be called from Python without printing or ending the
+process. Image-reading errors are raised to the caller:
 
 .. code-block:: python
 
     from ogo.cli.PrintLabels import render_labels
+    from ogo.cli.CheckLabels import read_labels, find_missing_labels
 
     table = render_labels("labels")
+    present = read_labels("segmentation.nii.gz")
+    missing = find_missing_labels(present, [2, 10])
 
 Development checks
 ==================
@@ -195,10 +201,10 @@ The calibration functionality is templated as described below and is best access
 Command Line Apps
 =================
 
-The pilot installs only ``ogo print-labels``, described above. The table below
-lists historical commands for reference to the baseline installation. It is not
+The pilot exposes ``ogo print-labels`` and ``ogo check-labels``, described above.
+The table below lists historical commands for reference to the baseline installation. It is not
 the pilot's installed command catalog. To inspect the current catalog, run
-``ogo --help``; use ``ogo print-labels --help`` for the migrated command.
+``ogo --help``; use ``ogo <command> --help`` for a migrated command.
 
 .. list-table::
    :widths: 25 100
