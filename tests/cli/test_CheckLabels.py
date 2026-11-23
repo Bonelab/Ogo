@@ -18,13 +18,14 @@ import SimpleITK as sitk
         "Missing required labels: 9 (L2)",
     ),
 ])
-def test_label_outcomes(run_installed_command, tmp_path, options, status, report):
+def test_label_outcomes(run_python, tmp_path, options, status, report):
     data = np.array([[[0, 1], [2, 91]], [[1, 0], [2, 0]]], dtype=np.uint8)
     source = tmp_path / "segmentation.nii.gz"
     sitk.WriteImage(sitk.GetImageFromArray(data), str(source))
     original = source.read_bytes()
 
-    result = run_installed_command("ogoCheckLabels", source, *options)
+    # This source remains unmigrated and has no installed pilot subcommand yet.
+    result = run_python("-m", "ogo.cli.CheckLabels", source, *options)
 
     assert result.returncode == status, result.stdout + result.stderr
     # Streams and elapsed/severity prefixes will intentionally change later.

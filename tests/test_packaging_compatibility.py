@@ -56,14 +56,24 @@ def test_editable_install_uses_checkout_and_matching_version():
 
 def test_installed_label_command_runs_outside_checkout(tmp_path):
     """Exercise a real installed command, not just its help or parser."""
-    executable = "ogoPrintLabels.exe" if os.name == "nt" else "ogoPrintLabels"
+    executable = "ogo.exe" if os.name == "nt" else "ogo"
     command = Path(sysconfig.get_path("scripts")) / executable
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
     result = subprocess.run(
-        [str(command), "--echo", "labels"], cwd=tmp_path, env=env,
+        [str(command), "print-labels", "--echo", "labels"], cwd=tmp_path, env=env,
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert '"Femur Right"' in result.stdout
+    assert result.stderr == ""
+
+
+def test_installed_package_registers_only_the_root_command():
+    entry_points = {
+        entry.name: entry.value
+        for entry in metadata.distribution("ogo").entry_points
+        if entry.group == "console_scripts"
+    }
+    assert entry_points == {"ogo": "ogo.cli.cli:main"}

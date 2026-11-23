@@ -80,6 +80,39 @@ Create a Conda environment called ``ogo``, activate it, and install Ogo:
 The environment file selects Python 3.12 and the compatible VTK/vtkbone stack.
 GraphCuts executables and FEA solver tools require their own installation.
 
+Modernization pilot
+===================
+
+The ``ogo-modernization`` branch currently installs only ``ogo``, with one
+migrated subcommand: ``print-labels``.
+
+From the modernization checkout, use a separate pilot environment:
+
+.. code-block:: bash
+
+    conda env create --name ogo-pilot --file environment.yml
+    conda activate ogo-pilot
+    python -m pip install -e .
+
+Then inspect the catalog or print a table:
+
+.. code-block:: bash
+
+    ogo --help
+    ogo --version
+    ogo print-labels --help
+    ogo print-labels > ogo-master-labels.txt
+    ogo print-labels --echo colors16
+
+The formatter can also be called from Python without printing or ending the
+process:
+
+.. code-block:: python
+
+    from ogo.cli.PrintLabels import render_labels
+
+    table = render_labels("labels")
+
 Development checks
 ==================
 
@@ -120,7 +153,7 @@ ogo.dat
 
 :code:`ogo.dat.OgoMasterLabels`
 
-- a dictionary of labels used by many of the command line interface functions. Any new labels must be defined here. Use ogoPrintLabels to output the dictionary.
+- a dictionary of labels used by many of the command line interface functions. Any new labels must be defined here. Use ``ogo print-labels`` to output the dictionary in the pilot.
 
 :code:`ogo.dat.MassAttenuationTables`
 
@@ -162,9 +195,10 @@ The calibration functionality is templated as described below and is best access
 Command Line Apps
 =================
 
-Here is a list of all of the command-line apps that get installed along with the ogo package.
-For detailed usage instructions, type the command followed by :code:`-h` into the terminal
-with the :code:`ogo` environment activated.
+The pilot installs only ``ogo print-labels``, described above. The table below
+lists historical commands for reference to the baseline installation. It is not
+the pilot's installed command catalog. To inspect the current catalog, run
+``ogo --help``; use ``ogo print-labels --help`` for the migrated command.
 
 .. list-table::
    :widths: 25 100

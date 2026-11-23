@@ -5,104 +5,76 @@
 # | bonelab@ucalgary.ca                                                          |
 # +------------------------------------------------------------------------------+
 
-# Imports
+"""Format Ogo label definitions and expose them through ``ogo print-labels``."""
+
 import argparse
-import os
-import vtk
-from ogo.util.echo_arguments import echo_arguments
-import ogo.util.Helper as ogo
+
 import ogo.dat.OgoMasterLabels as lb
 
-def PrintLabels(echo):
 
-    if echo in 'labels':
-        print(lb.labels_hdr)
-        print("\n".join("{:5d} {:4d} {:4d} {:4d}  {:.1f} {:4d} {:4d}  \"{}\"".format(k,v['RGB'][0],\
-                                                                                       v['RGB'][1],\
-                                                                                       v['RGB'][2],\
-                                                                                       v['A'],\
-                                                                                       v['VIS'],\
-                                                                                       v['IDX'],\
-                                                                                       v['LABEL'])\
-                                                           for k, v in lb.labels_dict.items()))
-    
-    elif echo in 'colors128':
-        print(lb.colors128_hdr)
-        print("\n".join("{:5d} {:4d}  {:4d}  {:4d}   {:s}".format(k,v['RGB'][0],\
-                                                                    v['RGB'][1],\
-                                                                    v['RGB'][2],\
-                                                                    v['DESC'])\
-                                                           for k, v in lb.colors128_dict.items()))
-        
-    elif echo in 'colors16':
-        print(lb.colors16_hdr)
-        print("\n".join("{:5d} {:4d}  {:4d}  {:4d}   {:s}".format(k,v['RGB'][0],\
-                                                                    v['RGB'][1],\
-                                                                    v['RGB'][2],\
-                                                                    v['DESC'])\
-                                                           for k, v in lb.colors16_dict.items()))
-        
+def render_labels(echo="labels"):
+    """Return a complete table with a final newline, without printing.
+
+    ``echo`` selects ``labels``, ``colors16``, or ``colors128``.
+    Unknown selections raise ValueError. Definitions and row order come from
+    OgoMasterLabels; formatting matches the original exported tables.
+    """
+    if echo == "labels":
+        header = lb.labels_hdr
+        rows = "\n".join(
+            '{:5d} {:4d} {:4d} {:4d}  {:.1f} {:4d} {:4d}  "{}"'.format(
+                label, value["RGB"][0], value["RGB"][1], value["RGB"][2],
+                value["A"], value["VIS"], value["IDX"], value["LABEL"],
+            )
+            for label, value in lb.labels_dict.items()
+        )
     else:
-        os.sys.exit('[ERROR] Unknown argument: \"{}\"'.format(echo))
-        
-    # labels
-    #print(labels_hdr)
-    #print("\n".join("{:5d} {:4d} {:4d} {:4d}  {:.1f} {:4d} {:4d}  \"{}\"".format(k,v['RGB'][0],v['RGB'][1],v['RGB'][2],v['A'],v['VIS'],v['IDX'],v['LABEL']) \
-    #                                                   for k, v in labels_dict.items()))
-    
-    # color16
-    #print(colors16_hdr)
-    #print("\n".join("{:5d} {:4d}  {:4d}  {:4d}   {:s}".format(k,v['RGB'][0],v['RGB'][1],v['RGB'][2],v['DESC']) \
-    #                                                   for k, v in colors16_dict.items()))
-    
-    # color128
-    #print(colors128_hdr)
-    #print("\n".join("{:5d} {:4d}  {:4d}  {:4d}   {:s}".format(k,v['RGB'][0],v['RGB'][1],v['RGB'][2],v['DESC']) \
-    #                                                   for k, v in colors128_dict.items()))
-    
-        
-def main():
-    # Setup description
-    description='''
-Prints labels that are the standard for all Ogo applications to identify 
-bones, tissues, and calibration rodes. 
+        if echo == "colors16":
+            header, definitions = lb.colors16_hdr, lb.colors16_dict
+        elif echo == "colors128":
+            header, definitions = lb.colors128_hdr, lb.colors128_dict
+        else:
+            raise ValueError(f"Unknown label table: {echo!r}")
+        rows = "\n".join(
+            "{:5d} {:4d}  {:4d}  {:4d}   {:s}".format(
+                label, value["RGB"][0], value["RGB"][1], value["RGB"][2],
+                value["DESC"],
+            )
+            for label, value in definitions.items()
+        )
+    return header + "\n" + rows + "\n"
 
-The master list of labels is kept in OgoMasterLabels.py. Any changes or 
-additions should be made in that document. This application reads that 
-document to produce output. 
 
-A text file created by the output from this application can be read in by 
-ITK-Snap:
-
-[Segmentation] --> [Import Label Descriptions]
-
-This application also contains information about 16 and 128 colour maps 
-that can be useful if/when updating OgoMasterLabels.py.
-
-'''
-    epilog='''
-Example calls: 
-ogoPrintLabels --echo labels >> ogo-master-labels.txt
-ogoPrintLabels --echo colors16
-'''
-
-    # Setup argument parsing
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawTextHelpFormatter,
-        prog="ogoPrintLabels",
-        description=description,
-        epilog=epilog
+def add_arguments(parser):
+    """Define the table selection for this command."""
+    parser.add_argument(
+        "--echo", default="labels", choices=["labels", "colors16", "colors128"],
+        help="Specify output (default: %(default)s)",
     )
-    parser.add_argument('--echo', default='labels', choices=['labels','colors16','colors128'], help='Specify output (default: %(default)s)')
 
-    print()
 
-    # Parse and display
-    args = parser.parse_args()
-    #print(echo_arguments('PrintLabels', vars(args)))
+def main(argv=None):
+    """Parse command arguments, write the selected table, and return success."""
+    parser = argparse.ArgumentParser(
+        prog="ogo print-labels",
+        description=(
+            "Print standard Ogo labels for bones, tissues, and calibration rods, "
+            "or a 16/128-color table. Definitions come from OgoMasterLabels.py. "
+            "The label output can be imported in ITK-SNAP through "
+            "Segmentation > Import Label Descriptions."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  ogo print-labels --echo labels > ogo-master-labels.txt\n"
+            "  ogo print-labels --echo colors16"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_arguments(parser)
+    args = parser.parse_args(argv)
+    print(render_labels(args.echo), end="")
+    return 0
 
-    # Run program
-    PrintLabels(**vars(args))
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    raise SystemExit(main())
