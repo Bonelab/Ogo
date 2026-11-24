@@ -13,6 +13,7 @@ from ogo import __version__
 COMMANDS = {
     "print-labels": ("ogo.cli.PrintLabels", "Print standard label definitions and color tables"),
     "check-labels": ("ogo.cli.CheckLabels", "Inspect segmentation labels or check required IDs"),
+    "resample-image": ("ogo.cli.IsotropicResampling", "Resample a CT image or mask"),
 }
 
 

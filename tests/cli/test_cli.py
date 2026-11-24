@@ -18,7 +18,8 @@ def test_root_help_lists_the_pilot(run_installed_command, arguments):
     assert "print-labels" in result.stdout
     assert "Print standard label definitions" in result.stdout
     assert "check-labels" in result.stdout
-    assert "resample-image" not in result.stdout
+    assert "resample-image" in result.stdout
+    assert "threshold-image" not in result.stdout
     assert result.stderr == ""
 
 
@@ -32,6 +33,7 @@ def test_version_reports_the_installed_version(run_installed_command):
 @pytest.mark.parametrize("command,option", [
     ("print-labels", "--echo {labels,colors16,colors128}"),
     ("check-labels", "--include-description"),
+    ("resample-image", "--iso-resolution"),
 ])
 def test_selected_command_handles_its_own_help(run_installed_command, command, option):
     result = run_installed_command("ogo", command, "--help")

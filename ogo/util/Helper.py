@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import datetime
+import logging
 import math
 import numpy as np
 from scipy import stats
@@ -1321,21 +1322,26 @@ def isotropicResampling(image, iso_resolution, image_type):
     """An alternative to imageResample that uses SimpleITK
     and avoids aliasing"""
 
-    message('Resampling to a resolution of {} mm'.format(iso_resolution))
+    if not math.isfinite(iso_resolution) or iso_resolution <= 0:
+        raise ValueError("Isotropic resolution must be finite and greater than zero")
+    if image_type not in ("ct", "mask"):
+        raise ValueError(f"Unknown image type: {image_type!r}; use ct or mask")
+    logger = logging.getLogger(__name__)
+    logger.info('Resampling to a resolution of {} mm'.format(iso_resolution))
 
     # image_type is either 'ct' or 'mask'
-    if image_type in 'ct':
+    if image_type == 'ct':
         sigma = iso_resolution * np.sqrt(2 * np.log(2)) / np.pi
-        message('  For a half-power cut-off frequency of {:0.6f}, \n'
+        logger.info('  For a half-power cut-off frequency of {:0.6f}, \n'
                 '           a standard deviation of {:0.6f} is being used.'.format(1 / (2.0 * iso_resolution), sigma))
 
         # Filter each sampling directions as needed
         for i, spacing in enumerate(image.GetSpacing()):
             if spacing > iso_resolution:
-                message('  No antialiasing in direction {}'.format(i))
+                logger.info('  No antialiasing in direction {}'.format(i))
                 continue
 
-            message('  Antialiasing in direction {}'.format(i))
+            logger.info('  Antialiasing in direction {}'.format(i))
             image = sitk.RecursiveGaussian(
                 image,
                 sigma, False,
@@ -1347,19 +1353,19 @@ def isotropicResampling(image, iso_resolution, image_type):
     resolution = [iso_resolution for i in range(image.GetDimension())]
     size = [int(np.ceil(s * i / o)) for o, i, s in
             zip(resolution, image.GetSpacing(), image.GetSize())]
-    message('  Input Size:  {}'.format(image.GetSize()))
-    message('  Output Size: {}'.format(size))
+    logger.info('  Input Size:  {}'.format(image.GetSize()))
+    logger.info('  Output Size: {}'.format(size))
 
     stats = sitk.StatisticsImageFilter()
     stats.Execute(image)
     vox_min = stats.GetMinimum()
-    message('  Minimum intensity: {:8.6f}'.format(vox_min))
+    logger.info('  Minimum intensity: {:8.6f}'.format(vox_min))
 
     transform = sitk.Euler3DTransform()
     transform.SetIdentity()
 
-    if image_type in 'ct':
-        message('  Using BSpline interpolation')
+    if image_type == 'ct':
+        logger.info('  Using BSpline interpolation')
         output = sitk.Resample(
             image,
             size,
@@ -1371,8 +1377,8 @@ def isotropicResampling(image, iso_resolution, image_type):
             vox_min,
             image.GetPixelID()
         )
-    elif image_type in 'mask':
-        message('  Using NearestNeighbor interpolation')
+    elif image_type == 'mask':
+        logger.info('  Using NearestNeighbor interpolation')
         output = sitk.Resample(
             image,
             size,
@@ -1385,7 +1391,7 @@ def isotropicResampling(image, iso_resolution, image_type):
             image.GetPixelID()
         )
     else:
-        os.sys.exit('[ERROR] Unknown input type to resample: \"{}\".'.format(image_type))
+        raise ValueError(f'Unknown image type: {image_type!r}')
 
     return output
 

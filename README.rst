@@ -83,8 +83,8 @@ GraphCuts executables and FEA solver tools require their own installation.
 Modernization pilot
 ===================
 
-The ``ogo-modernization`` branch currently installs only ``ogo``, with two
-migrated subcommands: ``print-labels`` and ``check-labels``.
+The ``ogo-modernization`` branch currently installs only ``ogo``, with three
+migrated subcommands: ``print-labels``, ``check-labels``, and ``resample-image``.
 
 From the modernization checkout, use a separate pilot environment:
 
@@ -107,8 +107,15 @@ Then inspect the catalog, print a table, or check segmentation labels:
     ogo check-labels segmentation.nii.gz --require 2 10 --include-description
     ogo --quiet check-labels segmentation.nii.gz > labels.txt
 
-The operations can also be called from Python without printing or ending the
-process. Image-reading errors are raised to the caller:
+Resample a 3D CT image or segmentation with explicit output permission:
+
+.. code-block:: bash
+
+    ogo resample-image input.nii.gz output.nii.gz --iso-resolution 1.0 --image-type ct
+    ogo resample-image mask.nii.gz resized-mask.nii.gz --image-type mask --overwrite
+
+The operations can also be called from Python without ending the process. They
+raise errors to the caller, resampling emits standard logging diagnostics:
 
 .. code-block:: python
 
@@ -118,6 +125,10 @@ process. Image-reading errors are raised to the caller:
     table = render_labels("labels")
     present = read_labels("segmentation.nii.gz")
     missing = find_missing_labels(present, [2, 10])
+
+    from ogo.cli.IsotropicResampling import resample_image_file
+
+    output = resample_image_file("input.nii.gz", "output.nii.gz", image_type="ct")
 
 Development checks
 ==================
@@ -201,7 +212,8 @@ The calibration functionality is templated as described below and is best access
 Command Line Apps
 =================
 
-The pilot exposes ``ogo print-labels`` and ``ogo check-labels``, described above.
+The pilot exposes ``ogo print-labels``, ``ogo check-labels``, and
+``ogo resample-image``, described above.
 The table below lists historical commands for reference to the baseline installation. It is not
 the pilot's installed command catalog. To inspect the current catalog, run
 ``ogo --help``; use ``ogo <command> --help`` for a migrated command.
